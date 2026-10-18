@@ -335,3 +335,6 @@ export interface HealthResponse {
   environment: string;
   version: string;
 }
+
+// Database Schema Types
+export * from './database.types.js';

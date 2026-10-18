@@ -3,9 +3,13 @@ import {
   type Invoice, 
   type PaymentRecord, 
   type ProductCategory,
+  type Database,
   calculatePaymentStatus 
 } from '@crimpston/shared';
 import { supabase, isSupabaseConfigured } from '../lib/supabase.js';
+
+type ShopRow = Database['public']['Tables']['shops']['Row'];
+type ProductRow = Database['public']['Tables']['products']['Row'];
 
 export interface Shop {
   id: string;
@@ -137,7 +141,7 @@ export async function getShops(): Promise<Shop[]> {
   if (isSupabaseConfigured && supabase) {
     const { data, error } = await supabase.from('shops').select('*').order('name');
     if (!error && data) {
-      return data.map(s => ({
+      return (data as unknown as ShopRow[]).map(s => ({
         id: s.id,
         name: s.name,
         code: s.code,
@@ -183,11 +187,11 @@ export async function getProducts(): Promise<Product[]> {
   if (isSupabaseConfigured && supabase) {
     const { data, error } = await supabase.from('products').select('*').order('name');
     if (!error && data) {
-      return data.map(p => ({
+      return (data as unknown as ProductRow[]).map(p => ({
         id: p.id,
         name: p.name,
         sku: p.sku,
-        category: p.category,
+        category: p.category as ProductCategory,
         minStock: p.min_stock_threshold || 0,
         isActive: p.is_active ?? true,
         createdAt: p.created_at
