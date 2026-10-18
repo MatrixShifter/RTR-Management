@@ -1,6 +1,14 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import "tailwindcss";
+
+@theme {
+  --color-crimpston-navy: #0A192F;
+  --color-crimpston-slate: #1E293B;
+  --color-crimpston-electric: #2563EB;
+  --color-crimpston-electric-hover: #1D4ED8;
+  --color-crimpston-offwhite: #F8FAFC;
+  --color-crimpston-card: #FFFFFF;
+  --color-crimpston-border: #E2E8F0;
+}
 
 @layer base {
   body {
