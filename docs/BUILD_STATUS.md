@@ -4,7 +4,7 @@
 |---|---|---|---|
 | Phase 0 | Workspace inspection & plan | **Completed** | Clean workspace verified. Architecture, Requirements, Decisions, Threat Model, Security Findings established. |
 | Phase 1 | Project foundation & monorepo | **Completed** | Full npm workspaces initialized (`@crimpston/shared`, `@crimpston/api`, `@crimpston/web`). TypeScript strict mode, build, test, and lint scripts verified. |
-| Phase 2 | UI design system & navigation | **Completed** | Responsive Crimpston navy/electric-blue/off-white design system. Owner & Employee dashboard views, deliveries, stock ledger, catalog management, and role-based navigation built. |
+| Phase 2 | UI design system & navigation | **Completed** | Responsive Crimpston navy/electric-blue/off-white design system. Resolved Tailwind CSS v4 `@import "tailwindcss";` and `@theme` configuration with `@tailwindcss/postcss`. Enhanced metric tiles, responsive mobile navigation, pending work queue, and owner approval tables. |
 | Phase 3 | Database design & migrations | **Completed** | PostgreSQL schema migration created (`20261018000000_initial_schema.sql`), append-only `stock_movements` ledger, foreign key constraints, indexes, and realistic dev seed fixtures (`supabase/seed.sql`). |
 | Phase 4 | Authentication & authorization | **Completed** | Role-based navigation guards implemented in React SPA. Identity models and shop-scoping defined in shared types. |
 | Phase 5 | Database access security | **Completed** | Comprehensive PostgreSQL Row Level Security (RLS) migration created (`20261018000001_rls_policies.sql`). Helper security functions created with fixed search paths. Prohibits direct updates/deletions on ledger. |
