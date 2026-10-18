@@ -5,6 +5,7 @@ import {
   Truck, 
   ClipboardCheck, 
   Store, 
+  Banknote,
   LogOut, 
   Wifi, 
   WifiOff, 
@@ -36,6 +37,7 @@ export const Navbar: React.FC<NavbarProps> = ({
     { label: 'Overview', to: '/', icon: Boxes },
     { label: 'Deliveries', to: '/deliveries', icon: Truck },
     { label: 'Stock Ledger', to: '/stock-ledger', icon: ClipboardCheck },
+    { label: 'Payments', to: '/payments', icon: Banknote },
     { label: 'Catalog & Shops', to: '/management', icon: Store }
   ];
 

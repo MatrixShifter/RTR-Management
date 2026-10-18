@@ -15,15 +15,16 @@ interface ProductEntry {
   category: string;
   sku: string;
   quantitySold: number;
+  physicalCount: number | '';
   availableStock: number;
 }
 
 const mockShopProducts: ProductEntry[] = [
-  { id: 'p1', name: 'Shockproof Armor Case (iPhone 15)', category: 'Mobile Cases', sku: 'CASE-IP15-ARM', quantitySold: 0, availableStock: 10 },
-  { id: 'p2', name: '9H 2.5D Tempered Glass (Galaxy S24)', category: 'Tempered Glass', sku: 'TG-S24-9H', quantitySold: 0, availableStock: 15 },
-  { id: 'p3', name: '65W GaN Fast Charger Dual Port', category: 'Chargers & Adapters', sku: 'CHG-65W-GAN', quantitySold: 0, availableStock: 5 },
-  { id: 'p4', name: 'Braided Type-C to Type-C 100W Cable 1.5m', category: 'USB Cables', sku: 'CBL-CC-100W', quantitySold: 0, availableStock: 8 },
-  { id: 'p5', name: 'BassPro Wireless Earbuds BT 5.3', category: 'Earphones & Audio', sku: 'AUD-TWS-BPRO', quantitySold: 0, availableStock: 4 }
+  { id: 'p1', name: 'Shockproof Armor Case (iPhone 15)', category: 'Mobile Cases', sku: 'CASE-IP15-ARM', quantitySold: 0, physicalCount: '', availableStock: 10 },
+  { id: 'p2', name: '9H 2.5D Tempered Glass (Galaxy S24)', category: 'Tempered Glass', sku: 'TG-S24-9H', quantitySold: 0, physicalCount: '', availableStock: 15 },
+  { id: 'p3', name: '65W GaN Fast Charger Dual Port', category: 'Chargers & Adapters', sku: 'CHG-65W-GAN', quantitySold: 0, physicalCount: '', availableStock: 5 },
+  { id: 'p4', name: 'Braided Type-C to Type-C 100W Cable 1.5m', category: 'USB Cables', sku: 'CBL-CC-100W', quantitySold: 0, physicalCount: '', availableStock: 8 },
+  { id: 'p5', name: 'BassPro Wireless Earbuds BT 5.3', category: 'Earphones & Audio', sku: 'AUD-TWS-BPRO', quantitySold: 0, physicalCount: '', availableStock: 4 }
 ];
 
 export const EmployeeReporting: React.FC = () => {
@@ -39,6 +40,15 @@ export const EmployeeReporting: React.FC = () => {
     setProducts(prev => prev.map(p => {
       if (p.id === id) {
         return { ...p, quantitySold: Math.max(0, qty) };
+      }
+      return p;
+    }));
+  };
+
+  const handlePhysicalCountChange = (id: string, countStr: string) => {
+    setProducts(prev => prev.map(p => {
+      if (p.id === id) {
+        return { ...p, physicalCount: countStr === '' ? '' : Math.max(0, parseInt(countStr, 10) || 0) };
       }
       return p;
     }));
@@ -94,7 +104,7 @@ export const EmployeeReporting: React.FC = () => {
             Today's Shop Update
           </span>
           <h1 className="text-lg font-bold text-slate-900">Apex Mobiles & Telecom (SH-01)</h1>
-          <p className="text-xs text-slate-500 mt-0.5">Date: {todayStr} • Deadline: 21:00</p>
+          <p className="text-xs text-slate-500 mt-0.5">Date: {todayStr} • Daily submission deadline: 21:00</p>
         </div>
         <div className="flex items-center space-x-2">
           <Badge variant="warning">Report Due</Badge>
@@ -123,33 +133,71 @@ export const EmployeeReporting: React.FC = () => {
           </label>
         </div>
 
-        {/* Product Sales Lines */}
+        {/* Product Sales & Stock Confirmation */}
         {!isZeroSales && (
-          <Card title="Enter Quantities Sold Today">
+          <Card title="Enter Quantities Sold & Confirm Physical Stock">
+            <p className="text-xs text-slate-500 mb-4">
+              Enter the units sold today. You may optionally enter the remaining physical count on the shelf to confirm stock accuracy.
+            </p>
             <div className="divide-y divide-slate-100">
-              {products.map(product => (
-                <div key={product.id} className="py-3.5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-                  <div>
-                    <h4 className="text-sm font-semibold text-slate-800">{product.name}</h4>
-                    <div className="flex items-center gap-2 mt-1 text-xs text-slate-500">
-                      <span className="font-mono bg-slate-100 px-1.5 py-0.5 rounded text-[10px]">{product.sku}</span>
-                      <span>•</span>
-                      <span>Available in store: <strong className="text-slate-700">{product.availableStock}</strong></span>
+              {products.map(product => {
+                const expectedRemaining = product.availableStock - product.quantitySold;
+                const hasCount = product.physicalCount !== '';
+                const countMatches = hasCount && product.physicalCount === expectedRemaining;
+
+                return (
+                  <div key={product.id} className="py-4 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+                    <div className="flex-1">
+                      <h4 className="text-sm font-semibold text-slate-800">{product.name}</h4>
+                      <div className="flex flex-wrap items-center gap-2 mt-1 text-xs text-slate-500">
+                        <span className="font-mono bg-slate-100 px-1.5 py-0.5 rounded text-[10px]">{product.sku}</span>
+                        <span>•</span>
+                        <span>Available: <strong className="text-slate-700">{product.availableStock} pcs</strong></span>
+                        <span>•</span>
+                        <span>Expected after sales: <strong className="text-slate-800">{expectedRemaining} pcs</strong></span>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-3">
+                      {/* Sold Input */}
+                      <div className="w-28">
+                        <label className="block text-[11px] font-semibold text-slate-600 mb-1">
+                          Units Sold <span className="text-rose-500">*</span>
+                        </label>
+                        <Input
+                          type="number"
+                          min={0}
+                          max={product.availableStock}
+                          value={product.quantitySold === 0 ? '' : product.quantitySold}
+                          placeholder="0"
+                          onChange={(e) => handleQuantityChange(product.id, parseInt(e.target.value, 10) || 0)}
+                          className="text-right font-bold text-slate-900"
+                        />
+                      </div>
+
+                      {/* Optional Physical Count on Shelf */}
+                      <div className="w-28">
+                        <label className="block text-[11px] font-semibold text-slate-600 mb-1">
+                          Shelf Count
+                        </label>
+                        <Input
+                          type="number"
+                          min={0}
+                          value={product.physicalCount}
+                          placeholder={String(expectedRemaining)}
+                          onChange={(e) => handlePhysicalCountChange(product.id, e.target.value)}
+                          className="text-right text-slate-700"
+                        />
+                        {hasCount && (
+                          <span className={`text-[10px] block mt-0.5 text-right font-semibold ${countMatches ? 'text-emerald-600' : 'text-amber-600'}`}>
+                            {countMatches ? '✓ Matches' : `Diff: ${Number(product.physicalCount) - expectedRemaining}`}
+                          </span>
+                        )}
+                      </div>
                     </div>
                   </div>
-                  <div className="w-32">
-                    <Input
-                      type="number"
-                      min={0}
-                      max={product.availableStock}
-                      value={product.quantitySold === 0 ? '' : product.quantitySold}
-                      placeholder="0"
-                      onChange={(e) => handleQuantityChange(product.id, parseInt(e.target.value, 10) || 0)}
-                      className="text-right font-semibold"
-                    />
-                  </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </Card>
         )}
@@ -160,7 +208,7 @@ export const EmployeeReporting: React.FC = () => {
             rows={3}
             value={reportNote}
             onChange={(e) => setReportNote(e.target.value)}
-            placeholder="Add any specific observations (e.g., damaged stock received, customer returns, store timing changes)..."
+            placeholder="Add any specific observations (e.g., customer returns, damaged items on shelf, cash handover details)..."
             className="w-full text-xs p-3 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-crimpston-electric"
           />
         </Card>

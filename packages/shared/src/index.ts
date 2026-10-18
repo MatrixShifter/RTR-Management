@@ -101,6 +101,7 @@ export const DailyReportItemSchema = z.object({
   report_id: z.string().uuid().optional(),
   product_id: z.string().uuid(),
   quantity_sold: z.number().int().nonnegative('Quantity sold cannot be negative'),
+  physical_count: z.number().int().nonnegative('Physical count cannot be negative').optional().nullable(),
   notes: z.string().max(255).optional().nullable()
 });
 export type DailyReportItem = z.infer<typeof DailyReportItemSchema>;
@@ -124,7 +125,7 @@ export const CreateDailyReportSchema = z.object({
 });
 export type CreateDailyReportInput = z.infer<typeof CreateDailyReportSchema>;
 
-// Inventory Ledger & Balances
+// Inventory Ledger & Shop-wise Balances
 export const StockBalanceSchema = z.object({
   shop_id: z.string().uuid(),
   shop_name: z.string(),
@@ -135,12 +136,184 @@ export const StockBalanceSchema = z.object({
   total_delivered: z.number().int().nonnegative(),
   confirmed_sold: z.number().int().nonnegative(),
   provisional_sold: z.number().int().nonnegative(),
+  total_returned: z.number().int().nonnegative().default(0),
+  total_damaged: z.number().int().nonnegative().default(0),
+  total_transferred_in: z.number().int().nonnegative().default(0),
+  total_transferred_out: z.number().int().nonnegative().default(0),
   expected_stock: z.number().int(),
   last_physical_count: z.number().int().nullable().optional(),
   last_counted_at: z.string().nullable().optional(),
+  discrepancy: z.number().int().nullable().optional(), // physical - expected
   min_stock_threshold: z.number().int()
 });
 export type StockBalance = z.infer<typeof StockBalanceSchema>;
+
+// Shop Stock Transfer
+export const CreateStockTransferSchema = z.object({
+  business_id: z.string().uuid(),
+  from_shop_id: z.string().uuid(),
+  to_shop_id: z.string().uuid(),
+  product_id: z.string().uuid(),
+  quantity: z.number().int().positive('Transfer quantity must be positive'),
+  notes: z.string().max(255).optional().nullable(),
+  idempotency_key: z.string().uuid().optional()
+}).refine(data => data.from_shop_id !== data.to_shop_id, {
+  message: 'Source and destination shops must be different',
+  path: ['to_shop_id']
+});
+export type CreateStockTransferInput = z.infer<typeof CreateStockTransferSchema>;
+
+// ==========================================
+// SHOP-WISE CASH & PAYMENT TRACKING
+// ==========================================
+export const PaymentMethodSchema = z.enum(['CASH', 'UPI', 'BANK_TRANSFER', 'CHEQUE', 'OTHER']);
+export type PaymentMethod = z.infer<typeof PaymentMethodSchema>;
+
+export const PaymentStatusSchema = z.enum(['fully_paid', 'partially_paid', 'unpaid']);
+export type PaymentStatus = z.infer<typeof PaymentStatusSchema>;
+
+export const InvoiceSchema = z.object({
+  id: z.string().uuid(),
+  business_id: z.string().uuid(),
+  shop_id: z.string().uuid(),
+  shop_name: z.string().optional(),
+  delivery_id: z.string().uuid().optional().nullable(),
+  invoice_number: z.string().min(1).max(50),
+  invoice_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Format must be YYYY-MM-DD'),
+  total_amount: z.number().nonnegative('Total amount must be non-negative'),
+  amount_paid: z.number().nonnegative().default(0),
+  outstanding_amount: z.number().default(0),
+  status: PaymentStatusSchema,
+  notes: z.string().optional().nullable(),
+  created_at: z.string().optional()
+});
+export type Invoice = z.infer<typeof InvoiceSchema>;
+
+export const CreateInvoiceSchema = z.object({
+  business_id: z.string().uuid(),
+  shop_id: z.string().uuid(),
+  delivery_id: z.string().uuid().optional().nullable(),
+  invoice_number: z.string().min(1).max(50),
+  invoice_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Format must be YYYY-MM-DD'),
+  total_amount: z.number().positive('Invoice total must be greater than zero'),
+  notes: z.string().max(500).optional().nullable(),
+  idempotency_key: z.string().uuid().optional()
+});
+export type CreateInvoiceInput = z.infer<typeof CreateInvoiceSchema>;
+
+export const PaymentRecordSchema = z.object({
+  id: z.string().uuid(),
+  business_id: z.string().uuid(),
+  shop_id: z.string().uuid(),
+  shop_name: z.string().optional(),
+  invoice_id: z.string().uuid().optional().nullable(),
+  payment_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Format must be YYYY-MM-DD'),
+  amount: z.number().positive('Payment amount must be positive'),
+  payment_method: PaymentMethodSchema.default('CASH'),
+  payment_reference: z.string().max(100).optional().nullable(),
+  status: z.enum(['COMPLETED', 'REVERSED', 'REFUNDED']).default('COMPLETED'),
+  notes: z.string().max(500).optional().nullable(),
+  recorded_by_name: z.string().optional(),
+  created_at: z.string().optional()
+});
+export type PaymentRecord = z.infer<typeof PaymentRecordSchema>;
+
+export const CreatePaymentSchema = z.object({
+  business_id: z.string().uuid(),
+  shop_id: z.string().uuid(),
+  invoice_id: z.string().uuid().optional().nullable(),
+  payment_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Format must be YYYY-MM-DD'),
+  amount: z.number().positive('Payment amount must be greater than 0'),
+  payment_method: PaymentMethodSchema.default('CASH'),
+  payment_reference: z.string().max(100).optional().nullable(),
+  notes: z.string().max(500).optional().nullable(),
+  idempotency_key: z.string().uuid().optional()
+});
+export type CreatePaymentInput = z.infer<typeof CreatePaymentSchema>;
+
+export interface ShopPaymentSummary {
+  shop_id: string;
+  shop_name: string;
+  shop_code: string;
+  total_due: number;
+  total_paid: number;
+  outstanding_balance: number;
+  status: PaymentStatus;
+  badge_color: 'green' | 'yellow' | 'grey';
+  last_payment_date: string | null;
+  payment_count: number;
+}
+
+/**
+ * Mandatory Payment Status Color & Calculation Rules:
+ * - GREEN: Fully Paid (Outstanding is 0)
+ * - YELLOW / AMBER: Partially Paid (Some payment received, outstanding > 0)
+ * - NEUTRAL GREY: Unpaid (No payment received, amount_paid is 0)
+ * - NEVER USE RED for payment status!
+ */
+export function calculatePaymentStatus(totalDue: number, totalPaid: number): {
+  status: PaymentStatus;
+  outstandingBalance: number;
+  outstandingAmount: number;
+  badgeColor: 'green' | 'yellow' | 'grey';
+  colorTheme: 'GREEN' | 'YELLOW' | 'GREY';
+  statusLabel: string;
+  badgeClasses: {
+    bg: string;
+    text: string;
+    border: string;
+  };
+} {
+  const roundedDue = Math.round(totalDue * 100) / 100;
+  const roundedPaid = Math.round(totalPaid * 100) / 100;
+  const outstanding = Math.max(0, Math.round((roundedDue - roundedPaid) * 100) / 100);
+
+  if (roundedPaid >= roundedDue && roundedDue > 0) {
+    return {
+      status: 'fully_paid',
+      outstandingBalance: 0,
+      outstandingAmount: 0,
+      badgeColor: 'green',
+      colorTheme: 'GREEN',
+      statusLabel: 'Fully Paid',
+      badgeClasses: {
+        bg: 'bg-emerald-50',
+        text: 'text-emerald-700',
+        border: 'border-emerald-200'
+      }
+    };
+  }
+
+  if (roundedPaid > 0 && roundedPaid < roundedDue) {
+    return {
+      status: 'partially_paid',
+      outstandingBalance: outstanding,
+      outstandingAmount: outstanding,
+      badgeColor: 'yellow',
+      colorTheme: 'YELLOW',
+      statusLabel: 'Partially Paid',
+      badgeClasses: {
+        bg: 'bg-amber-50',
+        text: 'text-amber-800',
+        border: 'border-amber-200'
+      }
+    };
+  }
+
+  return {
+    status: 'unpaid',
+    outstandingBalance: roundedDue,
+    outstandingAmount: roundedDue,
+    badgeColor: 'grey',
+    colorTheme: 'GREY',
+    statusLabel: 'Unpaid',
+    badgeClasses: {
+      bg: 'bg-slate-100',
+      text: 'text-slate-700',
+      border: 'border-slate-200'
+    }
+  };
+}
 
 // Pending Work Model (Task List)
 export const PendingReportTaskSchema = z.object({

@@ -6,6 +6,7 @@ import { OwnerDashboard } from './pages/owner/OwnerDashboard.js';
 import { DeliveryManagement } from './pages/owner/DeliveryManagement.js';
 import { StockLedger } from './pages/owner/StockLedger.js';
 import { CatalogManagement } from './pages/owner/CatalogManagement.js';
+import { PaymentTracking } from './pages/owner/PaymentTracking.js';
 import { EmployeeReporting } from './pages/employee/EmployeeReporting.js';
 import { Login } from './pages/auth/Login.js';
 
@@ -56,6 +57,7 @@ export const App: React.FC = () => {
                   <Route path="/" element={<OwnerDashboard />} />
                   <Route path="/deliveries" element={<DeliveryManagement />} />
                   <Route path="/stock-ledger" element={<StockLedger />} />
+                  <Route path="/payments" element={<PaymentTracking />} />
                   <Route path="/management" element={<CatalogManagement />} />
                   <Route path="/employee" element={<EmployeeReporting />} />
                   <Route path="*" element={<Navigate to="/" replace />} />

@@ -99,3 +99,32 @@ INSERT INTO public.audit_logs (business_id, actor_id, action, target_entity, tar
 VALUES
   ('b0000000-0000-0000-0000-000000000001', 'u0000000-0000-0000-0000-000000000001', 'WORKSPACE_INITIALIZED', 'businesses', 'b0000000-0000-0000-0000-000000000001', '{"environment": "development", "version": "1.0.0"}'::jsonb)
 ON CONFLICT DO NOTHING;
+
+-- 12. Invoices & Receivables (Shop Cash Tracking Fixtures)
+-- Scenario A: Apex Mobiles - Due ₹5,000, Paid ₹5,000 -> GREEN: Fully Paid
+INSERT INTO public.invoices (id, business_id, shop_id, delivery_id, invoice_number, invoice_date, total_amount, amount_paid, status, notes, created_by)
+VALUES
+  ('i0000000-0000-0000-0000-000000000001', 'b0000000-0000-0000-0000-000000000001', 's0000000-0000-0000-0000-000000000001', 'd0000000-0000-0000-0000-000000000001', 'MEMO-2026-001', CURRENT_DATE - INTERVAL '3 days', 5000.00, 5000.00, 'fully_paid', 'Batch supply memo #1 - Fully settled in cash', 'u0000000-0000-0000-0000-000000000001')
+ON CONFLICT (id) DO NOTHING;
+
+INSERT INTO public.payments (id, business_id, shop_id, invoice_id, payment_date, amount, payment_method, payment_reference, status, notes, recorded_by)
+VALUES
+  ('m0000000-0000-0000-0000-000000000001', 'b0000000-0000-0000-0000-000000000001', 's0000000-0000-0000-0000-000000000001', 'i0000000-0000-0000-0000-000000000001', CURRENT_DATE - INTERVAL '2 days', 5000.00, 'CASH', 'Cash handed to Rajesh (Notebook Pg 14)', 'COMPLETED', 'Cash collected during afternoon visit', 'u0000000-0000-0000-0000-000000000001')
+ON CONFLICT (id) DO NOTHING;
+
+-- Scenario B: City Point Digital Hub - Due ₹8,000, Paid ₹5,000 -> YELLOW: Partially Paid (₹3,000 outstanding)
+INSERT INTO public.invoices (id, business_id, shop_id, invoice_number, invoice_date, total_amount, amount_paid, status, notes, created_by)
+VALUES
+  ('i0000000-0000-0000-0000-000000000002', 'b0000000-0000-0000-0000-000000000001', 's0000000-0000-0000-0000-000000000002', 'MEMO-2026-002', CURRENT_DATE - INTERVAL '2 days', 8000.00, 5000.00, 'partially_paid', 'Weekly accessories supply memo #2', 'u0000000-0000-0000-0000-000000000001')
+ON CONFLICT (id) DO NOTHING;
+
+INSERT INTO public.payments (id, business_id, shop_id, invoice_id, payment_date, amount, payment_method, payment_reference, status, notes, recorded_by)
+VALUES
+  ('m0000000-0000-0000-0000-000000000002', 'b0000000-0000-0000-0000-000000000001', 's0000000-0000-0000-0000-000000000002', 'i0000000-0000-0000-0000-000000000002', CURRENT_DATE - INTERVAL '1 day', 5000.00, 'CASH', 'Cash received at shop (Notebook Pg 16)', 'COMPLETED', 'Partial payment - balance Rs 3,000 promised on Monday', 'u0000000-0000-0000-0000-000000000001')
+ON CONFLICT (id) DO NOTHING;
+
+-- Scenario C: City Point Digital Hub - Due ₹4,000, Paid ₹0 -> NEUTRAL GREY: Unpaid (₹4,000 outstanding)
+INSERT INTO public.invoices (id, business_id, shop_id, invoice_number, invoice_date, total_amount, amount_paid, status, notes, created_by)
+VALUES
+  ('i0000000-0000-0000-0000-000000000003', 'b0000000-0000-0000-0000-000000000001', 's0000000-0000-0000-0000-000000000002', 'MEMO-2026-003', CURRENT_DATE, 4000.00, 0.00, 'unpaid', 'Charger & cable batch supplied this morning', 'u0000000-0000-0000-0000-000000000001')
+ON CONFLICT (id) DO NOTHING;
