@@ -78,7 +78,7 @@ const initialPayments: PaymentRecord[] = [
     payment_reference: 'Cash in hand to Rajesh (Notebook Pg 14)',
     status: 'COMPLETED',
     notes: 'Collected during store visit',
-    recorded_by_name: 'Rajesh Crimpston'
+    recorded_by_name: 'Rajesh (Owner)'
   },
   {
     id: 'p002',
@@ -92,7 +92,7 @@ const initialPayments: PaymentRecord[] = [
     payment_reference: 'Cash collected by Arun (Notebook Pg 16)',
     status: 'COMPLETED',
     notes: 'Partial payment - balance Rs 3,000 promised on Monday',
-    recorded_by_name: 'Rajesh Crimpston'
+    recorded_by_name: 'Rajesh (Owner)'
   }
 ];
 
@@ -162,7 +162,7 @@ export const PaymentTracking: React.FC = () => {
       payment_reference: paymentRef || `Manual cash entry (${new Date().toLocaleDateString()})`,
       status: 'COMPLETED',
       notes: paymentNotes,
-      recorded_by_name: 'Rajesh Crimpston'
+      recorded_by_name: 'Rajesh (Owner)'
     };
 
     // Update payments list
@@ -189,7 +189,7 @@ export const PaymentTracking: React.FC = () => {
   };
 
   /**
-   * Helper to render the mandatory Crimpston payment status badge:
+   * Helper to render the mandatory payment status badge:
    * - GREEN: Fully Paid (Outstanding = 0)
    * - YELLOW / AMBER: Partially Paid (Paid > 0, Outstanding > 0)
    * - NEUTRAL GREY: Unpaid (Paid = 0)
@@ -425,7 +425,7 @@ export const PaymentTracking: React.FC = () => {
                   <td className="py-3 px-3.5 text-slate-600">
                     <span className="flex items-center gap-1">
                       <User className="w-3 h-3 text-slate-400" />
-                      {p.recorded_by_name || 'Rajesh Crimpston'}
+                      {p.recorded_by_name || 'Rajesh (Owner)'}
                     </span>
                   </td>
                   <td className="py-3 px-3.5 text-right font-bold text-emerald-700 text-sm">

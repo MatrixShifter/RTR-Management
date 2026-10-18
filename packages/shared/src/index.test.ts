@@ -10,7 +10,7 @@ import {
   type StockBalance
 } from './index.js';
 
-describe('Crimpston Wholesale Accessories Management — 25 Business Scenarios', () => {
+describe('RTR Wholesale Management — 25 Business Scenarios', () => {
 
   // ========================================================
   // SCENARIO 1 - 7: INVENTORY MOVEMENTS, ISOLATION & TRANSFERS

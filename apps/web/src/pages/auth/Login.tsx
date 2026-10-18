@@ -24,14 +24,14 @@ export const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
       if (email.includes('owner')) {
         onLoginSuccess({
           id: 'u0000000-0000-0000-0000-000000000001',
-          email: 'owner@crimpston.dev',
-          name: 'Rajesh Crimpston',
+          email: 'owner@rtrmobiles.com',
+          name: 'Rajesh (Owner)',
           role: 'owner'
         });
       } else {
         onLoginSuccess({
           id: 'u0000000-0000-0000-0000-000000000002',
-          email: 'emp.store1@crimpston.dev',
+          email: 'emp.store1@rtrmobiles.com',
           name: 'Arun Kumar',
           role: 'employee',
           assignedShop: 'Apex Mobiles & Telecom'
@@ -44,14 +44,14 @@ export const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
     if (role === 'owner') {
       onLoginSuccess({
         id: 'u0000000-0000-0000-0000-000000000001',
-        email: 'owner@crimpston.dev',
-        name: 'Rajesh Crimpston',
+        email: 'owner@rtrmobiles.com',
+        name: 'Rajesh (Owner)',
         role: 'owner'
       });
     } else {
       onLoginSuccess({
         id: 'u0000000-0000-0000-0000-000000000002',
-        email: 'emp.store1@crimpston.dev',
+        email: 'emp.store1@rtrmobiles.com',
         name: 'Arun Kumar',
         role: 'employee',
         assignedShop: 'Apex Mobiles & Telecom'
@@ -62,14 +62,14 @@ export const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col justify-center py-12 sm:px-6 lg:px-8">
       <div className="sm:mx-auto sm:w-full sm:max-w-md text-center">
-        <div className="w-12 h-12 rounded-xl bg-crimpston-navy text-white flex items-center justify-center font-black text-2xl mx-auto shadow-md">
-          C
+        <div className="w-14 h-14 rounded-2xl bg-crimpston-navy text-white flex items-center justify-center font-black text-xl mx-auto shadow-md border border-slate-700">
+          RTR
         </div>
         <h2 className="mt-4 text-2xl font-bold tracking-tight text-slate-900">
-          Crimpston Wholesale Accessories
+          RTR Wholesale Management
         </h2>
         <p className="mt-1 text-xs text-slate-500">
-          Secure Retail Partner & Inventory Management System
+          Mobile Accessories Distribution, Stock Ledger & Payment Tracking
         </p>
       </div>
 
@@ -87,7 +87,7 @@ export const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
               type="email"
               value={email}
               onChange={e => setEmail(e.target.value)}
-              placeholder="name@crimpston.dev"
+              placeholder="name@rtrmobiles.com"
               required
             />
 

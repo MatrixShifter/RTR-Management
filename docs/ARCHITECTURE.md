@@ -1,7 +1,7 @@
 # System Architecture & Technical Specifications
 
 ## 1. High-Level Architecture
-The Crimpston Accessories Management System is structured as a monorepo containing:
+The **RTR Wholesale Management System** (engineered by Crimpston for RTR Mobiles) is structured as a monorepo containing:
 - `apps/web`: Single-page React application (Vite, TypeScript, Tailwind CSS, TanStack Query, React Router, React Hook Form, Zod). Houses both Owner and Employee experiences with strict role-gated UI guards.
 - `apps/api`: Express.js backend (TypeScript, Zod, Helmet, Morgan, Express Rate Limit) handling verified business workflows, idempotency validation, reporting deadlines, and inventory aggregation.
 - `packages/shared`: Shared TypeScript types, schema validators (Zod), and business constants shared between frontend and backend.

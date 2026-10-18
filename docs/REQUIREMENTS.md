@@ -1,7 +1,7 @@
 # Functional & Technical Requirements
 
 ## 1. Product Overview
-Crimpston Wholesale Accessories Management System is designed to manage the distribution, delivery, employee daily reporting, and inventory ledger of mobile accessories across retail partner shops (e.g., cases, tempered glass, chargers, cables, earphones).
+**RTR Wholesale Management** is designed to manage the distribution, delivery, employee daily reporting, shop-wise inventory ledger, and cash payment tracking of mobile accessories across retail partner shops (e.g., cases, tempered glass, chargers, cables, earphones) for RTR Mobiles. Development and technical architecture provided by Crimpston.
 
 ## 2. Core Personas
 1. **Business Owner**:

@@ -1,0 +1,17 @@
+{
+  "name": "RTR Wholesale Management",
+  "short_name": "RTR Wholesale",
+  "description": "Multi-Shop Wholesale Accessories, Stock Ledger and Cash Payment Management System for RTR Mobiles",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0A192F",
+  "theme_color": "#0A192F",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "192x192 512x512",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

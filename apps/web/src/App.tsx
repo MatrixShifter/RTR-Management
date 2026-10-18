@@ -23,8 +23,8 @@ interface UserState {
 export const App: React.FC = () => {
   const [currentUser, setCurrentUser] = useState<UserState | null>({
     id: 'u0000000-0000-0000-0000-000000000001',
-    email: 'owner@crimpston.dev',
-    name: 'Rajesh Crimpston',
+    email: 'owner@rtrmobiles.com',
+    name: 'Rajesh (Owner)',
     role: 'owner'
   });
 

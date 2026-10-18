@@ -55,13 +55,13 @@ export const Navbar: React.FC<NavbarProps> = ({
           {/* Logo & Brand */}
           <div className="flex items-center space-x-3">
             <Link to="/" className="flex items-center space-x-3 focus:outline-none focus:ring-2 focus:ring-crimpston-electric rounded-lg p-1">
-              <div className="w-9 h-9 rounded-lg bg-crimpston-electric flex items-center justify-center font-black text-white text-lg tracking-wider shadow">
-                C
+              <div className="w-10 h-10 rounded-lg bg-crimpston-electric flex items-center justify-center font-black text-white text-xs tracking-wider shadow">
+                RTR
               </div>
               <div>
-                <span className="font-bold text-base tracking-tight text-white block leading-none">CRIMPSTON</span>
+                <span className="font-bold text-base tracking-tight text-white block leading-none">RTR</span>
                 <span className="text-[10px] tracking-wider text-slate-400 uppercase font-medium block mt-1">
-                  Wholesale Accessories
+                  Wholesale Management
                 </span>
               </div>
             </Link>
@@ -128,7 +128,7 @@ export const Navbar: React.FC<NavbarProps> = ({
             <button
               onClick={onSignOut}
               title="Sign Out"
-              aria-label="Sign out of Crimpston System"
+              aria-label="Sign out of RTR Wholesale Management"
               className="p-1.5 text-slate-400 hover:text-rose-400 hover:bg-slate-800 rounded-lg transition-colors focus:outline-none focus:ring-2 focus:ring-rose-500"
             >
               <LogOut className="w-4 h-4" />
