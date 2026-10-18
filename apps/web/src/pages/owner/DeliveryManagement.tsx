@@ -1,39 +1,72 @@
-import React, { useState } from 'react';
-import { Truck, Plus, Trash2, CheckCircle } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Truck, Plus, Trash2, CheckCircle, AlertCircle, Store } from 'lucide-react';
+import { Link } from 'react-router-dom';
 import { Card } from '../../components/ui/Card.js';
 import { Button } from '../../components/ui/Button.js';
 import { Input } from '../../components/ui/Input.js';
+import { 
+  getShops, 
+  getProducts, 
+  getDeliveries, 
+  recordDelivery, 
+  type Shop, 
+  type Product, 
+  type DeliveryRecord 
+} from '../../services/db.js';
 
 interface DeliveryLine {
   productId: string;
   quantity: number;
 }
 
-const mockShops = [
-  { id: 's1', name: 'Apex Mobiles & Telecom', code: 'SH-01' },
-  { id: 's2', name: 'City Point Digital Hub', code: 'SH-02' }
-];
-
-const mockCatalog = [
-  { id: 'p1', name: 'Shockproof Armor Case (iPhone 15)', sku: 'CASE-IP15-ARM' },
-  { id: 'p2', name: '9H 2.5D Tempered Glass (Galaxy S24)', sku: 'TG-S24-9H' },
-  { id: 'p3', name: '65W GaN Fast Charger Dual Port', sku: 'CHG-65W-GAN' },
-  { id: 'p4', name: 'Braided Type-C to Type-C 100W Cable 1.5m', sku: 'CBL-CC-100W' },
-  { id: 'p5', name: 'BassPro Wireless Earbuds BT 5.3', sku: 'AUD-TWS-BPRO' }
-];
-
 export const DeliveryManagement: React.FC = () => {
-  const [selectedShop, setSelectedShop] = useState(mockShops[0]?.id || '');
-  const [deliveryDate, setDeliveryDate] = useState(new Date().toISOString().split('T')[0]);
+  const [shops, setShops] = useState<Shop[]>([]);
+  const [products, setProducts] = useState<Product[]>([]);
+  const [recentDeliveries, setRecentDeliveries] = useState<DeliveryRecord[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+
+  const [selectedShop, setSelectedShop] = useState('');
+  const [deliveryDate, setDeliveryDate] = useState(new Date().toISOString().slice(0, 10));
   const [notes, setNotes] = useState('');
-  const [lines, setLines] = useState<DeliveryLine[]>([
-    { productId: mockCatalog[0]?.id || '', quantity: 10 }
-  ]);
+  const [lines, setLines] = useState<DeliveryLine[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [successNotice, setSuccessNotice] = useState(false);
 
+  const loadAll = async () => {
+    setIsLoading(true);
+    try {
+      const [sList, pList, dList] = await Promise.all([
+        getShops(),
+        getProducts(),
+        getDeliveries()
+      ]);
+      setShops(sList);
+      setProducts(pList);
+      setRecentDeliveries(dList);
+
+      if (sList.length > 0 && !selectedShop) {
+        setSelectedShop(sList[0]?.id || '');
+      }
+      if (pList.length > 0 && lines.length === 0) {
+        setLines([{ productId: pList[0]?.id || '', quantity: 10 }]);
+      }
+    } catch (err) {
+      console.error('Failed to load delivery references:', err);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadAll();
+    const handleSync = () => loadAll();
+    window.addEventListener('rtr_data_sync', handleSync);
+    return () => window.removeEventListener('rtr_data_sync', handleSync);
+  }, []);
+
   const addLine = () => {
-    setLines(prev => [...prev, { productId: mockCatalog[0]?.id || '', quantity: 5 }]);
+    if (products.length === 0) return;
+    setLines(prev => [...prev, { productId: products[0]?.id || '', quantity: 5 }]);
   };
 
   const removeLine = (idx: number) => {
@@ -44,21 +77,84 @@ export const DeliveryManagement: React.FC = () => {
     setLines(prev => prev.map((l, i) => i === idx ? { ...l, [field]: val } : l));
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!selectedShop) {
+      alert('Please select a target retail shop.');
+      return;
+    }
     if (lines.length === 0) {
       alert('Please add at least one product item to the delivery.');
       return;
     }
+
+    const targetShop = shops.find(s => s.id === selectedShop);
+
     setIsSubmitting(true);
-    setTimeout(() => {
-      setIsSubmitting(false);
+    try {
+      await recordDelivery({
+        shopId: selectedShop,
+        shopName: targetShop ? targetShop.name : 'Unknown Shop',
+        deliveryDate,
+        status: 'delivered',
+        notes,
+        createdBy: 'Business Owner',
+        items: lines.map(l => {
+          const prod = products.find(p => p.id === l.productId);
+          return {
+            productId: l.productId,
+            productName: prod ? prod.name : 'Unknown Product',
+            productSku: prod ? prod.sku : '',
+            quantity: l.quantity
+          };
+        })
+      });
+
       setSuccessNotice(true);
       setTimeout(() => setSuccessNotice(false), 4000);
-      setLines([{ productId: mockCatalog[0]?.id || '', quantity: 10 }]);
       setNotes('');
-    }, 600);
+      if (products.length > 0) {
+        setLines([{ productId: products[0]?.id || '', quantity: 10 }]);
+      }
+      await loadAll();
+    } catch (err) {
+      console.error('Failed to record delivery:', err);
+      alert('Error recording delivery.');
+    } finally {
+      setIsSubmitting(false);
+    }
   };
+
+  if (!isLoading && (shops.length === 0 || products.length === 0)) {
+    return (
+      <div className="space-y-6">
+        <div>
+          <h1 className="text-xl font-bold text-slate-900">Record Wholesale Supply Delivery</h1>
+          <p className="text-xs text-slate-500 mt-0.5">
+            Logs wholesale stock transfers directly into the immutable stock movements ledger.
+          </p>
+        </div>
+
+        <Card>
+          <div className="text-center py-12 px-4">
+            <div className="w-12 h-12 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center mx-auto mb-3 border border-amber-200">
+              <AlertCircle className="w-6 h-6" />
+            </div>
+            <h3 className="text-sm font-bold text-slate-800">Prerequisites Required</h3>
+            <p className="text-xs text-slate-500 max-w-sm mx-auto mt-1 mb-4">
+              You must add at least one retail shop and one product item before recording deliveries.
+            </p>
+            <Link to="/management">
+              <Button variant="primary" size="sm">
+                <Store className="w-3.5 h-3.5 mr-1.5" />
+                Go to Catalog & Shops
+              </Button>
+            </Link>
+          </div>
+        </Card>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
@@ -72,7 +168,7 @@ export const DeliveryManagement: React.FC = () => {
       </div>
 
       {successNotice && (
-        <div className="p-4 bg-emerald-50 border border-emerald-200 rounded-xl flex items-center space-x-3 text-xs text-emerald-800">
+        <div className="p-4 bg-emerald-50 border border-emerald-200 rounded-xl flex items-center space-x-3 text-xs text-emerald-800 animate-fade-in">
           <CheckCircle className="w-5 h-5 text-emerald-600 flex-shrink-0" />
           <div>
             <strong className="font-semibold">Delivery Logged Successfully!</strong>
@@ -91,9 +187,10 @@ export const DeliveryManagement: React.FC = () => {
               <select
                 value={selectedShop}
                 onChange={(e) => setSelectedShop(e.target.value)}
-                className="w-full rounded-lg border border-slate-300 px-3.5 py-2 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-crimpston-electric"
+                className="w-full rounded-lg border border-slate-300 px-3.5 py-2 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-crimpston-electric bg-white"
+                required
               >
-                {mockShops.map(s => (
+                {shops.map(s => (
                   <option key={s.id} value={s.id}>
                     {s.name} ({s.code})
                   </option>
@@ -128,9 +225,9 @@ export const DeliveryManagement: React.FC = () => {
                   <select
                     value={line.productId}
                     onChange={(e) => updateLine(idx, 'productId', e.target.value)}
-                    className="w-full rounded-lg border border-slate-300 px-3 py-1.5 text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-crimpston-electric"
+                    className="w-full rounded-lg border border-slate-300 px-3 py-1.5 text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-crimpston-electric bg-white"
                   >
-                    {mockCatalog.map(p => (
+                    {products.map(p => (
                       <option key={p.id} value={p.id}>
                         {p.name} ({p.sku})
                       </option>
@@ -165,7 +262,7 @@ export const DeliveryManagement: React.FC = () => {
           <Input
             value={notes}
             onChange={(e) => setNotes(e.target.value)}
-            placeholder="Driver name, van vehicle number, or special delivery instructions..."
+            placeholder="Driver name, van vehicle number, or delivery memo notes..."
           />
         </Card>
 
@@ -176,6 +273,32 @@ export const DeliveryManagement: React.FC = () => {
           </Button>
         </div>
       </form>
+
+      {/* Recent Deliveries Audit Trail */}
+      <Card title={`Recent Recorded Deliveries (${recentDeliveries.length})`}>
+        {recentDeliveries.length === 0 ? (
+          <div className="text-center py-8 text-xs text-slate-500">
+            No deliveries recorded yet.
+          </div>
+        ) : (
+          <div className="divide-y divide-slate-100">
+            {recentDeliveries.slice(0, 5).map(deliv => (
+              <div key={deliv.id} className="py-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 text-xs">
+                <div>
+                  <span className="font-semibold text-slate-900 block">{deliv.shopName}</span>
+                  <span className="text-slate-500">{deliv.deliveryDate} • {deliv.items.reduce((s, i) => s + i.quantity, 0)} items delivered</span>
+                  {deliv.notes && <span className="text-[11px] text-slate-400 block italic">{deliv.notes}</span>}
+                </div>
+                <div className="text-right">
+                  <span className="text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded font-medium text-[11px]">
+                    Delivered
+                  </span>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </Card>
     </div>
   );
 };

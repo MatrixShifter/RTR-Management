@@ -1,7 +1,14 @@
--- Safe Local Development Fixtures (Non-production)
--- Note: Safe to copy-paste directly into Supabase SQL Editor.
+-- ==============================================================================
+-- RTR WHOLESALE MANAGEMENT SYSTEM
+-- SEED SCRIPT: seed.sql
+-- DESCRIPTION: Sets up the core business workspace entity and owner account.
+--              In accordance with zero-demo data policy, NO fictional retail shops,
+--              sample products, fake deliveries, or mock transactions are seeded.
+--              Real business records are entered directly through the application.
+-- NOTE: Safe to run directly in Supabase SQL Editor.
+-- ==============================================================================
 
--- 1. Fictional Auth Users (Required for foreign key to auth.users)
+-- 1. Owner Auth User (Enables secure login for development & testing)
 INSERT INTO auth.users (
   id, 
   instance_id, 
@@ -16,115 +23,53 @@ INSERT INTO auth.users (
   aud
 )
 VALUES 
-  ('u0000000-0000-0000-0000-000000000001', '00000000-0000-0000-0000-000000000000', 'owner@crimpston.dev', crypt('dev_fixture_token', gen_salt('bf')), now(), '{"provider":"email","providers":["email"]}'::jsonb, '{"full_name":"Rajesh Crimpston (Owner)"}'::jsonb, now(), now(), 'authenticated', 'authenticated'),
-  ('u0000000-0000-0000-0000-000000000002', '00000000-0000-0000-0000-000000000000', 'emp.store1@crimpston.dev', crypt('dev_fixture_token', gen_salt('bf')), now(), '{"provider":"email","providers":["email"]}'::jsonb, '{"full_name":"Arun Kumar (Store 1 Employee)"}'::jsonb, now(), now(), 'authenticated', 'authenticated'),
-  ('u0000000-0000-0000-0000-000000000003', '00000000-0000-0000-0000-000000000000', 'emp.store2@crimpston.dev', crypt('dev_fixture_token', gen_salt('bf')), now(), '{"provider":"email","providers":["email"]}'::jsonb, '{"full_name":"Deepak Sharma (Store 2 Employee)"}'::jsonb, now(), now(), 'authenticated', 'authenticated')
+  (
+    'u0000000-0000-0000-0000-000000000001', 
+    '00000000-0000-0000-0000-000000000000', 
+    'owner@rtrmobiles.com', 
+    crypt('dev_fixture_token', gen_salt('bf')), 
+    now(), 
+    '{"provider":"email","providers":["email"]}'::jsonb, 
+    '{"full_name":"Business Owner"}'::jsonb, 
+    now(), 
+    now(), 
+    'authenticated', 
+    'authenticated'
+  )
 ON CONFLICT (id) DO NOTHING;
 
--- 2. Business
+-- 2. RTR Mobiles Business Workspace
 INSERT INTO public.businesses (id, name, timezone, report_cutoff_time)
-VALUES ('b0000000-0000-0000-0000-000000000001', 'Crimpston Accessories Wholesale Ltd', 'Asia/Kolkata', '21:00:00')
-ON CONFLICT (id) DO NOTHING;
+VALUES ('b0000000-0000-0000-0000-000000000001', 'RTR Wholesale Management', 'Asia/Kolkata', '21:00:00')
+ON CONFLICT (id) DO UPDATE
+SET name = EXCLUDED.name,
+    timezone = EXCLUDED.timezone,
+    report_cutoff_time = EXCLUDED.report_cutoff_time;
 
--- 3. Profiles (Fictional Dev Identities)
+-- 3. Owner Profile
 INSERT INTO public.profiles (id, email, full_name)
 VALUES 
-  ('u0000000-0000-0000-0000-000000000001', 'owner@crimpston.dev', 'Rajesh Crimpston (Owner)'),
-  ('u0000000-0000-0000-0000-000000000002', 'emp.store1@crimpston.dev', 'Arun Kumar (Store 1 Employee)'),
-  ('u0000000-0000-0000-0000-000000000003', 'emp.store2@crimpston.dev', 'Deepak Sharma (Store 2 Employee)')
+  ('u0000000-0000-0000-0000-000000000001', 'owner@rtrmobiles.com', 'Business Owner')
 ON CONFLICT (id) DO UPDATE
 SET full_name = EXCLUDED.full_name, email = EXCLUDED.email;
 
--- 4. Business Memberships
+-- 4. Owner Business Membership
 INSERT INTO public.business_memberships (business_id, user_id, role)
 VALUES
-  ('b0000000-0000-0000-0000-000000000001', 'u0000000-0000-0000-0000-000000000001', 'owner'),
-  ('b0000000-0000-0000-0000-000000000001', 'u0000000-0000-0000-0000-000000000002', 'employee'),
-  ('b0000000-0000-0000-0000-000000000001', 'u0000000-0000-0000-0000-000000000003', 'employee')
+  ('b0000000-0000-0000-0000-000000000001', 'u0000000-0000-0000-0000-000000000001', 'owner')
 ON CONFLICT DO NOTHING;
 
--- 5. Retail Shops
-INSERT INTO public.shops (id, business_id, name, code, address, phone)
-VALUES
-  ('s0000000-0000-0000-0000-000000000001', 'b0000000-0000-0000-0000-000000000001', 'Apex Mobiles & Telecom', 'SH-01', 'Shop 12, Commercial Complex, Sector 4', '+91 9876543210'),
-  ('s0000000-0000-0000-0000-000000000002', 'b0000000-0000-0000-0000-000000000001', 'City Point Digital Hub', 'SH-02', 'Plot 45, Main Market Road', '+91 9876543211')
-ON CONFLICT (id) DO NOTHING;
-
--- 6. Shop Memberships (Employee Scoping)
-INSERT INTO public.shop_memberships (shop_id, user_id)
-VALUES
-  ('s0000000-0000-0000-0000-000000000001', 'u0000000-0000-0000-0000-000000000002'), -- Arun -> Store 1
-  ('s0000000-0000-0000-0000-000000000002', 'u0000000-0000-0000-0000-000000000003')  -- Deepak -> Store 2
-ON CONFLICT DO NOTHING;
-
--- 7. Products Catalog
-INSERT INTO public.products (id, business_id, name, sku, category, unit_of_measure, min_stock_threshold)
-VALUES
-  ('p0000000-0000-0000-0000-000000000001', 'b0000000-0000-0000-0000-000000000001', 'Shockproof Armor Case (iPhone 15)', 'CASE-IP15-ARM', 'Mobile Cases', 'piece', 5),
-  ('p0000000-0000-0000-0000-000000000002', 'b0000000-0000-0000-0000-000000000001', '9H 2.5D Tempered Glass (Galaxy S24)', 'TG-S24-9H', 'Tempered Glass', 'piece', 10),
-  ('p0000000-0000-0000-0000-000000000003', 'b0000000-0000-0000-0000-000000000001', '65W GaN Fast Charger Dual Port', 'CHG-65W-GAN', 'Chargers & Adapters', 'piece', 3),
-  ('p0000000-0000-0000-0000-000000000004', 'b0000000-0000-0000-0000-000000000001', 'Braided Type-C to Type-C 100W Cable 1.5m', 'CBL-CC-100W', 'USB Cables', 'piece', 8),
-  ('p0000000-0000-0000-0000-000000000005', 'b0000000-0000-0000-0000-000000000001', 'BassPro Wireless Earbuds BT 5.3', 'AUD-TWS-BPRO', 'Earphones & Audio', 'piece', 4)
-ON CONFLICT (id) DO NOTHING;
-
--- 8. Deliveries
-INSERT INTO public.deliveries (id, business_id, shop_id, delivery_date, status, notes, created_by)
-VALUES
-  ('d0000000-0000-0000-0000-000000000001', 'b0000000-0000-0000-0000-000000000001', 's0000000-0000-0000-0000-000000000001', CURRENT_DATE, 'delivered', 'Morning batch supply to Apex Mobiles', 'u0000000-0000-0000-0000-000000000001')
-ON CONFLICT (id) DO NOTHING;
-
-INSERT INTO public.delivery_items (delivery_id, product_id, quantity)
-VALUES
-  ('d0000000-0000-0000-0000-000000000001', 'p0000000-0000-0000-0000-000000000001', 10),
-  ('d0000000-0000-0000-0000-000000000001', 'p0000000-0000-0000-0000-000000000002', 15),
-  ('d0000000-0000-0000-0000-000000000001', 'p0000000-0000-0000-0000-000000000003', 5)
-ON CONFLICT DO NOTHING;
-
--- 9. Initial Stock Movements from Deliveries
-INSERT INTO public.stock_movements (business_id, shop_id, product_id, movement_type, quantity, reference_id, is_provisional, reason, actor_id)
-VALUES
-  ('b0000000-0000-0000-0000-000000000001', 's0000000-0000-0000-0000-000000000001', 'p0000000-0000-0000-0000-000000000001', 'DELIVERY_IN', 10, 'd0000000-0000-0000-0000-000000000001', false, 'Delivery Batch #1', 'u0000000-0000-0000-0000-000000000001'),
-  ('b0000000-0000-0000-0000-000000000001', 's0000000-0000-0000-0000-000000000001', 'p0000000-0000-0000-0000-000000000002', 'DELIVERY_IN', 15, 'd0000000-0000-0000-0000-000000000001', false, 'Delivery Batch #1', 'u0000000-0000-0000-0000-000000000001'),
-  ('b0000000-0000-0000-0000-000000000001', 's0000000-0000-0000-0000-000000000001', 'p0000000-0000-0000-0000-000000000003', 'DELIVERY_IN', 5, 'd0000000-0000-0000-0000-000000000001', false, 'Delivery Batch #1', 'u0000000-0000-0000-0000-000000000001')
-ON CONFLICT DO NOTHING;
-
--- 10. Sample Physical Stock Count (Audit)
-INSERT INTO public.stock_counts (id, business_id, shop_id, product_id, counted_quantity, expected_quantity, counted_by, notes)
-VALUES
-  ('c0000000-0000-0000-0000-000000000001', 'b0000000-0000-0000-0000-000000000001', 's0000000-0000-0000-0000-000000000001', 'p0000000-0000-0000-0000-000000000001', 10, 10, 'u0000000-0000-0000-0000-000000000002', 'Store 1 physical count matches delivery exactly')
-ON CONFLICT (id) DO NOTHING;
-
--- 11. Initial Audit Log
+-- 5. Initial Audit Log
 INSERT INTO public.audit_logs (business_id, actor_id, action, target_entity, target_id, details)
 VALUES
-  ('b0000000-0000-0000-0000-000000000001', 'u0000000-0000-0000-0000-000000000001', 'WORKSPACE_INITIALIZED', 'businesses', 'b0000000-0000-0000-0000-000000000001', '{"environment": "development", "version": "1.0.0"}'::jsonb)
+  (
+    'b0000000-0000-0000-0000-000000000001', 
+    'u0000000-0000-0000-0000-000000000001', 
+    'WORKSPACE_INITIALIZED', 
+    'businesses', 
+    'b0000000-0000-0000-0000-000000000001', 
+    '{"environment": "production", "system": "RTR Wholesale Management", "version": "1.0.0"}'::jsonb
+  )
 ON CONFLICT DO NOTHING;
 
--- 12. Invoices & Receivables (Shop Cash Tracking Fixtures)
--- Scenario A: Apex Mobiles - Due ₹5,000, Paid ₹5,000 -> GREEN: Fully Paid
-INSERT INTO public.invoices (id, business_id, shop_id, delivery_id, invoice_number, invoice_date, total_amount, amount_paid, status, notes, created_by)
-VALUES
-  ('i0000000-0000-0000-0000-000000000001', 'b0000000-0000-0000-0000-000000000001', 's0000000-0000-0000-0000-000000000001', 'd0000000-0000-0000-0000-000000000001', 'MEMO-2026-001', CURRENT_DATE - INTERVAL '3 days', 5000.00, 5000.00, 'fully_paid', 'Batch supply memo #1 - Fully settled in cash', 'u0000000-0000-0000-0000-000000000001')
-ON CONFLICT (id) DO NOTHING;
-
-INSERT INTO public.payments (id, business_id, shop_id, invoice_id, payment_date, amount, payment_method, payment_reference, status, notes, recorded_by)
-VALUES
-  ('m0000000-0000-0000-0000-000000000001', 'b0000000-0000-0000-0000-000000000001', 's0000000-0000-0000-0000-000000000001', 'i0000000-0000-0000-0000-000000000001', CURRENT_DATE - INTERVAL '2 days', 5000.00, 'CASH', 'Cash handed to Rajesh (Notebook Pg 14)', 'COMPLETED', 'Cash collected during afternoon visit', 'u0000000-0000-0000-0000-000000000001')
-ON CONFLICT (id) DO NOTHING;
-
--- Scenario B: City Point Digital Hub - Due ₹8,000, Paid ₹5,000 -> YELLOW: Partially Paid (₹3,000 outstanding)
-INSERT INTO public.invoices (id, business_id, shop_id, invoice_number, invoice_date, total_amount, amount_paid, status, notes, created_by)
-VALUES
-  ('i0000000-0000-0000-0000-000000000002', 'b0000000-0000-0000-0000-000000000001', 's0000000-0000-0000-0000-000000000002', 'MEMO-2026-002', CURRENT_DATE - INTERVAL '2 days', 8000.00, 5000.00, 'partially_paid', 'Weekly accessories supply memo #2', 'u0000000-0000-0000-0000-000000000001')
-ON CONFLICT (id) DO NOTHING;
-
-INSERT INTO public.payments (id, business_id, shop_id, invoice_id, payment_date, amount, payment_method, payment_reference, status, notes, recorded_by)
-VALUES
-  ('m0000000-0000-0000-0000-000000000002', 'b0000000-0000-0000-0000-000000000001', 's0000000-0000-0000-0000-000000000002', 'i0000000-0000-0000-0000-000000000002', CURRENT_DATE - INTERVAL '1 day', 5000.00, 'CASH', 'Cash received at shop (Notebook Pg 16)', 'COMPLETED', 'Partial payment - balance Rs 3,000 promised on Monday', 'u0000000-0000-0000-0000-000000000001')
-ON CONFLICT (id) DO NOTHING;
-
--- Scenario C: City Point Digital Hub - Due ₹4,000, Paid ₹0 -> NEUTRAL GREY: Unpaid (₹4,000 outstanding)
-INSERT INTO public.invoices (id, business_id, shop_id, invoice_number, invoice_date, total_amount, amount_paid, status, notes, created_by)
-VALUES
-  ('i0000000-0000-0000-0000-000000000003', 'b0000000-0000-0000-0000-000000000001', 's0000000-0000-0000-0000-000000000002', 'MEMO-2026-003', CURRENT_DATE, 4000.00, 0.00, 'unpaid', 'Charger & cable batch supplied this morning', 'u0000000-0000-0000-0000-000000000001')
-ON CONFLICT (id) DO NOTHING;
+-- Zero demo data: No shops, products, deliveries, stock counts, invoices, or payments are inserted here.

@@ -1,13 +1,24 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   Send, 
   History, 
-  FileCheck2
+  FileCheck2,
+  PackageOpen,
+  Store
 } from 'lucide-react';
+import { Link } from 'react-router-dom';
 import { Card } from '../../components/ui/Card.js';
 import { Button } from '../../components/ui/Button.js';
 import { Input } from '../../components/ui/Input.js';
 import { Badge } from '../../components/ui/Badge.js';
+import { 
+  getShops, 
+  calculateStockBalances, 
+  getDailyReports, 
+  submitDailyReport, 
+  type Shop, 
+  type DailyReportRecord 
+} from '../../services/db.js';
 
 interface ProductEntry {
   id: string;
@@ -19,22 +30,62 @@ interface ProductEntry {
   availableStock: number;
 }
 
-const mockShopProducts: ProductEntry[] = [
-  { id: 'p1', name: 'Shockproof Armor Case (iPhone 15)', category: 'Mobile Cases', sku: 'CASE-IP15-ARM', quantitySold: 0, physicalCount: '', availableStock: 10 },
-  { id: 'p2', name: '9H 2.5D Tempered Glass (Galaxy S24)', category: 'Tempered Glass', sku: 'TG-S24-9H', quantitySold: 0, physicalCount: '', availableStock: 15 },
-  { id: 'p3', name: '65W GaN Fast Charger Dual Port', category: 'Chargers & Adapters', sku: 'CHG-65W-GAN', quantitySold: 0, physicalCount: '', availableStock: 5 },
-  { id: 'p4', name: 'Braided Type-C to Type-C 100W Cable 1.5m', category: 'USB Cables', sku: 'CBL-CC-100W', quantitySold: 0, physicalCount: '', availableStock: 8 },
-  { id: 'p5', name: 'BassPro Wireless Earbuds BT 5.3', category: 'Earphones & Audio', sku: 'AUD-TWS-BPRO', quantitySold: 0, physicalCount: '', availableStock: 4 }
-];
-
 export const EmployeeReporting: React.FC = () => {
-  const [products, setProducts] = useState<ProductEntry[]>(mockShopProducts);
+  const [shops, setShops] = useState<Shop[]>([]);
+  const [selectedShopId, setSelectedShopId] = useState<string>('');
+  const [products, setProducts] = useState<ProductEntry[]>([]);
+  const [recentReports, setRecentReports] = useState<DailyReportRecord[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+
   const [isZeroSales, setIsZeroSales] = useState(false);
   const [reportNote, setReportNote] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submittedSuccess, setSubmittedSuccess] = useState(false);
 
-  const todayStr = new Date().toISOString().split('T')[0];
+  const todayStr = new Date().toISOString().slice(0, 10);
+
+  const loadData = async () => {
+    setIsLoading(true);
+    try {
+      const shopList = await getShops();
+      setShops(shopList);
+
+      const targetShopId = selectedShopId || (shopList.length > 0 ? (shopList[0]?.id || '') : '');
+      if (targetShopId && targetShopId !== selectedShopId) {
+        setSelectedShopId(targetShopId);
+      }
+
+      if (targetShopId) {
+        const balances = await calculateStockBalances(targetShopId);
+        setProducts(balances.map(b => ({
+          id: b.product_id,
+          name: b.product_name,
+          category: b.category,
+          sku: b.product_sku,
+          quantitySold: 0,
+          physicalCount: '',
+          availableStock: Math.max(0, b.expected_stock)
+        })));
+
+        const allReports = await getDailyReports();
+        setRecentReports(allReports.filter(r => r.shopId === targetShopId));
+      } else {
+        setProducts([]);
+        setRecentReports([]);
+      }
+    } catch (err) {
+      console.error('Failed to load employee reporting data:', err);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadData();
+    const handleSync = () => loadData();
+    window.addEventListener('rtr_data_sync', handleSync);
+    return () => window.removeEventListener('rtr_data_sync', handleSync);
+  }, [selectedShopId]);
 
   const handleQuantityChange = (id: string, qty: number) => {
     setProducts(prev => prev.map(p => {
@@ -56,20 +107,71 @@ export const EmployeeReporting: React.FC = () => {
 
   const totalSoldUnits = isZeroSales ? 0 : products.reduce((sum, p) => sum + p.quantitySold, 0);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!selectedShopId) {
+      alert('Please select a retail shop.');
+      return;
+    }
     if (!isZeroSales && totalSoldUnits === 0) {
       alert('Please enter quantity sold for at least one item, or select "Zero Sales Today".');
       return;
     }
 
+    const currentShop = shops.find(s => s.id === selectedShopId);
+
     setIsSubmitting(true);
-    // Simulate API submission
-    setTimeout(() => {
-      setIsSubmitting(false);
+    try {
+      await submitDailyReport({
+        shopId: selectedShopId,
+        shopName: currentShop ? currentShop.name : '',
+        reportDate: todayStr,
+        isZeroSales,
+        status: 'submitted',
+        submittedBy: 'Shop Staff',
+        submittedAt: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        notes: reportNote,
+        items: isZeroSales ? [] : products.filter(p => p.quantitySold > 0 || p.physicalCount !== '').map(p => ({
+          productId: p.id,
+          productName: p.name,
+          quantitySold: p.quantitySold,
+          physicalCount: p.physicalCount === '' ? null : Number(p.physicalCount)
+        })),
+        totalQuantitySold: totalSoldUnits
+      });
+
       setSubmittedSuccess(true);
-    }, 800);
+      await loadData();
+    } catch (err) {
+      console.error('Failed to submit daily report:', err);
+      alert('Error submitting report.');
+    } finally {
+      setIsSubmitting(false);
+    }
   };
+
+  const currentShop = shops.find(s => s.id === selectedShopId);
+
+  if (!isLoading && shops.length === 0) {
+    return (
+      <div className="max-w-3xl mx-auto space-y-6">
+        <div className="bg-white p-5 rounded-xl border border-slate-200/80 shadow-sm text-center py-12 px-4">
+          <div className="w-12 h-12 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center mx-auto mb-3 border border-amber-200">
+            <Store className="w-6 h-6" />
+          </div>
+          <h2 className="text-base font-bold text-slate-800">No Retail Stores Found</h2>
+          <p className="text-xs text-slate-500 max-w-sm mx-auto mt-1 mb-4">
+            No retail partner shops are currently configured in the system.
+          </p>
+          <Link to="/management">
+            <Button variant="primary" size="sm">
+              Add Store in Catalog
+            </Button>
+          </Link>
+        </div>
+      </div>
+    );
+  }
 
   if (submittedSuccess) {
     return (
@@ -79,7 +181,7 @@ export const EmployeeReporting: React.FC = () => {
         </div>
         <h2 className="text-xl font-bold text-slate-900">Daily Sales Report Submitted</h2>
         <p className="text-xs text-slate-600 mt-2">
-          Your update for <span className="font-semibold text-slate-800">Apex Mobiles & Telecom</span> on {todayStr} has been securely registered.
+          Your update for <span className="font-semibold text-slate-800">{currentShop?.name || 'Selected Store'}</span> on {todayStr} has been securely registered.
         </p>
         <div className="mt-4 p-4 bg-slate-50 border border-slate-200 rounded-xl inline-block text-left text-xs text-slate-700">
           <p><strong>Report Status:</strong> Submitted (Awaiting Owner Review)</p>
@@ -88,7 +190,7 @@ export const EmployeeReporting: React.FC = () => {
         </div>
         <div className="mt-6 flex justify-center gap-3">
           <Button variant="outline" size="sm" onClick={() => setSubmittedSuccess(false)}>
-            Review Submitted Details
+            Submit Another Report
           </Button>
         </div>
       </div>
@@ -97,14 +199,24 @@ export const EmployeeReporting: React.FC = () => {
 
   return (
     <div className="max-w-3xl mx-auto space-y-6">
-      {/* Header Info */}
+      {/* Header Info & Shop Selector */}
       <div className="bg-white p-5 rounded-xl border border-slate-200/80 shadow-sm flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div>
           <span className="text-xs font-semibold uppercase tracking-wider text-crimpston-electric">
-            Today's Shop Update
+            Daily Shop Reporting
           </span>
-          <h1 className="text-lg font-bold text-slate-900">Apex Mobiles & Telecom (SH-01)</h1>
-          <p className="text-xs text-slate-500 mt-0.5">Date: {todayStr} • Daily submission deadline: 21:00</p>
+          <div className="flex items-center space-x-2 mt-1">
+            <select
+              value={selectedShopId}
+              onChange={(e) => setSelectedShopId(e.target.value)}
+              className="font-bold text-base text-slate-900 bg-transparent border-b border-slate-300 focus:outline-none focus:border-crimpston-electric cursor-pointer"
+            >
+              {shops.map(s => (
+                <option key={s.id} value={s.id}>{s.name} ({s.code})</option>
+              ))}
+            </select>
+          </div>
+          <p className="text-xs text-slate-500 mt-1">Date: {todayStr} • Daily deadline: 21:00</p>
         </div>
         <div className="flex items-center space-x-2">
           <Badge variant="warning">Report Due</Badge>
@@ -136,69 +248,79 @@ export const EmployeeReporting: React.FC = () => {
         {/* Product Sales & Stock Confirmation */}
         {!isZeroSales && (
           <Card title="Enter Quantities Sold & Confirm Physical Stock">
-            <p className="text-xs text-slate-500 mb-4">
-              Enter the units sold today. You may optionally enter the remaining physical count on the shelf to confirm stock accuracy.
-            </p>
-            <div className="divide-y divide-slate-100">
-              {products.map(product => {
-                const expectedRemaining = product.availableStock - product.quantitySold;
-                const hasCount = product.physicalCount !== '';
-                const countMatches = hasCount && product.physicalCount === expectedRemaining;
+            {products.length === 0 ? (
+              <div className="text-center py-8 text-xs text-slate-500">
+                <PackageOpen className="w-8 h-8 text-slate-300 mx-auto mb-2" />
+                <p className="font-semibold text-slate-700">No products recorded for this store yet</p>
+                <p className="text-slate-400 mt-1">Once deliveries are logged for this location, they will appear here for sales tracking.</p>
+              </div>
+            ) : (
+              <>
+                <p className="text-xs text-slate-500 mb-4">
+                  Enter the units sold today. You may optionally enter the remaining physical count on the shelf to confirm stock accuracy.
+                </p>
+                <div className="divide-y divide-slate-100">
+                  {products.map(product => {
+                    const expectedRemaining = product.availableStock - product.quantitySold;
+                    const hasCount = product.physicalCount !== '';
+                    const countMatches = hasCount && product.physicalCount === expectedRemaining;
 
-                return (
-                  <div key={product.id} className="py-4 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-                    <div className="flex-1">
-                      <h4 className="text-sm font-semibold text-slate-800">{product.name}</h4>
-                      <div className="flex flex-wrap items-center gap-2 mt-1 text-xs text-slate-500">
-                        <span className="font-mono bg-slate-100 px-1.5 py-0.5 rounded text-[10px]">{product.sku}</span>
-                        <span>•</span>
-                        <span>Available: <strong className="text-slate-700">{product.availableStock} pcs</strong></span>
-                        <span>•</span>
-                        <span>Expected after sales: <strong className="text-slate-800">{expectedRemaining} pcs</strong></span>
-                      </div>
-                    </div>
+                    return (
+                      <div key={product.id} className="py-4 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+                        <div className="flex-1">
+                          <h4 className="text-sm font-semibold text-slate-800">{product.name}</h4>
+                          <div className="flex flex-wrap items-center gap-2 mt-1 text-xs text-slate-500">
+                            <span className="font-mono bg-slate-100 px-1.5 py-0.5 rounded text-[10px]">{product.sku}</span>
+                            <span>•</span>
+                            <span>Available: <strong className="text-slate-700">{product.availableStock} pcs</strong></span>
+                            <span>•</span>
+                            <span>Expected after sales: <strong className="text-slate-800">{expectedRemaining} pcs</strong></span>
+                          </div>
+                        </div>
 
-                    <div className="flex items-center gap-3">
-                      {/* Sold Input */}
-                      <div className="w-28">
-                        <label className="block text-[11px] font-semibold text-slate-600 mb-1">
-                          Units Sold <span className="text-rose-500">*</span>
-                        </label>
-                        <Input
-                          type="number"
-                          min={0}
-                          max={product.availableStock}
-                          value={product.quantitySold === 0 ? '' : product.quantitySold}
-                          placeholder="0"
-                          onChange={(e) => handleQuantityChange(product.id, parseInt(e.target.value, 10) || 0)}
-                          className="text-right font-bold text-slate-900"
-                        />
-                      </div>
+                        <div className="flex items-center gap-3">
+                          {/* Sold Input */}
+                          <div className="w-28">
+                            <label className="block text-[11px] font-semibold text-slate-600 mb-1">
+                              Units Sold <span className="text-rose-500">*</span>
+                            </label>
+                            <Input
+                              type="number"
+                              min={0}
+                              max={product.availableStock}
+                              value={product.quantitySold === 0 ? '' : product.quantitySold}
+                              placeholder="0"
+                              onChange={(e) => handleQuantityChange(product.id, parseInt(e.target.value, 10) || 0)}
+                              className="text-right font-bold text-slate-900"
+                            />
+                          </div>
 
-                      {/* Optional Physical Count on Shelf */}
-                      <div className="w-28">
-                        <label className="block text-[11px] font-semibold text-slate-600 mb-1">
-                          Shelf Count
-                        </label>
-                        <Input
-                          type="number"
-                          min={0}
-                          value={product.physicalCount}
-                          placeholder={String(expectedRemaining)}
-                          onChange={(e) => handlePhysicalCountChange(product.id, e.target.value)}
-                          className="text-right text-slate-700"
-                        />
-                        {hasCount && (
-                          <span className={`text-[10px] block mt-0.5 text-right font-semibold ${countMatches ? 'text-emerald-600' : 'text-amber-600'}`}>
-                            {countMatches ? '✓ Matches' : `Diff: ${Number(product.physicalCount) - expectedRemaining}`}
-                          </span>
-                        )}
+                          {/* Optional Physical Count on Shelf */}
+                          <div className="w-28">
+                            <label className="block text-[11px] font-semibold text-slate-600 mb-1">
+                              Shelf Count
+                            </label>
+                            <Input
+                              type="number"
+                              min={0}
+                              value={product.physicalCount}
+                              placeholder={String(expectedRemaining)}
+                              onChange={(e) => handlePhysicalCountChange(product.id, e.target.value)}
+                              className="text-right text-slate-700"
+                            />
+                            {hasCount && (
+                              <span className={`text-[10px] block mt-0.5 text-right font-semibold ${countMatches ? 'text-emerald-600' : 'text-amber-600'}`}>
+                                {countMatches ? '✓ Matches' : `Diff: ${Number(product.physicalCount) - expectedRemaining}`}
+                              </span>
+                            )}
+                          </div>
+                        </div>
                       </div>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
+                    );
+                  })}
+                </div>
+              </>
+            )}
           </Card>
         )}
 
@@ -244,22 +366,27 @@ export const EmployeeReporting: React.FC = () => {
           </div>
         }
       >
-        <div className="space-y-3">
-          <div className="p-3 bg-slate-50 border border-slate-100 rounded-lg flex items-center justify-between text-xs">
-            <div>
-              <span className="font-semibold text-slate-800">Yesterday (2026-10-17)</span>
-              <span className="text-slate-500 block">Reported: 6 units • Reviewed by Rajesh</span>
-            </div>
-            <Badge variant="success">Approved</Badge>
+        {recentReports.length === 0 ? (
+          <div className="text-center py-6 text-xs text-slate-500">
+            No sales reports recorded yet for this shop.
           </div>
-          <div className="p-3 bg-slate-50 border border-slate-100 rounded-lg flex items-center justify-between text-xs">
-            <div>
-              <span className="font-semibold text-slate-800">2026-10-16</span>
-              <span className="text-slate-500 block">Reported: 0 units (Zero Sales)</span>
-            </div>
-            <Badge variant="success">Approved</Badge>
+        ) : (
+          <div className="space-y-3">
+            {recentReports.slice(0, 5).map(rep => (
+              <div key={rep.id} className="p-3 bg-slate-50 border border-slate-100 rounded-lg flex items-center justify-between text-xs">
+                <div>
+                  <span className="font-semibold text-slate-800">{rep.reportDate}</span>
+                  <span className="text-slate-500 block">
+                    Reported: {rep.isZeroSales ? '0 units (Zero Sales)' : `${rep.totalQuantitySold} units`} • {rep.submittedBy}
+                  </span>
+                </div>
+                <Badge variant={rep.status === 'approved' ? 'success' : 'warning'}>
+                  {rep.status === 'approved' ? 'Approved' : 'Awaiting Review'}
+                </Badge>
+              </div>
+            ))}
           </div>
-        </div>
+        )}
       </Card>
     </div>
   );

@@ -3,6 +3,8 @@ import { ArrowRight, ShieldCheck } from 'lucide-react';
 import { Button } from '../../components/ui/Button.js';
 import { Input } from '../../components/ui/Input.js';
 
+import { getShops } from '../../services/db.js';
+
 interface LoginProps {
   onLoginSuccess: (user: { id: string; email: string; name: string; role: 'owner' | 'employee'; assignedShop?: string }) => void;
 }
@@ -13,48 +15,51 @@ export const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
   const [isLoading, setIsLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsLoading(true);
     setErrorMsg('');
 
-    setTimeout(() => {
-      setIsLoading(false);
-      // Demo credentials handling
-      if (email.includes('owner')) {
+    try {
+      const isOwnerRole = email.toLowerCase().includes('owner') || !email.toLowerCase().includes('employee');
+      if (isOwnerRole) {
         onLoginSuccess({
           id: 'u0000000-0000-0000-0000-000000000001',
-          email: 'owner@rtrmobiles.com',
-          name: 'Rajesh (Owner)',
+          email: email.trim(),
+          name: 'Business Owner',
           role: 'owner'
         });
       } else {
+        const shops = await getShops();
         onLoginSuccess({
           id: 'u0000000-0000-0000-0000-000000000002',
-          email: 'emp.store1@rtrmobiles.com',
-          name: 'Arun Kumar',
+          email: email.trim(),
+          name: 'Store Staff',
           role: 'employee',
-          assignedShop: 'Apex Mobiles & Telecom'
+          assignedShop: shops.length > 0 ? shops[0]?.name : undefined
         });
       }
-    }, 500);
+    } finally {
+      setIsLoading(false);
+    }
   };
 
-  const handleQuickDemoLogin = (role: 'owner' | 'employee') => {
+  const handleQuickDemoLogin = async (role: 'owner' | 'employee') => {
     if (role === 'owner') {
       onLoginSuccess({
         id: 'u0000000-0000-0000-0000-000000000001',
         email: 'owner@rtrmobiles.com',
-        name: 'Rajesh (Owner)',
+        name: 'Business Owner',
         role: 'owner'
       });
     } else {
+      const shops = await getShops();
       onLoginSuccess({
         id: 'u0000000-0000-0000-0000-000000000002',
-        email: 'emp.store1@rtrmobiles.com',
-        name: 'Arun Kumar',
+        email: 'staff@rtrmobiles.com',
+        name: 'Store Staff',
         role: 'employee',
-        assignedShop: 'Apex Mobiles & Telecom'
+        assignedShop: shops.length > 0 ? shops[0]?.name : undefined
       });
     }
   };
