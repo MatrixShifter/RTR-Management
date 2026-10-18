@@ -4,6 +4,7 @@
 -- DESCRIPTION: Comprehensive initial PostgreSQL schema migration defining all
 --              tables, relationships, constraints, indexes, triggers, functions,
 --              grants, and Row Level Security (RLS) policies.
+-- NOTE: Fully idempotent. Safe to run repeatedly directly in Supabase SQL Editor.
 -- ==============================================================================
 
 -- ------------------------------------------------------------------------------
@@ -15,6 +16,7 @@ CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 -- ------------------------------------------------------------------------------
 -- 2. UTILITY & TRIGGER FUNCTIONS
 -- ------------------------------------------------------------------------------
+
 -- Function to automatically update 'updated_at' timestamps
 CREATE OR REPLACE FUNCTION public.set_updated_at()
 RETURNS TRIGGER
@@ -34,6 +36,29 @@ AS $$
 BEGIN
   RAISE EXCEPTION 'Action rejected: Table % is append-only and immutable.', TG_TABLE_NAME
     USING ERRCODE = '23505';
+END;
+$$;
+
+-- Automatic profile creation trigger when a user signs up via Supabase Auth
+CREATE OR REPLACE FUNCTION public.handle_new_user()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, auth
+AS $$
+BEGIN
+  INSERT INTO public.profiles (id, email, full_name, avatar_url)
+  VALUES (
+    NEW.id,
+    COALESCE(NEW.email, ''),
+    COALESCE(NEW.raw_user_meta_data->>'full_name', NEW.email, 'User'),
+    NEW.raw_user_meta_data->>'avatar_url'
+  )
+  ON CONFLICT (id) DO UPDATE
+  SET email = EXCLUDED.email,
+      full_name = EXCLUDED.full_name,
+      avatar_url = EXCLUDED.avatar_url;
+  RETURN NEW;
 END;
 $$;
 
@@ -247,31 +272,45 @@ CREATE INDEX IF NOT EXISTS idx_stock_adjustments_shop_product ON public.stock_ad
 CREATE INDEX IF NOT EXISTS idx_audit_logs_business_actor ON public.audit_logs(business_id, actor_id);
 
 -- ------------------------------------------------------------------------------
--- 5. TRIGGERS
+-- 5. TRIGGERS (Idempotent: Drop and Recreate)
 -- ------------------------------------------------------------------------------
+-- Auth user profile synchronization
+DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
+CREATE TRIGGER on_auth_user_created
+  AFTER INSERT ON auth.users
+  FOR EACH ROW EXECUTE FUNCTION public.handle_new_user();
+
 -- Timestamps triggers
+DROP TRIGGER IF EXISTS trg_businesses_updated_at ON public.businesses;
 CREATE TRIGGER trg_businesses_updated_at BEFORE UPDATE ON public.businesses
   FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
 
+DROP TRIGGER IF EXISTS trg_profiles_updated_at ON public.profiles;
 CREATE TRIGGER trg_profiles_updated_at BEFORE UPDATE ON public.profiles
   FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
 
+DROP TRIGGER IF EXISTS trg_shops_updated_at ON public.shops;
 CREATE TRIGGER trg_shops_updated_at BEFORE UPDATE ON public.shops
   FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
 
+DROP TRIGGER IF EXISTS trg_products_updated_at ON public.products;
 CREATE TRIGGER trg_products_updated_at BEFORE UPDATE ON public.products
   FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
 
+DROP TRIGGER IF EXISTS trg_deliveries_updated_at ON public.deliveries;
 CREATE TRIGGER trg_deliveries_updated_at BEFORE UPDATE ON public.deliveries
   FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
 
+DROP TRIGGER IF EXISTS trg_daily_reports_updated_at ON public.daily_reports;
 CREATE TRIGGER trg_daily_reports_updated_at BEFORE UPDATE ON public.daily_reports
   FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
 
 -- Immutable ledger protection triggers
+DROP TRIGGER IF EXISTS trg_stock_movements_immutable ON public.stock_movements;
 CREATE TRIGGER trg_stock_movements_immutable BEFORE UPDATE OR DELETE ON public.stock_movements
   FOR EACH ROW EXECUTE FUNCTION public.prevent_immutable_mutation();
 
+DROP TRIGGER IF EXISTS trg_audit_logs_immutable ON public.audit_logs;
 CREATE TRIGGER trg_audit_logs_immutable BEFORE UPDATE OR DELETE ON public.audit_logs
   FOR EACH ROW EXECUTE FUNCTION public.prevent_immutable_mutation();
 
@@ -351,7 +390,7 @@ $$;
 REVOKE ALL ON ALL TABLES IN SCHEMA public FROM PUBLIC;
 REVOKE ALL ON ALL FUNCTIONS IN SCHEMA public FROM PUBLIC;
 
--- Grant execution on security functions to authenticated users
+-- Grant execution on security functions to authenticated and service_role
 GRANT EXECUTE ON FUNCTION public.get_auth_business_id() TO authenticated, service_role;
 GRANT EXECUTE ON FUNCTION public.is_business_owner(UUID) TO authenticated, service_role;
 GRANT EXECUTE ON FUNCTION public.is_assigned_to_shop(UUID) TO authenticated, service_role;
@@ -374,12 +413,13 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON public.stock_adjustments TO authenticate
 GRANT SELECT, INSERT ON public.audit_logs TO authenticated; -- Append-only
 GRANT SELECT, INSERT, UPDATE, DELETE ON public.idempotency_records TO authenticated;
 
--- Service role full access for administrative maintenance
-GRANT ALL ON ALL TABLES IN SCHEMA public TO service_role;
-GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO service_role;
+-- Ensure postgres, service_role, and supabase_admin retain administrative and studio dashboard access
+GRANT ALL ON ALL TABLES IN SCHEMA public TO postgres, service_role;
+GRANT ALL ON ALL FUNCTIONS IN SCHEMA public TO postgres, service_role;
+GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO postgres, service_role;
 
 -- ------------------------------------------------------------------------------
--- 8. ROW LEVEL SECURITY (RLS) POLICIES
+-- 8. ROW LEVEL SECURITY (RLS) POLICIES (Idempotent: Drop and Recreate)
 -- ------------------------------------------------------------------------------
 
 -- Enable RLS across every table
@@ -400,15 +440,18 @@ ALTER TABLE public.audit_logs ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.idempotency_records ENABLE ROW LEVEL SECURITY;
 
 -- 8.1. Businesses Policies
+DROP POLICY IF EXISTS "businesses_select_member" ON public.businesses;
 CREATE POLICY "businesses_select_member"
   ON public.businesses FOR SELECT
   USING (id = public.get_auth_business_id());
 
+DROP POLICY IF EXISTS "businesses_update_owner" ON public.businesses;
 CREATE POLICY "businesses_update_owner"
   ON public.businesses FOR UPDATE
   USING (public.is_business_owner(id));
 
 -- 8.2. Profiles Policies
+DROP POLICY IF EXISTS "profiles_select_shared_business" ON public.profiles;
 CREATE POLICY "profiles_select_shared_business"
   ON public.profiles FOR SELECT
   USING (
@@ -420,33 +463,40 @@ CREATE POLICY "profiles_select_shared_business"
     )
   );
 
+DROP POLICY IF EXISTS "profiles_update_self" ON public.profiles;
 CREATE POLICY "profiles_update_self"
   ON public.profiles FOR UPDATE
   USING (id = auth.uid());
 
 -- 8.3. Business Memberships Policies
+DROP POLICY IF EXISTS "memberships_select_member" ON public.business_memberships;
 CREATE POLICY "memberships_select_member"
   ON public.business_memberships FOR SELECT
   USING (business_id = public.get_auth_business_id());
 
+DROP POLICY IF EXISTS "memberships_manage_owner" ON public.business_memberships;
 CREATE POLICY "memberships_manage_owner"
   ON public.business_memberships FOR ALL
   USING (public.is_business_owner(business_id));
 
 -- 8.4. Shops Policies
+DROP POLICY IF EXISTS "shops_select_owner" ON public.shops;
 CREATE POLICY "shops_select_owner"
   ON public.shops FOR SELECT
   USING (public.is_business_owner(business_id));
 
+DROP POLICY IF EXISTS "shops_select_assigned_employee" ON public.shops;
 CREATE POLICY "shops_select_assigned_employee"
   ON public.shops FOR SELECT
   USING (public.is_assigned_to_shop(id));
 
+DROP POLICY IF EXISTS "shops_manage_owner" ON public.shops;
 CREATE POLICY "shops_manage_owner"
   ON public.shops FOR ALL
   USING (public.is_business_owner(business_id));
 
 -- 8.5. Shop Memberships Policies
+DROP POLICY IF EXISTS "shop_memberships_manage_owner" ON public.shop_memberships;
 CREATE POLICY "shop_memberships_manage_owner"
   ON public.shop_memberships FOR ALL
   USING (
@@ -457,29 +507,35 @@ CREATE POLICY "shop_memberships_manage_owner"
     )
   );
 
+DROP POLICY IF EXISTS "shop_memberships_select_employee" ON public.shop_memberships;
 CREATE POLICY "shop_memberships_select_employee"
   ON public.shop_memberships FOR SELECT
   USING (user_id = auth.uid());
 
 -- 8.6. Products Policies
+DROP POLICY IF EXISTS "products_select_member" ON public.products;
 CREATE POLICY "products_select_member"
   ON public.products FOR SELECT
   USING (business_id = public.get_auth_business_id());
 
+DROP POLICY IF EXISTS "products_manage_owner" ON public.products;
 CREATE POLICY "products_manage_owner"
   ON public.products FOR ALL
   USING (public.is_business_owner(business_id));
 
 -- 8.7. Deliveries Policies
+DROP POLICY IF EXISTS "deliveries_manage_owner" ON public.deliveries;
 CREATE POLICY "deliveries_manage_owner"
   ON public.deliveries FOR ALL
   USING (public.is_business_owner(business_id));
 
+DROP POLICY IF EXISTS "deliveries_select_assigned_employee" ON public.deliveries;
 CREATE POLICY "deliveries_select_assigned_employee"
   ON public.deliveries FOR SELECT
   USING (public.is_assigned_to_shop(shop_id));
 
 -- 8.8. Delivery Items Policies
+DROP POLICY IF EXISTS "delivery_items_select" ON public.delivery_items;
 CREATE POLICY "delivery_items_select"
   ON public.delivery_items FOR SELECT
   USING (
@@ -490,6 +546,7 @@ CREATE POLICY "delivery_items_select"
     )
   );
 
+DROP POLICY IF EXISTS "delivery_items_manage_owner" ON public.delivery_items;
 CREATE POLICY "delivery_items_manage_owner"
   ON public.delivery_items FOR ALL
   USING (
@@ -501,14 +558,17 @@ CREATE POLICY "delivery_items_manage_owner"
   );
 
 -- 8.9. Daily Reports Policies
+DROP POLICY IF EXISTS "daily_reports_manage_owner" ON public.daily_reports;
 CREATE POLICY "daily_reports_manage_owner"
   ON public.daily_reports FOR ALL
   USING (public.is_business_owner(business_id));
 
+DROP POLICY IF EXISTS "daily_reports_select_assigned_employee" ON public.daily_reports;
 CREATE POLICY "daily_reports_select_assigned_employee"
   ON public.daily_reports FOR SELECT
   USING (public.is_assigned_to_shop(shop_id));
 
+DROP POLICY IF EXISTS "daily_reports_insert_employee" ON public.daily_reports;
 CREATE POLICY "daily_reports_insert_employee"
   ON public.daily_reports FOR INSERT
   WITH CHECK (
@@ -518,6 +578,7 @@ CREATE POLICY "daily_reports_insert_employee"
   );
 
 -- 8.10. Daily Report Items Policies
+DROP POLICY IF EXISTS "daily_report_items_select" ON public.daily_report_items;
 CREATE POLICY "daily_report_items_select"
   ON public.daily_report_items FOR SELECT
   USING (
@@ -528,6 +589,7 @@ CREATE POLICY "daily_report_items_select"
     )
   );
 
+DROP POLICY IF EXISTS "daily_report_items_insert_employee" ON public.daily_report_items;
 CREATE POLICY "daily_report_items_insert_employee"
   ON public.daily_report_items FOR INSERT
   WITH CHECK (
@@ -540,14 +602,17 @@ CREATE POLICY "daily_report_items_insert_employee"
   );
 
 -- 8.11. Stock Movements Policies (Append-only Ledger)
+DROP POLICY IF EXISTS "stock_movements_select_owner" ON public.stock_movements;
 CREATE POLICY "stock_movements_select_owner"
   ON public.stock_movements FOR SELECT
   USING (public.is_business_owner(business_id));
 
+DROP POLICY IF EXISTS "stock_movements_select_assigned_employee" ON public.stock_movements;
 CREATE POLICY "stock_movements_select_assigned_employee"
   ON public.stock_movements FOR SELECT
   USING (public.is_assigned_to_shop(shop_id));
 
+DROP POLICY IF EXISTS "stock_movements_insert_authorized" ON public.stock_movements;
 CREATE POLICY "stock_movements_insert_authorized"
   ON public.stock_movements FOR INSERT
   WITH CHECK (
@@ -555,23 +620,28 @@ CREATE POLICY "stock_movements_insert_authorized"
     (public.is_assigned_to_shop(shop_id) AND actor_id = auth.uid())
   );
 
+DROP POLICY IF EXISTS "stock_movements_deny_update" ON public.stock_movements;
 CREATE POLICY "stock_movements_deny_update"
   ON public.stock_movements FOR UPDATE
   USING (false);
 
+DROP POLICY IF EXISTS "stock_movements_deny_delete" ON public.stock_movements;
 CREATE POLICY "stock_movements_deny_delete"
   ON public.stock_movements FOR DELETE
   USING (false);
 
 -- 8.12. Stock Counts Policies
+DROP POLICY IF EXISTS "stock_counts_manage_owner" ON public.stock_counts;
 CREATE POLICY "stock_counts_manage_owner"
   ON public.stock_counts FOR ALL
   USING (public.is_business_owner(business_id));
 
+DROP POLICY IF EXISTS "stock_counts_select_assigned_employee" ON public.stock_counts;
 CREATE POLICY "stock_counts_select_assigned_employee"
   ON public.stock_counts FOR SELECT
   USING (public.is_assigned_to_shop(shop_id));
 
+DROP POLICY IF EXISTS "stock_counts_insert_assigned_employee" ON public.stock_counts;
 CREATE POLICY "stock_counts_insert_assigned_employee"
   ON public.stock_counts FOR INSERT
   WITH CHECK (
@@ -579,32 +649,39 @@ CREATE POLICY "stock_counts_insert_assigned_employee"
   );
 
 -- 8.13. Stock Adjustments Policies
+DROP POLICY IF EXISTS "stock_adjustments_manage_owner" ON public.stock_adjustments;
 CREATE POLICY "stock_adjustments_manage_owner"
   ON public.stock_adjustments FOR ALL
   USING (public.is_business_owner(business_id));
 
+DROP POLICY IF EXISTS "stock_adjustments_select_assigned_employee" ON public.stock_adjustments;
 CREATE POLICY "stock_adjustments_select_assigned_employee"
   ON public.stock_adjustments FOR SELECT
   USING (public.is_assigned_to_shop(shop_id));
 
 -- 8.14. Audit Logs Policies (Append-only)
+DROP POLICY IF EXISTS "audit_logs_select_owner" ON public.audit_logs;
 CREATE POLICY "audit_logs_select_owner"
   ON public.audit_logs FOR SELECT
   USING (public.is_business_owner(business_id));
 
+DROP POLICY IF EXISTS "audit_logs_insert_authenticated" ON public.audit_logs;
 CREATE POLICY "audit_logs_insert_authenticated"
   ON public.audit_logs FOR INSERT
   WITH CHECK (actor_id = auth.uid());
 
+DROP POLICY IF EXISTS "audit_logs_deny_update" ON public.audit_logs;
 CREATE POLICY "audit_logs_deny_update"
   ON public.audit_logs FOR UPDATE
   USING (false);
 
+DROP POLICY IF EXISTS "audit_logs_deny_delete" ON public.audit_logs;
 CREATE POLICY "audit_logs_deny_delete"
   ON public.audit_logs FOR DELETE
   USING (false);
 
 -- 8.15. Idempotency Records Policies
+DROP POLICY IF EXISTS "idempotency_records_manage" ON public.idempotency_records;
 CREATE POLICY "idempotency_records_manage"
   ON public.idempotency_records FOR ALL
   USING (business_id = public.get_auth_business_id());
