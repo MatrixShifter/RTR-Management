@@ -62,14 +62,14 @@ export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             error: AlertCircle,
             warning: AlertTriangle,
             info: Info
-          }[toast.type];
+          }[toast.type] || Info;
 
           const iconColor = {
             success: 'text-emerald-600',
             error: 'text-rose-600',
             warning: 'text-amber-600',
             info: 'text-blue-600'
-          }[toast.type];
+          }[toast.type] || 'text-blue-600';
 
           return (
             <div

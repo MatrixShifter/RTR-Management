@@ -45,7 +45,7 @@ export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
     danger: { Icon: AlertCircle, color: 'text-rose-600 bg-rose-50 border-rose-200' },
     warning: { Icon: AlertTriangle, color: 'text-amber-600 bg-amber-50 border-amber-200' },
     primary: { Icon: Info, color: 'text-blue-600 bg-blue-50 border-blue-200' }
-  }[variant];
+  }[variant] || { Icon: AlertCircle, color: 'text-rose-600 bg-rose-50 border-rose-200' };
 
   const IconComponent = iconConfig.Icon;
 
