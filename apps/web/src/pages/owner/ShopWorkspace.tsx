@@ -114,9 +114,9 @@ export const ShopWorkspace: React.FC = () => {
           getShopCategoryAnalytics(selectedShopId)
         ]);
 
-        setStockBalances(balances.filter(b => b.shop_id === selectedShopId));
-        setShopDeliveries(allDelivs.filter(d => d.shopId === selectedShopId));
-        setShopReports(allReps.filter(r => r.shopId === selectedShopId));
+        setStockBalances(balances.filter((b: StockBalance) => b.shop_id === selectedShopId));
+        setShopDeliveries(allDelivs.filter((d: DeliveryRecord) => d.shopId === selectedShopId));
+        setShopReports(allReps.filter((r: DailyReportRecord) => r.shopId === selectedShopId));
         setShopSummary(summary);
         setShopTimeline(timeline);
         setShopCategories(categories);

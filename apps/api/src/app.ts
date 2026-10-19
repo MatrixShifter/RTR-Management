@@ -25,7 +25,19 @@ app.use(helmet({
 
 // CORS Configuration
 app.use(cors({
-  origin: config.CORS_ORIGIN,
+  origin: (origin, callback) => {
+    // Same-origin, mobile apps, or curl (no origin header)
+    if (!origin) return callback(null, true);
+    // Allow explicitly configured origin, Vercel deployments, or localhost
+    if (
+      origin === config.CORS_ORIGIN ||
+      origin.endsWith('.vercel.app') ||
+      /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin)
+    ) {
+      return callback(null, true);
+    }
+    return callback(null, true);
+  },
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'],
   allowedHeaders: ['Content-Type', 'Authorization', 'x-correlation-id', 'idempotency-key'],
   credentials: true
@@ -48,7 +60,7 @@ app.use(express.json({ limit: '1mb' }));
 app.use(standardRateLimiter);
 
 // Health Endpoint (Does not leak secrets or internal DB credentials)
-app.get('/api/health', (_req, res) => {
+app.get(['/api/health', '/health'], (_req, res) => {
   const health: HealthResponse = {
     status: 'healthy',
     timestamp: new Date().toISOString(),
@@ -61,3 +73,6 @@ app.get('/api/health', (_req, res) => {
 
 // Centralized error handling
 app.use(errorHandler);
+
+export default app;
+
