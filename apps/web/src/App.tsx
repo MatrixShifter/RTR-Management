@@ -7,6 +7,7 @@ import { DeliveryManagement } from './pages/owner/DeliveryManagement.js';
 import { StockLedger } from './pages/owner/StockLedger.js';
 import { CatalogManagement } from './pages/owner/CatalogManagement.js';
 import { PaymentTracking } from './pages/owner/PaymentTracking.js';
+import { ShopAnalytics } from './pages/owner/ShopAnalytics.js';
 import { EmployeeReporting } from './pages/employee/EmployeeReporting.js';
 import { Login } from './pages/auth/Login.js';
 import { ToastProvider, useToast } from './components/ui/Toast.js';
@@ -161,6 +162,7 @@ const AppContent: React.FC = () => {
                 <Route path="/deliveries" element={<DeliveryManagement />} />
                 <Route path="/stock-ledger" element={<StockLedger />} />
                 <Route path="/payments" element={<PaymentTracking />} />
+                <Route path="/analytics" element={<ShopAnalytics />} />
                 <Route path="/management" element={<CatalogManagement />} />
                 <Route path="/employee" element={<EmployeeReporting />} />
                 <Route path="*" element={<Navigate to="/" replace />} />

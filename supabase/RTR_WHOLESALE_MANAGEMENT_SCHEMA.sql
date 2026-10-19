@@ -155,6 +155,7 @@ CREATE TABLE IF NOT EXISTS public.products (
     unit_of_measure VARCHAR(20) NOT NULL DEFAULT 'piece',
     min_stock_threshold INTEGER NOT NULL DEFAULT 5 CHECK (min_stock_threshold >= 0),
     unit_price NUMERIC(10, 2) DEFAULT 0.00 CHECK (unit_price >= 0),
+    cost_price NUMERIC(10, 2) DEFAULT NULL CHECK (cost_price >= 0),
     is_active BOOLEAN NOT NULL DEFAULT true,
     created_by UUID REFERENCES public.profiles(id) ON DELETE SET NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now()),
@@ -182,6 +183,8 @@ CREATE TABLE IF NOT EXISTS public.delivery_items (
     delivery_id UUID NOT NULL REFERENCES public.deliveries(id) ON DELETE CASCADE,
     product_id UUID NOT NULL REFERENCES public.products(id) ON DELETE RESTRICT,
     quantity INTEGER NOT NULL CHECK (quantity > 0),
+    unit_cost NUMERIC(10, 2) DEFAULT NULL CHECK (unit_cost >= 0),
+    unit_price NUMERIC(10, 2) DEFAULT NULL CHECK (unit_price >= 0),
     notes VARCHAR(255),
     CONSTRAINT uq_delivery_product UNIQUE (delivery_id, product_id)
 );
@@ -211,6 +214,8 @@ CREATE TABLE IF NOT EXISTS public.daily_report_items (
     report_id UUID NOT NULL REFERENCES public.daily_reports(id) ON DELETE CASCADE,
     product_id UUID NOT NULL REFERENCES public.products(id) ON DELETE RESTRICT,
     quantity_sold INTEGER NOT NULL CHECK (quantity_sold >= 0),
+    unit_price NUMERIC(10, 2) DEFAULT NULL CHECK (unit_price >= 0),
+    unit_cost NUMERIC(10, 2) DEFAULT NULL CHECK (unit_cost >= 0),
     physical_count INTEGER CHECK (physical_count >= 0),
     notes VARCHAR(255),
     CONSTRAINT uq_report_product UNIQUE (report_id, product_id)
@@ -390,6 +395,13 @@ CREATE INDEX IF NOT EXISTS idx_invoices_shop_date ON public.invoices(shop_id, in
 CREATE INDEX IF NOT EXISTS idx_invoices_status ON public.invoices(status);
 CREATE INDEX IF NOT EXISTS idx_payments_shop_date ON public.payments(shop_id, payment_date);
 CREATE INDEX IF NOT EXISTS idx_payments_invoice ON public.payments(invoice_id);
+
+-- Historical & Long-Term Descending Range Lookup Indexes
+CREATE INDEX IF NOT EXISTS idx_deliveries_shop_date_desc ON public.deliveries(shop_id, delivery_date DESC);
+CREATE INDEX IF NOT EXISTS idx_daily_reports_shop_date_desc ON public.daily_reports(shop_id, report_date DESC);
+CREATE INDEX IF NOT EXISTS idx_payments_shop_date_desc ON public.payments(shop_id, payment_date DESC);
+CREATE INDEX IF NOT EXISTS idx_invoices_shop_date_desc ON public.invoices(shop_id, invoice_date DESC);
+CREATE INDEX IF NOT EXISTS idx_stock_movements_shop_created_desc ON public.stock_movements(shop_id, created_at DESC);
 
 CREATE INDEX IF NOT EXISTS idx_audit_logs_business_actor ON public.audit_logs(business_id, actor_id);
 CREATE INDEX IF NOT EXISTS idx_audit_logs_entity ON public.audit_logs(target_entity, target_id);

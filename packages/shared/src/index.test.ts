@@ -7,6 +7,8 @@ import {
   InvoiceSchema,
   calculatePaymentStatus,
   StockBalanceSchema,
+  getDateRangeFromPreset,
+  calculateGrossProfit,
   type StockBalance
 } from './index.js';
 
@@ -410,4 +412,55 @@ describe('RTR Wholesale Management — 25 Business Scenarios', () => {
       expect(sample.status).toBe('fully_paid');
     });
   });
+
+  // ========================================================
+  // SCENARIO 26 - 30: HISTORICAL SEARCH, PRESETS & PROFIT
+  // ========================================================
+  describe('Scenarios 26–30: Historical Presets, Analytics & Profit Calculation', () => {
+    const fixedBaseDate = new Date('2026-10-18T12:00:00Z');
+
+    it('Scenario 26: All Time preset starts at 2000-01-01 to support records > 2 years ago', () => {
+      const range = getDateRangeFromPreset('all_time', undefined, undefined, fixedBaseDate);
+      expect(range.startDate).toBe('2000-01-01');
+      expect(range.endDate).toBe('2026-10-18');
+      expect(range.label).toBe('All Time');
+    });
+
+    it('Scenario 27: Last 2 Years preset accurately calculates 2-year boundary', () => {
+      const range = getDateRangeFromPreset('last_2_years', undefined, undefined, fixedBaseDate);
+      expect(range.startDate).toBe('2024-10-18');
+      expect(range.endDate).toBe('2026-10-18');
+      expect(range.label).toBe('Last 2 Years');
+    });
+
+    it('Scenario 28: Custom Range preset respects user-selected date boundaries', () => {
+      const range = getDateRangeFromPreset('custom', '2023-01-01', '2023-12-31', fixedBaseDate);
+      expect(range.startDate).toBe('2023-01-01');
+      expect(range.endDate).toBe('2023-12-31');
+      expect(range.label).toContain('2023-01-01 to 2023-12-31');
+    });
+
+    it('Scenario 29: Accurate gross profit calculation when cost price is recorded', () => {
+      const revenue = 15000;
+      const cogs = 9000;
+      const profit = calculateGrossProfit(revenue, cogs);
+
+      expect(profit.status).toBe('calculated');
+      expect(profit.grossProfit).toBe(6000);
+      expect(profit.marginPercent).toBe(40);
+      expect(profit.message).toContain('₹6,000');
+      expect(profit.message).toContain('40%');
+    });
+
+    it('Scenario 30: Missing cost data produces unavailable profit status rather than fabricated profit', () => {
+      const revenue = 15000;
+      const profit = calculateGrossProfit(revenue, null);
+
+      expect(profit.status).toBe('missing_cost_data');
+      expect(profit.grossProfit).toBeNull();
+      expect(profit.marginPercent).toBeNull();
+      expect(profit.message).toBe('Profit unavailable — cost data missing');
+    });
+  });
 });
+

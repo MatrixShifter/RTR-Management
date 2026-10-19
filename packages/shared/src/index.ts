@@ -56,6 +56,8 @@ export const ProductSchema = z.object({
   category: ProductCategorySchema,
   unit_of_measure: z.string().default('piece'),
   min_stock_threshold: z.number().int().nonnegative().default(5),
+  unit_price: z.number().nonnegative().default(0),
+  cost_price: z.number().nonnegative().nullable().optional(),
   is_active: z.boolean().default(true),
   created_at: z.string().optional(),
   updated_at: z.string().optional()
@@ -336,5 +338,190 @@ export interface HealthResponse {
   version: string;
 }
 
+// ==========================================
+// HISTORICAL SEARCH & SHOP-WISE ANALYTICS
+// ==========================================
+export type DateRangePreset = 
+  | 'all_time' 
+  | 'last_30_days' 
+  | 'last_6_months' 
+  | 'last_1_year' 
+  | 'last_2_years' 
+  | 'this_year' 
+  | 'custom';
+
+export interface DateRange {
+  startDate: string;
+  endDate: string;
+  preset: DateRangePreset;
+  label: string;
+}
+
+export function getDateRangeFromPreset(
+  preset: DateRangePreset, 
+  customStart?: string, 
+  customEnd?: string,
+  baseDate: Date = new Date()
+): DateRange {
+  const formatDate = (d: Date) => d.toISOString().slice(0, 10);
+  const end = formatDate(baseDate);
+
+  if (preset === 'custom') {
+    const s = customStart || formatDate(new Date(baseDate.getTime() - 30 * 24 * 60 * 60 * 1000));
+    const e = customEnd || end;
+    return { startDate: s, endDate: e, preset, label: `Custom (${s} to ${e})` };
+  }
+
+  if (preset === 'all_time') {
+    return { startDate: '2000-01-01', endDate: end, preset, label: 'All Time' };
+  }
+
+  if (preset === 'last_30_days') {
+    const start = new Date(baseDate.getTime() - 30 * 24 * 60 * 60 * 1000);
+    return { startDate: formatDate(start), endDate: end, preset, label: 'Last 30 Days' };
+  }
+
+  if (preset === 'last_6_months') {
+    const start = new Date(baseDate);
+    start.setMonth(start.getMonth() - 6);
+    return { startDate: formatDate(start), endDate: end, preset, label: 'Last 6 Months' };
+  }
+
+  if (preset === 'last_1_year') {
+    const start = new Date(baseDate);
+    start.setFullYear(start.getFullYear() - 1);
+    return { startDate: formatDate(start), endDate: end, preset, label: 'Last 1 Year' };
+  }
+
+  if (preset === 'last_2_years') {
+    const start = new Date(baseDate);
+    start.setFullYear(start.getFullYear() - 2);
+    return { startDate: formatDate(start), endDate: end, preset, label: 'Last 2 Years' };
+  }
+
+  if (preset === 'this_year') {
+    const start = new Date(baseDate.getFullYear(), 0, 1);
+    return { startDate: formatDate(start), endDate: end, preset, label: `This Year (${baseDate.getFullYear()})` };
+  }
+
+  return { startDate: '2000-01-01', endDate: end, preset: 'all_time', label: 'All Time' };
+}
+
+export interface ShopBusinessSummary {
+  shopId: string;
+  shopName: string;
+  shopCode: string;
+  periodLabel: string;
+  startDate: string;
+  endDate: string;
+  deliveriesCount: number;
+  totalDeliveredUnits: number;
+  totalSoldUnits: number;
+  expectedRemainingStock: number;
+  totalDiscrepancy: number;
+  salesRevenue: number;
+  costOfGoodsSold: number | null;
+  grossProfit: number | null;
+  grossMarginPercent: number | null;
+  profitStatus: 'calculated' | 'missing_cost_data';
+  profitStatusMessage: string;
+  totalInvoiced: number;
+  totalPayments: number;
+  outstandingBalance: number;
+  paymentStatus: PaymentStatus;
+  returnsUnits: number;
+  damagedUnits: number;
+  transfersInUnits: number;
+  transfersOutUnits: number;
+}
+
+export interface ProductHistoryItem {
+  productId: string;
+  productName: string;
+  sku: string;
+  category: string;
+  deliveredInPeriod: number;
+  soldInPeriod: number;
+  returnedInPeriod: number;
+  damagedInPeriod: number;
+  transferredInPeriod: number;
+  transferredOutPeriod: number;
+  currentRemainingStock: number;
+  lastPhysicalCount: number | null;
+  discrepancy: number | null;
+  unitPrice: number;
+  costPrice: number | null;
+  salesRevenue: number;
+  cogs: number | null;
+  grossProfit: number | null;
+  hasCostData: boolean;
+}
+
+export interface CategorySalesAnalytics {
+  category: string;
+  quantityDelivered: number;
+  quantitySold: number;
+  salesRevenue: number;
+  cogs: number | null;
+  grossProfit: number | null;
+  grossMarginPercent: number | null;
+  returnsQuantity: number;
+  damagedQuantity: number;
+  remainingStock: number;
+  productCount: number;
+  products: ProductHistoryItem[];
+  hasCompleteCostData: boolean;
+}
+
+export interface TimelineEvent {
+  id: string;
+  date: string;
+  type: 'delivery' | 'sale_report' | 'payment' | 'transfer' | 'audit' | 'adjustment';
+  title: string;
+  reference: string;
+  summary: string;
+  quantity: number | null;
+  amount: number | null;
+  responsibleUser: string;
+  notes?: string;
+  badgeVariant: 'success' | 'warning' | 'info' | 'neutral';
+  rawDetails: Record<string, unknown>;
+}
+
+/**
+ * Gross Profit Calculation with Missing Cost Data Safeguard:
+ * Formula: Gross Profit = Sales Revenue - Cost of Goods Sold
+ * If cost of goods sold is null or incomplete, profit must NOT be fabricated.
+ */
+export function calculateGrossProfit(
+  revenue: number, 
+  cogs: number | null
+): {
+  grossProfit: number | null;
+  marginPercent: number | null;
+  status: 'calculated' | 'missing_cost_data';
+  message: string;
+} {
+  if (cogs === null || cogs === undefined) {
+    return {
+      grossProfit: null,
+      marginPercent: null,
+      status: 'missing_cost_data',
+      message: 'Profit unavailable — cost data missing'
+    };
+  }
+
+  const profit = Math.round((revenue - cogs) * 100) / 100;
+  const margin = revenue > 0 ? Math.round((profit / revenue) * 1000) / 10 : 0;
+
+  return {
+    grossProfit: profit,
+    marginPercent: margin,
+    status: 'calculated',
+    message: `₹${profit.toLocaleString('en-IN')} (${margin}% margin)`
+  };
+}
+
 // Database Schema Types
 export * from './database.types.js';
+

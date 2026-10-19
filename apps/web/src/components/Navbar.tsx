@@ -6,6 +6,7 @@ import {
   ClipboardCheck, 
   Store, 
   Banknote,
+  BarChart3,
   LogOut, 
   Wifi, 
   WifiOff, 
@@ -38,6 +39,7 @@ export const Navbar: React.FC<NavbarProps> = ({
     { label: 'Deliveries', to: '/deliveries', icon: Truck },
     { label: 'Stock Ledger', to: '/stock-ledger', icon: ClipboardCheck },
     { label: 'Payments', to: '/payments', icon: Banknote },
+    { label: 'History & Analytics', to: '/analytics', icon: BarChart3 },
     { label: 'Catalog & Shops', to: '/management', icon: Store }
   ];
 

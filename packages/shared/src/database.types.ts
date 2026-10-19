@@ -171,6 +171,7 @@ export interface Database {
           unit_of_measure: string;
           min_stock_threshold: number;
           unit_price: number;
+          cost_price: number | null;
           is_active: boolean;
           created_by: string | null;
           created_at: string;
@@ -186,6 +187,7 @@ export interface Database {
           unit_of_measure?: string;
           min_stock_threshold?: number;
           unit_price?: number;
+          cost_price?: number | null;
           is_active?: boolean;
           created_by?: string | null;
           created_at?: string;
@@ -201,6 +203,7 @@ export interface Database {
           unit_of_measure?: string;
           min_stock_threshold?: number;
           unit_price?: number;
+          cost_price?: number | null;
           is_active?: boolean;
           created_by?: string | null;
           created_at?: string;
@@ -251,6 +254,8 @@ export interface Database {
           delivery_id: string;
           product_id: string;
           quantity: number;
+          unit_cost: number | null;
+          unit_price: number | null;
           notes: string | null;
         };
         Insert: {
@@ -258,6 +263,8 @@ export interface Database {
           delivery_id: string;
           product_id: string;
           quantity: number;
+          unit_cost?: number | null;
+          unit_price?: number | null;
           notes?: string | null;
         };
         Update: {
@@ -265,6 +272,8 @@ export interface Database {
           delivery_id?: string;
           product_id?: string;
           quantity?: number;
+          unit_cost?: number | null;
+          unit_price?: number | null;
           notes?: string | null;
         };
       };
@@ -321,6 +330,8 @@ export interface Database {
           report_id: string;
           product_id: string;
           quantity_sold: number;
+          unit_price: number | null;
+          unit_cost: number | null;
           physical_count: number | null;
           notes: string | null;
         };
@@ -329,6 +340,8 @@ export interface Database {
           report_id: string;
           product_id: string;
           quantity_sold: number;
+          unit_price?: number | null;
+          unit_cost?: number | null;
           physical_count?: number | null;
           notes?: string | null;
         };
@@ -337,6 +350,8 @@ export interface Database {
           report_id?: string;
           product_id?: string;
           quantity_sold?: number;
+          unit_price?: number | null;
+          unit_cost?: number | null;
           physical_count?: number | null;
           notes?: string | null;
         };
