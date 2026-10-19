@@ -3,8 +3,8 @@ import { renderToString } from 'react-dom/server';
 import { MemoryRouter } from 'react-router-dom';
 import { Navbar } from './Navbar.js';
 
-describe('Navbar Component — Layout, Responsiveness & Accessibility', () => {
-  it('renders all 6 owner navigation links with whitespace-nowrap preventing text wrapping', () => {
+describe('Navbar Component — Responsive Sidebar & Top Header Architecture', () => {
+  it('renders all 6 owner navigation links vertically in the sidebar with whitespace-nowrap', () => {
     const html = renderToString(
       <MemoryRouter initialEntries={['/analytics']}>
         <Navbar
@@ -28,6 +28,23 @@ describe('Navbar Component — Layout, Responsiveness & Accessibility', () => {
     expect(html).toContain('whitespace-nowrap');
   });
 
+  it('renders desktop sidebar navigation in a dedicated aside container', () => {
+    const html = renderToString(
+      <MemoryRouter initialEntries={['/']}>
+        <Navbar
+          userRole="owner"
+          userName="Business Owner"
+          isOnline={true}
+          onSignOut={vi.fn()}
+        />
+      </MemoryRouter>
+    );
+
+    // Sidebar has dedicated aria-label and fixed positioning class
+    expect(html).toContain('aria-label="Main Desktop Navigation"');
+    expect(html).toContain('w-64 bg-crimpston-navy');
+  });
+
   it('renders compact RTR brand section without heavy horizontal footprint', () => {
     const html = renderToString(
       <MemoryRouter initialEntries={['/']}>
@@ -45,7 +62,7 @@ describe('Navbar Component — Layout, Responsiveness & Accessibility', () => {
     expect(html).toContain('w-8 h-8 rounded-lg bg-crimpston-electric');
   });
 
-  it('correctly distinguishes active route with refined styling', () => {
+  it('correctly distinguishes active route with refined styling in sidebar', () => {
     const html = renderToString(
       <MemoryRouter initialEntries={['/management']}>
         <Navbar
@@ -59,10 +76,10 @@ describe('Navbar Component — Layout, Responsiveness & Accessibility', () => {
 
     // Active route gets blue text and electric-blue border highlight
     expect(html).toContain('text-blue-400');
-    expect(html).toContain('border-crimpston-electric/30');
+    expect(html).toContain('border-crimpston-electric/40');
   });
 
-  it('displays Live connectivity indicator with accessible title', () => {
+  it('displays Live connectivity indicator in top header with accessible title', () => {
     const htmlOnline = renderToString(
       <MemoryRouter initialEntries={['/']}>
         <Navbar
@@ -122,6 +139,6 @@ describe('Navbar Component — Layout, Responsiveness & Accessibility', () => {
 
     expect(html).toContain('aria-label="Open navigation menu"');
     expect(html).toContain('aria-expanded="false"');
-    expect(html).toContain('aria-controls="mobile-navigation-menu"');
+    expect(html).toContain('aria-controls="mobile-navigation-drawer"');
   });
 });

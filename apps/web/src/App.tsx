@@ -154,27 +154,29 @@ const AppContent: React.FC = () => {
           isOnline={isOnline}
           onSignOut={handleSignOut}
         />
-        <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8 animate-fade-in">
-          <Routes>
-            {currentUser.role === 'owner' ? (
-              <>
-                <Route path="/" element={<OwnerDashboard />} />
-                <Route path="/deliveries" element={<DeliveryManagement />} />
-                <Route path="/stock-ledger" element={<StockLedger />} />
-                <Route path="/payments" element={<PaymentTracking />} />
-                <Route path="/analytics" element={<ShopAnalytics />} />
-                <Route path="/management" element={<CatalogManagement />} />
-                <Route path="/employee" element={<EmployeeReporting />} />
-                <Route path="*" element={<Navigate to="/" replace />} />
-              </>
-            ) : (
-              <>
-                <Route path="/employee" element={<EmployeeReporting />} />
-                <Route path="/stock-ledger" element={<StockLedger />} />
-                <Route path="*" element={<Navigate to="/employee" replace />} />
-              </>
-            )}
-          </Routes>
+        <main className="flex-1 w-full lg:pl-64 print:pl-0 animate-fade-in">
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+            <Routes>
+              {currentUser.role === 'owner' ? (
+                <>
+                  <Route path="/" element={<OwnerDashboard />} />
+                  <Route path="/deliveries" element={<DeliveryManagement />} />
+                  <Route path="/stock-ledger" element={<StockLedger />} />
+                  <Route path="/payments" element={<PaymentTracking />} />
+                  <Route path="/analytics" element={<ShopAnalytics />} />
+                  <Route path="/management" element={<CatalogManagement />} />
+                  <Route path="/employee" element={<EmployeeReporting />} />
+                  <Route path="*" element={<Navigate to="/" replace />} />
+                </>
+              ) : (
+                <>
+                  <Route path="/employee" element={<EmployeeReporting />} />
+                  <Route path="/stock-ledger" element={<StockLedger />} />
+                  <Route path="*" element={<Navigate to="/employee" replace />} />
+                </>
+              )}
+            </Routes>
+          </div>
         </main>
       </div>
     </BrowserRouter>
