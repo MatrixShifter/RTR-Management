@@ -3,17 +3,15 @@ import {
   Banknote, 
   Plus, 
   Search, 
-  User, 
-  CheckCircle, 
-  Receipt,
-  Smartphone,
-  Landmark,
-  WalletCards
+  CheckCircle2, 
+  Receipt
 } from 'lucide-react';
-import { Card, MetricCard } from '../../components/ui/Card.js';
+import { Link } from 'react-router-dom';
 import { Button } from '../../components/ui/Button.js';
 import { Input } from '../../components/ui/Input.js';
 import { Modal } from '../../components/ui/Modal.js';
+import { EmptyState } from '../../components/ui/EmptyState.js';
+import { TableSkeleton } from '../../components/ui/Skeleton.js';
 import { 
   calculatePaymentStatus, 
   type Invoice, 
@@ -29,25 +27,36 @@ import {
   type Shop 
 } from '../../services/db.js';
 
+interface ShopPaymentSummary {
+  shop: Shop;
+  totalBilled: number;
+  totalPaid: number;
+  outstandingBalance: number;
+  lastPaymentDate: string | null;
+  status: 'fully_paid' | 'partially_paid' | 'unpaid';
+  statusLabel: string;
+  badgeClasses: { bg: string; text: string; border: string };
+}
+
 export const PaymentTracking: React.FC = () => {
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [payments, setPayments] = useState<PaymentRecord[]>([]);
   const [shops, setShops] = useState<Shop[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
-  const [shopFilter, setShopFilter] = useState('all');
   const [searchQuery, setSearchQuery] = useState('');
-  const [activeTab, setActiveTab] = useState<'invoices' | 'payments'>('invoices');
+  const [statusFilter, setStatusFilter] = useState<string>('all');
+  const [activeTab, setActiveTab] = useState<'shops' | 'invoices' | 'payments'>('shops');
 
   // Record Payment Modal State
   const [isRecordModalOpen, setIsRecordModalOpen] = useState(false);
   const [targetShopId, setTargetShopId] = useState('');
-  const [selectedInvoiceId, setSelectedInvoiceId] = useState<string>('');
   const [paymentAmount, setPaymentAmount] = useState<number>(0);
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('CASH');
   const [paymentDate, setPaymentDate] = useState(new Date().toISOString().slice(0, 10));
   const [paymentRef, setPaymentRef] = useState('');
   const [paymentNotes, setPaymentNotes] = useState('');
+  const [isSubmittingPayment, setIsSubmittingPayment] = useState(false);
 
   // Create Supply Memo / Invoice Modal State
   const [isInvoiceModalOpen, setIsInvoiceModalOpen] = useState(false);
@@ -56,6 +65,7 @@ export const PaymentTracking: React.FC = () => {
   const [newInvoiceDate, setNewInvoiceDate] = useState(new Date().toISOString().slice(0, 10));
   const [newInvoiceAmount, setNewInvoiceAmount] = useState<number>(0);
   const [newInvoiceNotes, setNewInvoiceNotes] = useState('');
+  const [isSubmittingInvoice, setIsSubmittingInvoice] = useState(false);
 
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
@@ -89,29 +99,78 @@ export const PaymentTracking: React.FC = () => {
     return () => window.removeEventListener('rtr_data_sync', handleSync);
   }, []);
 
-  // Filter calculations
+  // Compute Shop Summaries
+  const shopSummaries: ShopPaymentSummary[] = shops.map(shop => {
+    const shopInvs = invoices.filter(i => i.shop_id === shop.id);
+    const shopPays = payments.filter(p => p.shop_id === shop.id && p.status === 'COMPLETED');
+
+    const totalBilled = shopInvs.reduce((sum, i) => sum + i.total_amount, 0);
+    const totalPaid = shopPays.reduce((sum, p) => sum + p.amount, 0);
+    const statusCalc = calculatePaymentStatus(totalBilled, totalPaid);
+
+    // Find latest payment date
+    const sortedPays = [...shopPays].sort((a, b) => new Date(b.payment_date).getTime() - new Date(a.payment_date).getTime());
+    const lastPaymentDate = sortedPays[0]?.payment_date || null;
+
+    return {
+      shop,
+      totalBilled,
+      totalPaid,
+      outstandingBalance: statusCalc.outstandingBalance,
+      lastPaymentDate,
+      status: statusCalc.status,
+      statusLabel: statusCalc.statusLabel,
+      badgeClasses: statusCalc.badgeClasses
+    };
+  });
+
+  // Global Aggregates
+  const totalBilledAll = shopSummaries.reduce((sum, s) => sum + s.totalBilled, 0);
+  const totalPaidAll = shopSummaries.reduce((sum, s) => sum + s.totalPaid, 0);
+  const totalOutstandingAll = shopSummaries.reduce((sum, s) => sum + s.outstandingBalance, 0);
+
+  const fullyPaidCount = shopSummaries.filter(s => s.status === 'fully_paid').length;
+  const partiallyPaidCount = shopSummaries.filter(s => s.status === 'partially_paid').length;
+  const unpaidCount = shopSummaries.filter(s => s.status === 'unpaid').length;
+
+  // Filtered Shop Summaries
+  const filteredShopSummaries = shopSummaries.filter(s => {
+    const q = searchQuery.toLowerCase();
+    const matchesSearch = s.shop.name.toLowerCase().includes(q) || s.shop.code.toLowerCase().includes(q);
+    const matchesStatus = statusFilter === 'all' || s.status === statusFilter || (statusFilter === 'paid' && s.status === 'fully_paid') || (statusFilter === 'fully_paid' && s.status === 'fully_paid');
+    return matchesSearch && matchesStatus;
+  });
+
+  // Filtered Invoices
   const filteredInvoices = invoices.filter(inv => {
-    const matchesShop = shopFilter === 'all' || inv.shop_id === shopFilter;
-    const matchesSearch = inv.invoice_number.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                          (inv.shop_name && inv.shop_name.toLowerCase().includes(searchQuery.toLowerCase())) ||
-                          (inv.notes && inv.notes.toLowerCase().includes(searchQuery.toLowerCase()));
-    return matchesShop && matchesSearch;
+    const q = searchQuery.toLowerCase();
+    const matchesSearch = inv.invoice_number.toLowerCase().includes(q) ||
+                          (inv.shop_name && inv.shop_name.toLowerCase().includes(q)) ||
+                          (inv.notes && inv.notes.toLowerCase().includes(q));
+    const matchesStatus = statusFilter === 'all' || inv.status === statusFilter;
+    return matchesSearch && matchesStatus;
   });
 
+  // Filtered Payments
   const filteredPayments = payments.filter(pay => {
-    const matchesShop = shopFilter === 'all' || pay.shop_id === shopFilter;
-    const matchesSearch = (pay.payment_reference && pay.payment_reference.toLowerCase().includes(searchQuery.toLowerCase())) ||
-                          (pay.shop_name && pay.shop_name.toLowerCase().includes(searchQuery.toLowerCase())) ||
-                          (pay.notes && pay.notes.toLowerCase().includes(searchQuery.toLowerCase()));
-    return matchesShop && matchesSearch;
+    const q = searchQuery.toLowerCase();
+    return (pay.payment_reference && pay.payment_reference.toLowerCase().includes(q)) ||
+           (pay.notes && pay.notes.toLowerCase().includes(q)) ||
+           pay.payment_method.toLowerCase().includes(q) ||
+           pay.payment_date.includes(q);
   });
 
-  // Calculate Aggregates dynamically
-  const totalBilled = filteredInvoices.reduce((sum, i) => sum + i.total_amount, 0);
-  const totalCollected = filteredInvoices.reduce((sum, i) => sum + i.amount_paid, 0);
-  const totalOutstanding = filteredInvoices.reduce((sum, i) => sum + i.outstanding_amount, 0);
-  const fullyPaidCount = filteredInvoices.filter(i => i.status === 'fully_paid').length;
+  // Open Payment Modal for specific shop
+  const openPaymentForShop = (shopId: string) => {
+    setTargetShopId(shopId);
+    const shopSummary = shopSummaries.find(s => s.shop.id === shopId);
+    setPaymentAmount(shopSummary ? shopSummary.outstandingBalance : 0);
+    setPaymentRef('');
+    setPaymentNotes('');
+    setIsRecordModalOpen(true);
+  };
 
+  // Submit Payment
   const handleRecordPaymentSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (paymentAmount <= 0) {
@@ -120,451 +179,560 @@ export const PaymentTracking: React.FC = () => {
     }
 
     const shop = shops.find(s => s.id === targetShopId);
+    setIsSubmittingPayment(true);
+    try {
+      await recordPayment({
+        business_id: '4fba6fb7-4e1b-4106-ac84-908f821d73c3',
+        shop_id: targetShopId,
+        payment_date: paymentDate,
+        amount: paymentAmount,
+        payment_method: paymentMethod,
+        payment_reference: paymentRef.trim() || `Cash entry (${paymentDate})`,
+        status: 'COMPLETED',
+        notes: paymentNotes.trim(),
+        recorded_by_name: 'Business Owner'
+      });
 
-    await recordPayment({
-      business_id: 'b0000000-0000-0000-0000-000000000001',
-      shop_id: targetShopId,
-      shop_name: shop ? shop.name : '',
-      invoice_id: selectedInvoiceId || null,
-      payment_date: paymentDate,
-      amount: paymentAmount,
-      payment_method: paymentMethod,
-      payment_reference: paymentRef || `Cash entry (${paymentDate})`,
-      status: 'COMPLETED',
-      notes: paymentNotes,
-      recorded_by_name: 'Business Owner'
-    });
-
-    setIsRecordModalOpen(false);
-    setPaymentAmount(0);
-    setPaymentRef('');
-    setPaymentNotes('');
-    setSuccessMessage(`Recorded ₹${paymentAmount.toLocaleString('en-IN')} payment for ${shop?.name || 'store'}.`);
-    setTimeout(() => setSuccessMessage(null), 4000);
-    await loadData();
+      setIsRecordModalOpen(false);
+      setPaymentAmount(0);
+      setPaymentRef('');
+      setPaymentNotes('');
+      setSuccessMessage(`Payment of ₹${paymentAmount.toLocaleString('en-IN')} recorded for ${shop?.name || 'store'}.`);
+      setTimeout(() => setSuccessMessage(null), 4000);
+      await loadData();
+    } catch (err: any) {
+      alert(err?.message || 'Error recording payment.');
+    } finally {
+      setIsSubmittingPayment(false);
+    }
   };
 
+  // Submit Invoice / Memo
   const handleCreateInvoiceSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (newInvoiceAmount <= 0) {
-      alert('Invoice total amount must be greater than 0.');
+      alert('Memo / Bill amount must be greater than 0.');
       return;
     }
 
     const shop = shops.find(s => s.id === newInvoiceShopId);
+    setIsSubmittingInvoice(true);
+    try {
+      await saveInvoice({
+        business_id: '4fba6fb7-4e1b-4106-ac84-908f821d73c3',
+        shop_id: newInvoiceShopId,
+        shop_name: shop ? shop.name : '',
+        invoice_number: newInvoiceNumber.trim().toUpperCase() || `MEMO-${Date.now().toString().slice(-4)}`,
+        invoice_date: newInvoiceDate,
+        total_amount: newInvoiceAmount,
+        amount_paid: 0,
+        outstanding_amount: newInvoiceAmount,
+        status: 'unpaid',
+        notes: newInvoiceNotes.trim()
+      });
 
-    await saveInvoice({
-      business_id: 'b0000000-0000-0000-0000-000000000001',
-      shop_id: newInvoiceShopId,
-      shop_name: shop ? shop.name : '',
-      invoice_number: newInvoiceNumber.trim().toUpperCase() || `MEMO-${Date.now().toString().slice(-4)}`,
-      invoice_date: newInvoiceDate,
-      total_amount: newInvoiceAmount,
-      amount_paid: 0,
-      outstanding_amount: newInvoiceAmount,
-      status: 'unpaid',
-      notes: newInvoiceNotes
-    });
-
-    setIsInvoiceModalOpen(false);
-    setNewInvoiceAmount(0);
-    setNewInvoiceNumber('');
-    setNewInvoiceNotes('');
-    setSuccessMessage(`Created supply memo for ${shop?.name || 'store'}.`);
-    setTimeout(() => setSuccessMessage(null), 4000);
-    await loadData();
+      setIsInvoiceModalOpen(false);
+      setNewInvoiceAmount(0);
+      setNewInvoiceNumber('');
+      setNewInvoiceNotes('');
+      setSuccessMessage(`Supply memo created for ${shop?.name || 'store'}.`);
+      setTimeout(() => setSuccessMessage(null), 4000);
+      await loadData();
+    } catch (err: any) {
+      alert(err?.message || 'Error creating invoice.');
+    } finally {
+      setIsSubmittingInvoice(false);
+    }
   };
 
-  const renderPaymentBadge = (totalDue: number, totalPaid: number) => {
-    const calc = calculatePaymentStatus(totalDue, totalPaid);
-    return (
-      <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold ${calc.badgeClasses.bg} ${calc.badgeClasses.text}`}>
-        {calc.statusLabel}
-      </span>
-    );
+  const getMethodBadge = (method: PaymentMethod) => {
+    switch (method) {
+      case 'CASH':
+        return <span className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-semibold bg-emerald-50 text-emerald-800 border border-emerald-200">CASH</span>;
+      case 'UPI':
+        return <span className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-semibold bg-blue-50 text-blue-700 border border-blue-200">UPI</span>;
+      case 'BANK_TRANSFER':
+        return <span className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-semibold bg-indigo-50 text-indigo-700 border border-indigo-200">BANK TRANSFER</span>;
+      case 'CHEQUE':
+        return <span className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-semibold bg-purple-50 text-purple-700 border border-purple-200">CHEQUE</span>;
+      default:
+        return <span className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-semibold bg-slate-100 text-slate-700 border border-slate-200">{method}</span>;
+    }
   };
 
   return (
-    <div className="space-y-6">
-      {/* Alert Notice */}
-      {successMessage && (
-        <div className="p-4 bg-emerald-50 border border-emerald-200 rounded-xl flex items-center space-x-3 text-xs text-emerald-800 animate-fade-in">
-          <CheckCircle className="w-5 h-5 text-emerald-600 flex-shrink-0" />
-          <span className="font-semibold">{successMessage}</span>
-        </div>
-      )}
-
-      {/* Header & Quick Action */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+    <div className="space-y-5">
+      {/* Page Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 pb-3 border-b border-slate-200">
         <div>
-          <div className="flex items-center space-x-2 text-xs font-semibold uppercase tracking-wider text-crimpston-electric mb-1">
-            <Banknote className="w-4 h-4" />
-            <span>Retail Cash & Settlements</span>
-          </div>
-          <h1 className="text-xl sm:text-2xl font-bold text-slate-900 tracking-tight">Shop Cash & Payment Tracking</h1>
+          <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-slate-900">
+            Payment & Receivables Tracking
+          </h1>
           <p className="text-xs text-slate-500 mt-0.5">
-            Manual cash recording, notebook reference tracking, and auto-calculating shop balances.
+            Manage partner retail balances, cash collections, and outstanding dues with audit accuracy.
           </p>
         </div>
 
+        {/* Action Buttons */}
         <div className="flex items-center space-x-2">
-          {shops.length > 0 && (
-            <>
-              <Button 
-                variant="outline" 
-                size="sm"
-                onClick={() => setIsInvoiceModalOpen(true)}
-              >
-                <Plus className="w-3.5 h-3.5 mr-1" />
-                Add Supply Memo
-              </Button>
-              <Button 
-                variant="primary" 
-                size="sm"
-                onClick={() => {
-                  setSelectedInvoiceId('');
-                  setIsRecordModalOpen(true);
-                }}
-              >
-                <Banknote className="w-3.5 h-3.5 mr-1.5" />
-                Record Cash Payment
-              </Button>
-            </>
-          )}
+          <Button 
+            variant="outline" 
+            size="sm" 
+            onClick={() => setIsInvoiceModalOpen(true)}
+            className="text-xs font-medium"
+          >
+            <Receipt className="w-3.5 h-3.5 mr-1 text-slate-500" />
+            <span>Issue Supply Memo</span>
+          </Button>
+
+          <Button 
+            variant="primary" 
+            size="sm" 
+            onClick={() => setIsRecordModalOpen(true)}
+            className="text-xs font-semibold shadow-sm"
+          >
+            <Plus className="w-3.5 h-3.5 mr-1" />
+            <span>Record Payment</span>
+          </Button>
         </div>
       </div>
 
-      {/* KPI Cards */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <MetricCard
-          label="Total Supply Billed"
-          value={`₹${totalBilled.toLocaleString('en-IN')}`}
-          subtext={`${filteredInvoices.length} invoices / memos recorded`}
-        />
-        <MetricCard
-          label="Total Cash Collected"
-          value={`₹${totalCollected.toLocaleString('en-IN')}`}
-          subtext="Verified payments in notebook"
-          variant="highlight"
-        />
-        <MetricCard
-          label="Balance Outstanding"
-          value={`₹${totalOutstanding.toLocaleString('en-IN')}`}
-          subtext={totalOutstanding === 0 ? "All retail shops fully paid" : "Pending collection from stores"}
-          variant={totalOutstanding > 0 ? "alert" : "default"}
-        />
-        <MetricCard
-          label="Settlement Ratio"
-          value={filteredInvoices.length > 0 ? `${fullyPaidCount} / ${filteredInvoices.length}` : '0 / 0'}
-          subtext="Stores with zero pending debt"
-        />
+      {/* Success Notification */}
+      {successMessage && (
+        <div className="p-3.5 bg-emerald-50 border border-emerald-200 rounded-md flex items-center justify-between text-xs text-emerald-900 shadow-sm animate-fade-in font-medium">
+          <div className="flex items-center space-x-2">
+            <CheckCircle2 className="w-4 h-4 text-emerald-600 flex-shrink-0" />
+            <span>{successMessage}</span>
+          </div>
+          <button onClick={() => setSuccessMessage(null)} className="text-slate-400 hover:text-slate-600">✕</button>
+        </div>
+      )}
+
+      {/* Unified Receivables KPI Strip */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 bg-white border border-slate-200 rounded-lg p-3.5 shadow-sm">
+        <div className="p-2.5 bg-slate-50/70 rounded-md border border-slate-100">
+          <span className="text-[11px] font-medium text-slate-500 block">Total Invoiced (Billed)</span>
+          <span className="text-lg font-bold text-slate-900 tabular-nums font-mono">
+            ₹{totalBilledAll.toLocaleString('en-IN')}
+          </span>
+          <span className="text-[11px] text-slate-400 block mt-0.5">{invoices.length} supply memos</span>
+        </div>
+
+        <div className="p-2.5 bg-slate-50/70 rounded-md border border-slate-100">
+          <span className="text-[11px] font-medium text-slate-500 block">Total Payments Collected</span>
+          <span className="text-lg font-bold text-emerald-700 tabular-nums font-mono">
+            ₹{totalPaidAll.toLocaleString('en-IN')}
+          </span>
+          <span className="text-[11px] text-slate-400 block mt-0.5">{payments.length} receipts</span>
+        </div>
+
+        <div className="p-2.5 bg-slate-50/70 rounded-md border border-slate-100">
+          <span className="text-[11px] font-medium text-slate-500 block">Total Outstanding Dues</span>
+          <span className="text-lg font-bold text-slate-900 tabular-nums font-mono">
+            ₹{totalOutstandingAll.toLocaleString('en-IN')}
+          </span>
+          <span className="text-[11px] text-slate-400 block mt-0.5">Across all retail shops</span>
+        </div>
+
+        <div className="p-2.5 bg-slate-50/70 rounded-md border border-slate-100">
+          <span className="text-[11px] font-medium text-slate-500 block">Payment Compliance</span>
+          <div className="flex items-center space-x-1.5 mt-1 text-[11px] font-medium">
+            <span className="text-emerald-700 bg-emerald-50 px-1.5 py-0.2 rounded border border-emerald-200">{fullyPaidCount} Paid</span>
+            <span className="text-amber-800 bg-amber-50 px-1.5 py-0.2 rounded border border-amber-200">{partiallyPaidCount} Partial</span>
+            <span className="text-slate-700 bg-slate-100 px-1.5 py-0.2 rounded border border-slate-200">{unpaidCount} Unpaid</span>
+          </div>
+          <span className="text-[10px] text-slate-400 block mt-1">Out of {shops.length} partner stores</span>
+        </div>
       </div>
 
-      {/* Filters and Search Bar */}
-      <Card>
-        <div className="flex flex-col sm:flex-row items-center gap-3">
-          <div className="relative flex-1 w-full">
-            <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
-            <input
-              type="text"
-              placeholder="Search by invoice memo number, shop, or notes..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full pl-9 pr-3 py-2 text-xs rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-crimpston-electric"
-            />
+      {/* Navigation Tabs & Search Filter Bar */}
+      <div className="bg-white border border-slate-200 rounded-lg p-3.5 shadow-sm space-y-3">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+          
+          {/* Tabs */}
+          <div className="flex border-b sm:border-b-0 border-slate-200 space-x-1 text-xs font-medium">
+            <button
+              onClick={() => setActiveTab('shops')}
+              className={`px-3 py-1.5 rounded-md transition-colors ${
+                activeTab === 'shops'
+                  ? 'bg-slate-900 text-white font-semibold'
+                  : 'text-slate-600 hover:bg-slate-100'
+              }`}
+            >
+              Shop Receivables Ledger ({shops.length})
+            </button>
+            <button
+              onClick={() => setActiveTab('invoices')}
+              className={`px-3 py-1.5 rounded-md transition-colors ${
+                activeTab === 'invoices'
+                  ? 'bg-slate-900 text-white font-semibold'
+                  : 'text-slate-600 hover:bg-slate-100'
+              }`}
+            >
+              Supply Memos ({invoices.length})
+            </button>
+            <button
+              onClick={() => setActiveTab('payments')}
+              className={`px-3 py-1.5 rounded-md transition-colors ${
+                activeTab === 'payments'
+                  ? 'bg-slate-900 text-white font-semibold'
+                  : 'text-slate-600 hover:bg-slate-100'
+              }`}
+            >
+              Payment Receipts ({payments.length})
+            </button>
           </div>
 
-          <div className="w-full sm:w-64">
+          {/* Search & Filter Controls */}
+          <div className="flex items-center space-x-2">
+            <div className="relative w-full sm:w-60">
+              <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+              <input
+                type="text"
+                placeholder="Search by store or memo..."
+                value={searchQuery}
+                onChange={e => setSearchQuery(e.target.value)}
+                className="w-full pl-8 pr-3 py-1.5 text-xs rounded-md border border-slate-200 focus:outline-none focus:ring-1 focus:ring-blue-500 bg-white text-slate-800"
+              />
+            </div>
+
             <select
-              value={shopFilter}
-              onChange={(e) => setShopFilter(e.target.value)}
-              className="w-full py-2 px-3 text-xs rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-crimpston-electric bg-white font-medium"
+              value={statusFilter}
+              onChange={e => setStatusFilter(e.target.value)}
+              className="rounded-md border border-slate-200 px-2.5 py-1.5 text-xs text-slate-800 bg-white focus:outline-none focus:ring-1 focus:ring-blue-500"
             >
-              <option value="all">All Retail Shops</option>
-              {shops.map(s => (
-                <option key={s.id} value={s.id}>{s.name} ({s.code})</option>
-              ))}
+              <option value="all">All Statuses</option>
+              <option value="fully_paid">Fully Paid</option>
+              <option value="partially_paid">Partially Paid</option>
+              <option value="unpaid">Unpaid</option>
             </select>
           </div>
+
         </div>
-      </Card>
-
-      {/* Tabs */}
-      <div className="flex border-b border-slate-200 space-x-6">
-        <button
-          onClick={() => setActiveTab('invoices')}
-          className={`py-3 text-xs font-semibold border-b-2 flex items-center space-x-2 transition-colors ${
-            activeTab === 'invoices'
-              ? 'border-crimpston-navy text-crimpston-navy font-bold'
-              : 'border-transparent text-slate-500 hover:text-slate-800'
-          }`}
-        >
-          <Receipt className="w-4 h-4" />
-          <span>Shop Supply Invoices & Balances ({filteredInvoices.length})</span>
-        </button>
-
-        <button
-          onClick={() => setActiveTab('payments')}
-          className={`py-3 text-xs font-semibold border-b-2 flex items-center space-x-2 transition-colors ${
-            activeTab === 'payments'
-              ? 'border-crimpston-navy text-crimpston-navy font-bold'
-              : 'border-transparent text-slate-500 hover:text-slate-800'
-          }`}
-        >
-          <WalletCards className="w-4 h-4" />
-          <span>Payment Audit History ({filteredPayments.length})</span>
-        </button>
       </div>
 
-      {/* Tab 1: Invoices */}
-      {activeTab === 'invoices' && (
-        <Card title="Shop Wholesale Supply Memos & Balance Tracking">
-          {isLoading ? (
-            <div className="py-12 text-center text-xs text-slate-400">Loading payment memos...</div>
-          ) : filteredInvoices.length === 0 ? (
-            <div className="text-center py-12 px-4">
-              <div className="w-12 h-12 rounded-xl bg-slate-100 text-slate-400 flex items-center justify-center mx-auto mb-3">
-                <Receipt className="w-6 h-6" />
+      {/* Main Content Sections */}
+      <div className="bg-white border border-slate-200 rounded-lg shadow-sm overflow-hidden">
+        
+        {/* TAB 1: SHOP RECEIVABLES WORKSPACE */}
+        {activeTab === 'shops' && (
+          <div>
+            {isLoading ? (
+              <TableSkeleton rows={5} />
+            ) : shopSummaries.length === 0 ? (
+              <EmptyState
+                icon={Banknote}
+                title="No Retail Stores Configured"
+                description="Add partner retail shops to start recording supply memos, tracking payment receipts, and managing receivables."
+                action={
+                  <Button variant="primary" size="sm" onClick={() => window.location.href = '/shops'}>
+                    Add Retail Shop
+                  </Button>
+                }
+              />
+            ) : filteredShopSummaries.length === 0 ? (
+              <div className="p-12 text-center text-xs text-slate-400">
+                No retail shops match the selected search or status filter.
               </div>
-              <h3 className="text-sm font-bold text-slate-800">No payment records or memos found</h3>
-              <p className="text-xs text-slate-500 max-w-sm mx-auto mt-1 mb-4">
-                Record cash collections or create invoice supply memos to track shop settlements.
-              </p>
-              {shops.length > 0 && (
-                <Button variant="primary" size="sm" onClick={() => setIsInvoiceModalOpen(true)}>
-                  <Plus className="w-3.5 h-3.5 mr-1" />
-                  Add Supply Memo
-                </Button>
-              )}
-            </div>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs">
-                <thead className="bg-slate-50 text-slate-500 font-semibold border-b border-slate-100">
-                  <tr>
-                    <th className="py-2.5 px-3">Memo / Invoice #</th>
-                    <th className="py-2.5 px-3">Retail Shop</th>
-                    <th className="py-2.5 px-3">Date</th>
-                    <th className="py-2.5 px-3 text-right">Total Due</th>
-                    <th className="py-2.5 px-3 text-right">Paid So Far</th>
-                    <th className="py-2.5 px-3 text-right font-bold text-slate-900">Outstanding Balance</th>
-                    <th className="py-2.5 px-3 text-center">Status</th>
-                    <th className="py-2.5 px-3 text-center">Action</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100">
-                  {filteredInvoices.map(inv => (
-                    <tr key={inv.id} className="hover:bg-slate-50/50 transition-colors">
-                      <td className="py-3 px-3 font-mono font-bold text-slate-800">
-                        {inv.invoice_number}
-                      </td>
-                      <td className="py-3 px-3 font-semibold text-slate-900">
-                        {inv.shop_name}
-                      </td>
-                      <td className="py-3 px-3 text-slate-500">
-                        {inv.invoice_date}
-                      </td>
-                      <td className="py-3 px-3 text-right font-medium text-slate-700">
-                        ₹{inv.total_amount.toLocaleString('en-IN')}
-                      </td>
-                      <td className="py-3 px-3 text-right text-emerald-700 font-medium">
-                        ₹{inv.amount_paid.toLocaleString('en-IN')}
-                      </td>
-                      <td className="py-3 px-3 text-right font-bold text-slate-900 bg-slate-50/50">
-                        ₹{inv.outstanding_amount.toLocaleString('en-IN')}
-                      </td>
-                      <td className="py-3 px-3 text-center">
-                        {renderPaymentBadge(inv.total_amount, inv.amount_paid)}
-                      </td>
-                      <td className="py-3 px-3 text-center">
-                        {inv.outstanding_amount > 0 ? (
+            ) : (
+              <div className="overflow-x-auto text-xs">
+                <table className="w-full text-left">
+                  <thead className="bg-slate-50 text-slate-600 font-semibold border-b border-slate-200">
+                    <tr>
+                      <th className="py-2.5 px-3.5">Retail Shop</th>
+                      <th className="py-2.5 px-3">Code</th>
+                      <th className="py-2.5 px-3 text-right font-mono">Total Billed</th>
+                      <th className="py-2.5 px-3 text-right font-mono">Amount Paid</th>
+                      <th className="py-2.5 px-3 text-right font-mono font-bold">Outstanding Balance</th>
+                      <th className="py-2.5 px-3 text-center">Last Payment Date</th>
+                      <th className="py-2.5 px-3 text-center">Payment Status</th>
+                      <th className="py-2.5 px-3 text-right">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {filteredShopSummaries.map(item => (
+                      <tr key={item.shop.id} className="hover:bg-slate-50/50">
+                        <td className="py-3 px-3.5 font-semibold text-slate-900">
+                          <Link to="/shops" className="hover:text-blue-600">
+                            {item.shop.name}
+                          </Link>
+                        </td>
+                        <td className="py-3 px-3 font-mono text-slate-500">
+                          {item.shop.code}
+                        </td>
+                        <td className="py-3 px-3 text-right tabular-nums font-mono text-slate-700">
+                          ₹{item.totalBilled.toLocaleString('en-IN')}
+                        </td>
+                        <td className="py-3 px-3 text-right tabular-nums font-mono text-emerald-700 font-medium">
+                          ₹{item.totalPaid.toLocaleString('en-IN')}
+                        </td>
+                        <td className="py-3 px-3 text-right tabular-nums font-mono font-bold text-slate-900">
+                          ₹{item.outstandingBalance.toLocaleString('en-IN')}
+                        </td>
+                        <td className="py-3 px-3 text-center font-mono text-slate-500">
+                          {item.lastPaymentDate || <span className="text-slate-300">No payment yet</span>}
+                        </td>
+                        <td className="py-3 px-3 text-center">
+                          <span className={`inline-flex items-center px-2 py-0.5 rounded text-[11px] font-semibold border ${item.badgeClasses.bg} ${item.badgeClasses.text} ${item.badgeClasses.border}`}>
+                            {item.statusLabel}
+                          </span>
+                        </td>
+                        <td className="py-3 px-3 text-right space-x-1.5">
                           <Button
                             variant="primary"
                             size="sm"
-                            className="text-[11px] py-1 px-2.5 h-auto"
-                            onClick={() => {
-                              setSelectedInvoiceId(inv.id);
-                              setTargetShopId(inv.shop_id);
-                              setPaymentAmount(inv.outstanding_amount);
-                              setIsRecordModalOpen(true);
-                            }}
+                            onClick={() => openPaymentForShop(item.shop.id)}
+                            className="h-7 text-xs"
                           >
-                            Collect Cash
+                            Collect
                           </Button>
-                        ) : (
-                          <span className="text-emerald-600 font-semibold text-[11px]">Settled</span>
-                        )}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </Card>
-      )}
-
-      {/* Tab 2: Payments Audit */}
-      {activeTab === 'payments' && (
-        <Card title="Payment Receipts & Cash Handover Audit Log">
-          {filteredPayments.length === 0 ? (
-            <div className="text-center py-12 px-4">
-              <div className="w-12 h-12 rounded-xl bg-slate-100 text-slate-400 flex items-center justify-center mx-auto mb-3">
-                <Banknote className="w-6 h-6" />
+                          <Link to="/shops">
+                            <Button variant="outline" size="sm" className="h-7 text-xs">
+                              Workspace
+                            </Button>
+                          </Link>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
-              <h3 className="text-sm font-bold text-slate-800">No payments recorded yet</h3>
-              <p className="text-xs text-slate-500 max-w-sm mx-auto mt-1 mb-4">
-                When cash or online payments are received from retail shops, record them here for auditing.
-              </p>
-            </div>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs">
-                <thead className="bg-slate-50 text-slate-500 font-semibold border-b border-slate-100">
-                  <tr>
-                    <th className="py-2.5 px-3">Date</th>
-                    <th className="py-2.5 px-3">Retail Shop</th>
-                    <th className="py-2.5 px-3">Method</th>
-                    <th className="py-2.5 px-3">Reference / Notebook Note</th>
-                    <th className="py-2.5 px-3">Recorded By</th>
-                    <th className="py-2.5 px-3 text-right font-bold text-slate-900">Amount Received</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100">
-                  {filteredPayments.map(p => (
-                    <tr key={p.id} className="hover:bg-slate-50/50 transition-colors">
-                      <td className="py-3 px-3 text-slate-700 font-medium">
-                        {p.payment_date}
-                      </td>
-                      <td className="py-3 px-3 font-semibold text-slate-900">
-                        {p.shop_name}
-                      </td>
-                      <td className="py-3 px-3">
-                        <span className="inline-flex items-center gap-1 font-semibold text-slate-700">
-                          {p.payment_method === 'CASH' && <Banknote className="w-3.5 h-3.5 text-emerald-600" />}
-                          {p.payment_method === 'UPI' && <Smartphone className="w-3.5 h-3.5 text-blue-600" />}
-                          {p.payment_method === 'BANK_TRANSFER' && <Landmark className="w-3.5 h-3.5 text-purple-600" />}
-                          {p.payment_method}
-                        </span>
-                      </td>
-                      <td className="py-3 px-3 text-slate-600">
-                        <span className="block font-medium">{p.payment_reference || '-'}</span>
-                        {p.notes && <span className="block text-[11px] text-slate-400">{p.notes}</span>}
-                      </td>
-                      <td className="py-3 px-3 text-slate-600">
-                        <span className="flex items-center gap-1">
-                          <User className="w-3 h-3 text-slate-400" />
-                          {p.recorded_by_name || 'Rajesh (Owner)'}
-                        </span>
-                      </td>
-                      <td className="py-3 px-3 text-right font-bold text-emerald-700 text-sm">
-                        ₹{p.amount.toLocaleString('en-IN')}
-                      </td>
+            )}
+          </div>
+        )}
+
+        {/* TAB 2: INVOICES & SUPPLY MEMOS */}
+        {activeTab === 'invoices' && (
+          <div>
+            {invoices.length === 0 ? (
+              <div className="p-8 text-center text-xs text-slate-400">
+                No supply memos created yet. Click "Issue Supply Memo" above to record a billable batch.
+              </div>
+            ) : (
+              <div className="overflow-x-auto text-xs">
+                <table className="w-full text-left">
+                  <thead className="bg-slate-50 text-slate-600 font-semibold border-b border-slate-200">
+                    <tr>
+                      <th className="py-2.5 px-3.5">Memo / Bill #</th>
+                      <th className="py-2.5 px-3">Date</th>
+                      <th className="py-2.5 px-3">Retail Shop</th>
+                      <th className="py-2.5 px-3 text-right font-mono">Billed Amount</th>
+                      <th className="py-2.5 px-3 text-right font-mono">Paid</th>
+                      <th className="py-2.5 px-3 text-right font-mono font-bold">Outstanding</th>
+                      <th className="py-2.5 px-3 text-center">Status</th>
+                      <th className="py-2.5 px-3">Notes</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </Card>
-      )}
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {filteredInvoices.map(inv => {
+                      const calc = calculatePaymentStatus(inv.total_amount, inv.amount_paid);
+                      return (
+                        <tr key={inv.id} className="hover:bg-slate-50/50">
+                          <td className="py-3 px-3.5 font-mono font-semibold text-blue-600">
+                            {inv.invoice_number}
+                          </td>
+                          <td className="py-3 px-3 font-mono text-slate-600">
+                            {inv.invoice_date}
+                          </td>
+                          <td className="py-3 px-3 font-semibold text-slate-900">
+                            {inv.shop_name}
+                          </td>
+                          <td className="py-3 px-3 text-right tabular-nums font-mono text-slate-800">
+                            ₹{inv.total_amount.toLocaleString('en-IN')}
+                          </td>
+                          <td className="py-3 px-3 text-right tabular-nums font-mono text-emerald-700">
+                            ₹{inv.amount_paid.toLocaleString('en-IN')}
+                          </td>
+                          <td className="py-3 px-3 text-right tabular-nums font-mono font-bold text-slate-900">
+                            ₹{inv.outstanding_amount.toLocaleString('en-IN')}
+                          </td>
+                          <td className="py-3 px-3 text-center">
+                            <span className={`inline-flex items-center px-2 py-0.5 rounded text-[11px] font-semibold border ${calc.badgeClasses.bg} ${calc.badgeClasses.text} ${calc.badgeClasses.border}`}>
+                              {calc.statusLabel}
+                            </span>
+                          </td>
+                          <td className="py-3 px-3 text-slate-500 italic truncate max-w-xs">
+                            {inv.notes || '—'}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* TAB 3: PAYMENT RECEIPTS */}
+        {activeTab === 'payments' && (
+          <div>
+            {payments.length === 0 ? (
+              <div className="p-8 text-center text-xs text-slate-400">
+                No payment receipts logged yet. Click "Record Payment" to enter collections.
+              </div>
+            ) : (
+              <div className="overflow-x-auto text-xs">
+                <table className="w-full text-left">
+                  <thead className="bg-slate-50 text-slate-600 font-semibold border-b border-slate-200">
+                    <tr>
+                      <th className="py-2.5 px-3.5">Payment Date</th>
+                      <th className="py-2.5 px-3">Retail Shop</th>
+                      <th className="py-2.5 px-3 text-center">Payment Method</th>
+                      <th className="py-2.5 px-3">Reference / Transaction ID</th>
+                      <th className="py-2.5 px-3 text-right font-mono font-bold">Amount Collected</th>
+                      <th className="py-2.5 px-3">Recorded By</th>
+                      <th className="py-2.5 px-3">Notes</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {filteredPayments.map(pay => {
+                      const shop = shops.find(s => s.id === pay.shop_id);
+                      return (
+                        <tr key={pay.id} className="hover:bg-slate-50/50">
+                          <td className="py-3 px-3.5 font-mono text-slate-700">{pay.payment_date}</td>
+                          <td className="py-3 px-3 font-semibold text-slate-900">{shop ? shop.name : 'Partner Store'}</td>
+                          <td className="py-3 px-3 text-center">{getMethodBadge(pay.payment_method)}</td>
+                          <td className="py-3 px-3 font-mono text-slate-700">{pay.payment_reference || '—'}</td>
+                          <td className="py-3 px-3 text-right tabular-nums font-mono font-bold text-emerald-700 text-sm">
+                            ₹{pay.amount.toLocaleString('en-IN')}
+                          </td>
+                          <td className="py-3 px-3 text-slate-600">{pay.recorded_by_name || 'Business Owner'}</td>
+                          <td className="py-3 px-3 text-slate-500 italic truncate max-w-xs">{pay.notes || '—'}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        )}
+
+      </div>
 
       {/* Record Payment Modal */}
       <Modal
         isOpen={isRecordModalOpen}
         onClose={() => setIsRecordModalOpen(false)}
-        title="Record Shop Payment"
+        title="Record Retail Shop Payment"
       >
         <form onSubmit={handleRecordPaymentSubmit} className="space-y-4">
           <div>
-            <label className="block text-xs font-semibold text-slate-700 mb-1">Retail Shop</label>
+            <label className="block text-xs font-semibold text-slate-700 mb-1">
+              Select Retail Shop *
+            </label>
             <select
               value={targetShopId}
-              onChange={(e) => setTargetShopId(e.target.value)}
-              className="w-full rounded-lg border border-slate-300 px-3.5 py-2 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-crimpston-electric bg-white"
+              onChange={e => {
+                setTargetShopId(e.target.value);
+                const sSummary = shopSummaries.find(s => s.shop.id === e.target.value);
+                setPaymentAmount(sSummary ? sSummary.outstandingBalance : 0);
+              }}
+              className="w-full rounded-md border border-slate-200 px-3 py-1.5 text-xs text-slate-900 bg-white"
               required
             >
-              {shops.map(s => (
-                <option key={s.id} value={s.id}>{s.name} ({s.code})</option>
-              ))}
+              {shops.map(s => {
+                const sSummary = shopSummaries.find(sum => sum.shop.id === s.id);
+                return (
+                  <option key={s.id} value={s.id}>
+                    {s.name} ({s.code}) — Balance Due: ₹{(sSummary?.outstandingBalance ?? 0).toLocaleString('en-IN')}
+                  </option>
+                );
+              })}
             </select>
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <Input
-              label="Payment Amount (₹)"
-              type="number"
-              min={1}
-              value={paymentAmount || ''}
-              onChange={(e) => setPaymentAmount(parseFloat(e.target.value) || 0)}
+              label="Payment Date *"
+              type="date"
+              value={paymentDate}
+              onChange={e => setPaymentDate(e.target.value)}
               required
             />
+
             <div>
-              <label className="block text-xs font-semibold text-slate-700 mb-1">Payment Method</label>
+              <label className="block text-xs font-semibold text-slate-700 mb-1">
+                Payment Method *
+              </label>
               <select
                 value={paymentMethod}
-                onChange={(e) => setPaymentMethod(e.target.value as PaymentMethod)}
-                className="w-full rounded-lg border border-slate-300 px-3.5 py-2 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-crimpston-electric bg-white"
+                onChange={e => setPaymentMethod(e.target.value as PaymentMethod)}
+                className="w-full rounded-md border border-slate-200 px-3 py-1.5 text-xs text-slate-900 bg-white"
+                required
               >
-                <option value="CASH">Cash in Hand</option>
-                <option value="UPI">UPI / QR Code</option>
-                <option value="BANK_TRANSFER">Bank Transfer / NEFT</option>
-                <option value="CHEQUE">Cheque</option>
+                <option value="CASH">CASH (Physical Collection)</option>
+                <option value="UPI">UPI (GPay / PhonePe / Paytm)</option>
+                <option value="BANK_TRANSFER">BANK TRANSFER (NEFT / IMPS)</option>
+                <option value="CHEQUE">CHEQUE</option>
+                <option value="OTHER">OTHER</option>
               </select>
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <Input
-              label="Payment Date"
-              type="date"
-              value={paymentDate}
-              onChange={(e) => setPaymentDate(e.target.value)}
+              label="Amount Collected (₹) *"
+              type="number"
+              min={1}
+              step="any"
+              value={paymentAmount}
+              onChange={e => setPaymentAmount(Math.max(0, parseFloat(e.target.value) || 0))}
               required
             />
+
             <Input
-              label="Notebook Reference / Memo"
-              placeholder="e.g. Notebook Page 14"
+              label="Reference / Cheque / Txn ID"
+              placeholder="e.g. UPI Ref / Cheque #8812"
               value={paymentRef}
-              onChange={(e) => setPaymentRef(e.target.value)}
+              onChange={e => setPaymentRef(e.target.value)}
             />
           </div>
 
-          <div>
-            <label className="block text-xs font-semibold text-slate-700 mb-1">Collection Notes (Optional)</label>
-            <textarea
-              rows={2}
-              value={paymentNotes}
-              onChange={(e) => setPaymentNotes(e.target.value)}
-              placeholder="e.g. Collected during store visit, handed over by store manager"
-              className="w-full text-xs p-3 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-crimpston-electric"
-            />
-          </div>
+          <Input
+            label="Internal Notes"
+            placeholder="e.g. Collected during weekly visit"
+            value={paymentNotes}
+            onChange={e => setPaymentNotes(e.target.value)}
+          />
 
-          <div className="pt-2 flex justify-end space-x-2">
-            <Button variant="ghost" size="sm" type="button" onClick={() => setIsRecordModalOpen(false)}>
+          <div className="pt-3 border-t border-slate-100 flex items-center justify-end space-x-2">
+            <Button
+              type="button"
+              variant="outline"
+              size="md"
+              onClick={() => setIsRecordModalOpen(false)}
+            >
               Cancel
             </Button>
-            <Button variant="primary" size="sm" type="submit">
-              Save Cash Payment
+            <Button
+              type="submit"
+              variant="primary"
+              size="md"
+              isLoading={isSubmittingPayment}
+            >
+              Confirm Payment Receipt
             </Button>
           </div>
         </form>
       </Modal>
 
-      {/* Create Supply Memo / Invoice Modal */}
+      {/* Issue Supply Memo Modal */}
       <Modal
         isOpen={isInvoiceModalOpen}
         onClose={() => setIsInvoiceModalOpen(false)}
-        title="Add Wholesale Supply Memo"
+        title="Issue Supply Memo / Receivable"
       >
         <form onSubmit={handleCreateInvoiceSubmit} className="space-y-4">
           <div>
-            <label className="block text-xs font-semibold text-slate-700 mb-1">Retail Shop</label>
+            <label className="block text-xs font-semibold text-slate-700 mb-1">
+              Select Retail Shop *
+            </label>
             <select
               value={newInvoiceShopId}
-              onChange={(e) => setNewInvoiceShopId(e.target.value)}
-              className="w-full rounded-lg border border-slate-300 px-3.5 py-2 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-crimpston-electric bg-white"
+              onChange={e => setNewInvoiceShopId(e.target.value)}
+              className="w-full rounded-md border border-slate-200 px-3 py-1.5 text-xs text-slate-900 bg-white"
               required
             >
               {shops.map(s => (
@@ -573,55 +741,62 @@ export const PaymentTracking: React.FC = () => {
             </select>
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <Input
-              label="Memo / Bill Number"
-              placeholder="e.g. MEMO-2026-001"
+              label="Memo / Bill Number *"
+              placeholder="e.g. MEMO-1001"
               value={newInvoiceNumber}
-              onChange={(e) => setNewInvoiceNumber(e.target.value)}
+              onChange={e => setNewInvoiceNumber(e.target.value.toUpperCase())}
               required
             />
-            <Input
-              label="Total Billed Amount (₹)"
-              type="number"
-              min={1}
-              value={newInvoiceAmount || ''}
-              onChange={(e) => setNewInvoiceAmount(parseFloat(e.target.value) || 0)}
-              required
-            />
-          </div>
 
-          <div>
             <Input
-              label="Supply Date"
+              label="Memo Date *"
               type="date"
               value={newInvoiceDate}
-              onChange={(e) => setNewInvoiceDate(e.target.value)}
+              onChange={e => setNewInvoiceDate(e.target.value)}
               required
             />
           </div>
 
-          <div>
-            <label className="block text-xs font-semibold text-slate-700 mb-1">Memo Notes (Optional)</label>
-            <textarea
-              rows={2}
-              value={newInvoiceNotes}
-              onChange={(e) => setNewInvoiceNotes(e.target.value)}
-              placeholder="e.g. Weekly accessories supply batch"
-              className="w-full text-xs p-3 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-crimpston-electric"
-            />
-          </div>
+          <Input
+            label="Total Billable Amount (₹) *"
+            type="number"
+            min={1}
+            step="any"
+            value={newInvoiceAmount}
+            onChange={e => setNewInvoiceAmount(Math.max(0, parseFloat(e.target.value) || 0))}
+            required
+          />
 
-          <div className="pt-2 flex justify-end space-x-2">
-            <Button variant="ghost" size="sm" type="button" onClick={() => setIsInvoiceModalOpen(false)}>
+          <Input
+            label="Memo Notes / Particulars"
+            placeholder="e.g. Batch #14 mobile cases & tempered glass supply"
+            value={newInvoiceNotes}
+            onChange={e => setNewInvoiceNotes(e.target.value)}
+          />
+
+          <div className="pt-3 border-t border-slate-100 flex items-center justify-end space-x-2">
+            <Button
+              type="button"
+              variant="outline"
+              size="md"
+              onClick={() => setIsInvoiceModalOpen(false)}
+            >
               Cancel
             </Button>
-            <Button variant="primary" size="sm" type="submit">
-              Save Supply Memo
+            <Button
+              type="submit"
+              variant="primary"
+              size="md"
+              isLoading={isSubmittingInvoice}
+            >
+              Issue Supply Memo
             </Button>
           </div>
         </form>
       </Modal>
+
     </div>
   );
 };

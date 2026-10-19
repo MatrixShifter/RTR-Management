@@ -4,6 +4,7 @@ import { Button } from '../../components/ui/Button.js';
 import { Input } from '../../components/ui/Input.js';
 
 import { getShops } from '../../services/db.js';
+import { supabase, isSupabaseConfigured } from '../../lib/supabase.js';
 
 interface LoginProps {
   onLoginSuccess: (user: { id: string; email: string; name: string; role: 'owner' | 'employee'; assignedShop?: string }) => void;
@@ -15,52 +16,106 @@ export const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
   const [isLoading, setIsLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setIsLoading(true);
-    setErrorMsg('');
+  const performSignIn = async (userEmail: string, userPass: string) => {
+    if (isSupabaseConfigured && supabase) {
+      const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
+        email: userEmail.trim(),
+        password: userPass,
+      });
 
-    try {
-      const isOwnerRole = email.toLowerCase().includes('owner') || !email.toLowerCase().includes('employee');
-      if (isOwnerRole) {
-        onLoginSuccess({
-          id: 'u0000000-0000-0000-0000-000000000001',
-          email: email.trim(),
-          name: 'Business Owner',
-          role: 'owner'
-        });
-      } else {
-        const shops = await getShops();
-        onLoginSuccess({
-          id: 'u0000000-0000-0000-0000-000000000002',
-          email: email.trim(),
-          name: 'Store Staff',
-          role: 'employee',
-          assignedShop: shops.length > 0 ? shops[0]?.name : undefined
-        });
+      if (authError) {
+        setErrorMsg(authError.message || 'Invalid email or password.');
+        return false;
       }
-    } finally {
-      setIsLoading(false);
-    }
-  };
 
-  const handleQuickDemoLogin = async (role: 'owner' | 'employee') => {
-    if (role === 'owner') {
+      if (authData.user) {
+        // Query business membership
+        const { data: membership } = await supabase
+          .from('business_memberships')
+          .select('role')
+          .eq('user_id', authData.user.id)
+          .maybeSingle();
+
+        const role = membership?.role === 'owner' ? 'owner' : 'employee';
+
+        let assignedShopName: string | undefined;
+        if (role === 'employee') {
+          const { data: shopMember } = await supabase
+            .from('shop_memberships')
+            .select('shop_id')
+            .eq('user_id', authData.user.id)
+            .maybeSingle();
+
+          if (shopMember?.shop_id) {
+            const { data: shopData } = await supabase
+              .from('shops')
+              .select('name')
+              .eq('id', shopMember.shop_id)
+              .maybeSingle();
+            assignedShopName = shopData?.name;
+          }
+        }
+
+        onLoginSuccess({
+          id: authData.user.id,
+          email: authData.user.email || userEmail.trim(),
+          name: authData.user.user_metadata?.full_name || (role === 'owner' ? 'Business Owner' : 'Store Staff'),
+          role,
+          assignedShop: assignedShopName
+        });
+        return true;
+      }
+    }
+
+    // Fallback if Supabase is offline or unconfigured
+    const isOwnerRole = userEmail.toLowerCase().includes('owner') || !userEmail.toLowerCase().includes('employee');
+    if (isOwnerRole) {
       onLoginSuccess({
-        id: 'u0000000-0000-0000-0000-000000000001',
-        email: 'owner@rtrmobiles.com',
+        id: 'b46689e9-754e-49b5-b79b-ebc1ee42538f',
+        email: userEmail.trim(),
         name: 'Business Owner',
         role: 'owner'
       });
     } else {
       const shops = await getShops();
       onLoginSuccess({
-        id: 'u0000000-0000-0000-0000-000000000002',
-        email: 'staff@rtrmobiles.com',
+        id: '41adecf8-91aa-46e7-9dd4-13a332014f88',
+        email: userEmail.trim(),
         name: 'Store Staff',
         role: 'employee',
         assignedShop: shops.length > 0 ? shops[0]?.name : undefined
       });
+    }
+    return true;
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsLoading(true);
+    setErrorMsg('');
+
+    try {
+      await performSignIn(email, password);
+    } catch (err: any) {
+      setErrorMsg(err?.message || 'Failed to authenticate.');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleQuickDemoLogin = async (role: 'owner' | 'employee') => {
+    setIsLoading(true);
+    setErrorMsg('');
+    try {
+      if (role === 'owner') {
+        await performSignIn('owner@rtrmobiles.com', 'password123');
+      } else {
+        await performSignIn('staff@rtrmobiles.com', 'password123');
+      }
+    } catch (err: any) {
+      setErrorMsg(err?.message || 'Failed to sign in demo user.');
+    } finally {
+      setIsLoading(false);
     }
   };
 

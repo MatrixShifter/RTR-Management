@@ -216,7 +216,7 @@ export const ShopAnalytics: React.FC = () => {
   return (
     <div className="space-y-6">
       {/* Top Header & Shop Selection Bar */}
-      <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm space-y-4 print:border-none print:shadow-none print:p-0">
+      <div className="bg-white rounded-lg border border-slate-200 p-5 shadow-xs space-y-4 print:border-none print:shadow-none print:p-0">
         <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
           <div>
             <div className="flex items-center space-x-2 text-xs font-semibold uppercase tracking-wider text-crimpston-electric mb-1">
@@ -234,11 +234,11 @@ export const ShopAnalytics: React.FC = () => {
           {/* Export & Print Actions */}
           <div className="flex items-center space-x-2 print:hidden">
             <Button variant="outline" size="sm" onClick={handleExportCSV} disabled={!summary}>
-              <Download className="w-4 h-4 mr-1.5 text-slate-500" />
+              <Download className="w-3.5 h-3.5 mr-1.5 text-slate-500" />
               <span>Export CSV</span>
             </Button>
             <Button variant="primary" size="sm" onClick={handlePrint} disabled={!summary}>
-              <Printer className="w-4 h-4 mr-1.5" />
+              <Printer className="w-3.5 h-3.5 mr-1.5" />
               <span>Print / PDF</span>
             </Button>
           </div>
@@ -265,7 +265,7 @@ export const ShopAnalytics: React.FC = () => {
               <select
                 value={selectedShopId}
                 onChange={(e) => setSelectedShopId(e.target.value)}
-                className="w-full pl-3 pr-8 py-2 text-xs font-semibold bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-crimpston-electric text-slate-800"
+                className="w-full pl-3 pr-8 py-2 text-xs font-semibold bg-slate-50 border border-slate-200 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-600 text-slate-800"
               >
                 {filteredShops.map(s => (
                   <option key={s.id} value={s.id}>
@@ -282,7 +282,7 @@ export const ShopAnalytics: React.FC = () => {
             <select
               value={preset}
               onChange={(e) => setPreset(e.target.value as DateRangePreset)}
-              className="w-full px-3 py-2 text-xs font-semibold bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-crimpston-electric text-slate-800"
+              className="w-full px-3 py-2 text-xs font-semibold bg-slate-50 border border-slate-200 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-600 text-slate-800"
             >
               <option value="all_time">All Time (Complete History)</option>
               <option value="last_30_days">Last 30 Days</option>
@@ -296,7 +296,7 @@ export const ShopAnalytics: React.FC = () => {
 
           {/* Active Period Label */}
           <div className="md:col-span-3 flex items-end">
-            <div className="w-full py-2 px-3 bg-blue-50 border border-blue-100 rounded-xl text-[11px] text-blue-900 flex items-center justify-between">
+            <div className="w-full py-2 px-3 bg-blue-50 border border-blue-100 rounded-md text-[11px] text-blue-900 flex items-center justify-between font-mono tabular-nums">
               <span className="font-semibold">{dateRange.label}</span>
               <Calendar className="w-3.5 h-3.5 text-blue-500" />
             </div>
@@ -305,14 +305,14 @@ export const ShopAnalytics: React.FC = () => {
 
         {/* Custom Date Pickers (Shown only when preset === 'custom') */}
         {preset === 'custom' && (
-          <div className="grid grid-cols-2 gap-3 p-3 bg-slate-50 rounded-xl border border-slate-200 print:hidden animate-fade-in">
+          <div className="grid grid-cols-2 gap-3 p-3 bg-slate-50 rounded-md border border-slate-200 print:hidden animate-fade-in">
             <div>
               <label className="block text-[11px] font-semibold text-slate-600 mb-1">Start Date</label>
               <input
                 type="date"
                 value={customStart}
                 onChange={(e) => setCustomStart(e.target.value)}
-                className="w-full text-xs p-2 bg-white rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-crimpston-electric"
+                className="w-full text-xs p-2 bg-white rounded-md border border-slate-200 focus:outline-none focus:ring-1 focus:ring-blue-600"
               />
             </div>
             <div>
@@ -321,7 +321,7 @@ export const ShopAnalytics: React.FC = () => {
                 type="date"
                 value={customEnd}
                 onChange={(e) => setCustomEnd(e.target.value)}
-                className="w-full text-xs p-2 bg-white rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-crimpston-electric"
+                className="w-full text-xs p-2 bg-white rounded-md border border-slate-200 focus:outline-none focus:ring-1 focus:ring-blue-600"
               />
             </div>
           </div>
@@ -339,9 +339,9 @@ export const ShopAnalytics: React.FC = () => {
           <button
             key={tab.id}
             onClick={() => setActiveTab(tab.id as typeof activeTab)}
-            className={`px-4 py-2 rounded-xl text-xs font-semibold tracking-wide transition-all whitespace-nowrap ${
+            className={`px-3 py-1.5 rounded-md text-xs font-semibold tracking-tight transition-colors whitespace-nowrap ${
               activeTab === tab.id
-                ? 'bg-crimpston-navy text-white shadow-sm'
+                ? 'bg-slate-900 text-white shadow-xs'
                 : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
             }`}
           >
@@ -402,49 +402,49 @@ export const ShopAnalytics: React.FC = () => {
 
               {/* Financial Health & Accurate Profit Analytics Card */}
               <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                <div className="lg:col-span-2 bg-white rounded-2xl border border-slate-200 p-6 shadow-sm space-y-4">
+                <div className="lg:col-span-2 bg-white rounded-lg border border-slate-200 p-5 shadow-xs space-y-4">
                   <div className="flex items-center justify-between">
                     <div className="flex items-center space-x-2.5">
-                      <div className="w-9 h-9 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center">
-                        <TrendingUp className="w-5 h-5" />
+                      <div className="w-8 h-8 rounded-md bg-emerald-50 text-emerald-600 flex items-center justify-center">
+                        <TrendingUp className="w-4 h-4" />
                       </div>
                       <div>
-                        <h2 className="text-base font-bold text-slate-900">Profit & Revenue Recognition</h2>
+                        <h2 className="text-sm font-bold text-slate-900">Profit & Revenue Recognition</h2>
                         <p className="text-xs text-slate-500">Gross profit = Sales Revenue − Cost of Goods Sold</p>
                       </div>
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-2">
-                    <div className="p-4 bg-slate-50 rounded-xl border border-slate-100">
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2">
+                    <div className="p-3.5 bg-slate-50 rounded-md border border-slate-200">
                       <span className="text-[11px] font-medium text-slate-500 block">Recognized Sales Revenue</span>
-                      <span className="text-lg font-bold text-slate-900 block mt-1">
+                      <span className="text-base font-bold font-mono text-slate-900 block mt-1 tabular-nums">
                         ₹{summary.salesRevenue.toLocaleString('en-IN')}
                       </span>
                       <span className="text-[10px] text-slate-400">From verified sold units</span>
                     </div>
 
-                    <div className="p-4 bg-slate-50 rounded-xl border border-slate-100">
+                    <div className="p-3.5 bg-slate-50 rounded-md border border-slate-200">
                       <span className="text-[11px] font-medium text-slate-500 block">Cost of Goods Sold (COGS)</span>
-                      <span className="text-lg font-bold text-slate-900 block mt-1">
+                      <span className="text-base font-bold font-mono text-slate-900 block mt-1 tabular-nums">
                         {summary.costOfGoodsSold !== null ? `₹${summary.costOfGoodsSold.toLocaleString('en-IN')}` : 'Missing'}
                       </span>
                       <span className="text-[10px] text-slate-400">Based on catalog purchase cost</span>
                     </div>
 
-                    <div className="p-4 bg-slate-50 rounded-xl border border-slate-100">
+                    <div className="p-3.5 bg-slate-50 rounded-md border border-slate-200">
                       <span className="text-[11px] font-medium text-slate-500 block">Gross Profit</span>
-                      <span className="text-lg font-bold text-emerald-700 block mt-1">
+                      <span className="text-base font-bold font-mono text-emerald-700 block mt-1 tabular-nums">
                         {summary.grossProfit !== null ? `₹${summary.grossProfit.toLocaleString('en-IN')}` : 'Unavailable'}
                       </span>
-                      <span className="text-[10px] text-slate-400">
+                      <span className="text-[10px] text-slate-400 font-mono tabular-nums">
                         {summary.grossMarginPercent !== null ? `${summary.grossMarginPercent}% profit margin` : 'Missing cost basis'}
                       </span>
                     </div>
                   </div>
 
                   {summary.profitStatus === 'missing_cost_data' && (
-                    <div className="p-3.5 bg-amber-50 rounded-xl border border-amber-200 flex items-start space-x-3">
+                    <div className="p-3 bg-amber-50 rounded-md border border-amber-200 flex items-start space-x-2.5">
                       <AlertTriangle className="w-4 h-4 text-amber-600 flex-shrink-0 mt-0.5" />
                       <div className="text-xs text-amber-900 leading-relaxed">
                         <span className="font-bold">Profit unavailable — cost data missing.</span> One or more products sold in this period do not have a purchase cost price recorded in the catalog. To maintain accounting integrity, profit figures are not fabricated.
@@ -454,29 +454,29 @@ export const ShopAnalytics: React.FC = () => {
                 </div>
 
                 {/* Cash Collections & Payment Tracking Card */}
-                <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm space-y-4">
+                <div className="bg-white rounded-lg border border-slate-200 p-5 shadow-xs space-y-4">
                   <div className="flex items-center space-x-2.5">
-                    <div className="w-9 h-9 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center">
-                      <Banknote className="w-5 h-5" />
+                    <div className="w-8 h-8 rounded-md bg-blue-50 text-blue-600 flex items-center justify-center">
+                      <Banknote className="w-4 h-4" />
                     </div>
                     <div>
-                      <h2 className="text-base font-bold text-slate-900">Payment Accounting</h2>
+                      <h2 className="text-sm font-bold text-slate-900">Payment Accounting</h2>
                       <p className="text-xs text-slate-500">Cash & digital collections</p>
                     </div>
                   </div>
 
-                  <div className="space-y-3 pt-2">
+                  <div className="space-y-2.5 pt-2">
                     <div className="flex justify-between items-center text-xs pb-2 border-b border-slate-100">
                       <span className="text-slate-500">Total Billed / Invoiced:</span>
-                      <span className="font-bold text-slate-900">₹{summary.totalInvoiced.toLocaleString('en-IN')}</span>
+                      <span className="font-bold font-mono text-slate-900 tabular-nums">₹{summary.totalInvoiced.toLocaleString('en-IN')}</span>
                     </div>
                     <div className="flex justify-between items-center text-xs pb-2 border-b border-slate-100">
                       <span className="text-slate-500">Total Payments Received:</span>
-                      <span className="font-bold text-emerald-600">₹{summary.totalPayments.toLocaleString('en-IN')}</span>
+                      <span className="font-bold font-mono text-emerald-600 tabular-nums">₹{summary.totalPayments.toLocaleString('en-IN')}</span>
                     </div>
                     <div className="flex justify-between items-center text-xs pb-2 border-b border-slate-100">
                       <span className="text-slate-500">Remaining Outstanding:</span>
-                      <span className="font-bold text-slate-900">₹{summary.outstandingBalance.toLocaleString('en-IN')}</span>
+                      <span className="font-bold font-mono text-slate-900 tabular-nums">₹{summary.outstandingBalance.toLocaleString('en-IN')}</span>
                     </div>
                     <div className="flex justify-between items-center text-xs pt-1">
                       <span className="text-slate-500">Settlement Status:</span>
@@ -612,38 +612,38 @@ export const ShopAnalytics: React.FC = () => {
               ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   {sortedCategories.map(cat => (
-                    <div key={cat.category} className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm space-y-3 hover:border-slate-300 transition-all">
+                    <div key={cat.category} className="bg-white border border-slate-200 rounded-lg p-4 shadow-xs space-y-3 hover:border-slate-300 transition-colors">
                       <div className="flex items-center justify-between">
                         <div className="flex items-center space-x-2">
-                          <div className="w-8 h-8 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center font-bold text-xs">
+                          <div className="w-7 h-7 rounded-md bg-blue-50 text-blue-600 flex items-center justify-center font-bold text-xs">
                             {cat.category.slice(0, 2).toUpperCase()}
                           </div>
                           <div>
-                            <h3 className="text-sm font-bold text-slate-900">{cat.category}</h3>
+                            <h3 className="text-xs font-bold text-slate-900">{cat.category}</h3>
                             <span className="text-[11px] text-slate-400">{cat.productCount} catalog products</span>
                           </div>
                         </div>
-                        <Badge variant="neutral">{cat.remainingStock} pcs in stock</Badge>
+                        <Badge variant="neutral" size="sm">{cat.remainingStock} pcs in stock</Badge>
                       </div>
 
                       <div className="grid grid-cols-3 gap-2 pt-2 border-t border-slate-100 text-center">
-                        <div className="p-2 bg-slate-50 rounded-lg">
+                        <div className="p-2 bg-slate-50 rounded-md">
                           <span className="text-[10px] text-slate-500 block">Delivered</span>
-                          <span className="text-xs font-bold text-slate-800">{cat.quantityDelivered} pcs</span>
+                          <span className="text-xs font-bold font-mono text-slate-800 tabular-nums">{cat.quantityDelivered} pcs</span>
                         </div>
-                        <div className="p-2 bg-slate-50 rounded-lg">
+                        <div className="p-2 bg-slate-50 rounded-md">
                           <span className="text-[10px] text-slate-500 block">Sold</span>
-                          <span className="text-xs font-bold text-slate-900">{cat.quantitySold} pcs</span>
+                          <span className="text-xs font-bold font-mono text-slate-900 tabular-nums">{cat.quantitySold} pcs</span>
                         </div>
-                        <div className="p-2 bg-slate-50 rounded-lg">
+                        <div className="p-2 bg-slate-50 rounded-md">
                           <span className="text-[10px] text-slate-500 block">Revenue</span>
-                          <span className="text-xs font-bold text-slate-900">₹{cat.salesRevenue.toLocaleString('en-IN')}</span>
+                          <span className="text-xs font-bold font-mono text-slate-900 tabular-nums">₹{cat.salesRevenue.toLocaleString('en-IN')}</span>
                         </div>
                       </div>
 
-                      <div className="p-3 bg-emerald-50/50 rounded-xl border border-emerald-100 flex items-center justify-between text-xs">
+                      <div className="p-2.5 bg-emerald-50/50 rounded-md border border-emerald-100 flex items-center justify-between text-xs">
                         <span className="text-emerald-900 font-medium">Gross Profit:</span>
-                        <span className="font-bold text-emerald-800">
+                        <span className="font-bold font-mono text-emerald-800 tabular-nums">
                           {cat.grossProfit !== null ? `₹${cat.grossProfit.toLocaleString('en-IN')} (${cat.grossMarginPercent}% margin)` : 'Missing cost basis'}
                         </span>
                       </div>
@@ -691,10 +691,10 @@ export const ShopAnalytics: React.FC = () => {
                     <div
                       key={evt.id}
                       onClick={() => setSelectedEventDetails(evt)}
-                      className="p-4 bg-white rounded-xl border border-slate-200 hover:border-slate-300 transition-all flex items-center justify-between cursor-pointer"
+                      className="p-3.5 bg-white rounded-lg border border-slate-200 hover:border-slate-300 transition-colors flex items-center justify-between cursor-pointer shadow-xs"
                     >
-                      <div className="flex items-start space-x-3.5">
-                        <div className="w-8 h-8 rounded-lg bg-slate-100 flex items-center justify-center font-bold text-xs text-slate-700 mt-0.5">
+                      <div className="flex items-start space-x-3">
+                        <div className="w-8 h-8 rounded-md bg-slate-100 flex items-center justify-center font-bold text-xs text-slate-700 mt-0.5">
                           {evt.type === 'delivery' && '🚚'}
                           {evt.type === 'sale_report' && '📋'}
                           {evt.type === 'payment' && '💵'}
@@ -707,7 +707,7 @@ export const ShopAnalytics: React.FC = () => {
                             <Badge variant={evt.badgeVariant} size="sm">{evt.type.replace('_', ' ').toUpperCase()}</Badge>
                           </div>
                           <p className="text-xs text-slate-500 mt-0.5">{evt.summary}</p>
-                          <span className="text-[11px] text-slate-400 block mt-1">
+                          <span className="text-[11px] text-slate-400 block mt-1 font-mono tabular-nums">
                             📅 {evt.date} • By {evt.responsibleUser}
                           </span>
                         </div>
@@ -715,12 +715,12 @@ export const ShopAnalytics: React.FC = () => {
 
                       <div className="text-right">
                         {evt.amount !== null && (
-                          <span className="text-xs font-bold text-emerald-600 block">
+                          <span className="text-xs font-bold font-mono text-emerald-600 block tabular-nums">
                             ₹{evt.amount.toLocaleString('en-IN')}
                           </span>
                         )}
                         {evt.quantity !== null && (
-                          <span className="text-xs font-semibold text-slate-700 block">
+                          <span className="text-xs font-semibold font-mono text-slate-700 block tabular-nums">
                             {evt.quantity > 0 ? `+${evt.quantity}` : evt.quantity} pcs
                           </span>
                         )}
@@ -768,10 +768,10 @@ export const ShopAnalytics: React.FC = () => {
           title={`Product History: ${selectedProductDetails.productName}`}
         >
           <div className="space-y-4 text-xs">
-            <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 grid grid-cols-2 gap-3">
+            <div className="p-3 bg-slate-50 rounded-lg border border-slate-200 grid grid-cols-2 gap-3">
               <div>
                 <span className="text-slate-500 block text-[11px]">SKU:</span>
-                <span className="font-mono font-bold text-slate-800">{selectedProductDetails.sku}</span>
+                <span className="font-mono font-bold text-slate-800 tabular-nums">{selectedProductDetails.sku}</span>
               </div>
               <div>
                 <span className="text-slate-500 block text-[11px]">Category:</span>
@@ -779,11 +779,11 @@ export const ShopAnalytics: React.FC = () => {
               </div>
               <div>
                 <span className="text-slate-500 block text-[11px]">Catalog Selling Price:</span>
-                <span className="font-bold text-slate-800">₹{selectedProductDetails.unitPrice}</span>
+                <span className="font-bold font-mono text-slate-800 tabular-nums">₹{selectedProductDetails.unitPrice}</span>
               </div>
               <div>
                 <span className="text-slate-500 block text-[11px]">Catalog Cost Price:</span>
-                <span className="font-bold text-slate-800">
+                <span className="font-bold font-mono text-slate-800 tabular-nums">
                   {selectedProductDetails.costPrice !== null ? `₹${selectedProductDetails.costPrice}` : 'Missing cost basis'}
                 </span>
               </div>
@@ -792,33 +792,33 @@ export const ShopAnalytics: React.FC = () => {
             <div className="space-y-2">
               <h4 className="font-bold text-slate-900">Period Movement Totals</h4>
               <div className="grid grid-cols-3 gap-2 text-center">
-                <div className="p-2 bg-slate-50 rounded-lg border border-slate-100">
+                <div className="p-2 bg-slate-50 rounded-md border border-slate-200">
                   <span className="text-[10px] text-slate-500 block">Delivered</span>
-                  <span className="font-bold text-slate-800">{selectedProductDetails.deliveredInPeriod} pcs</span>
+                  <span className="font-bold font-mono text-slate-800 tabular-nums">{selectedProductDetails.deliveredInPeriod} pcs</span>
                 </div>
-                <div className="p-2 bg-slate-50 rounded-lg border border-slate-100">
+                <div className="p-2 bg-slate-50 rounded-md border border-slate-200">
                   <span className="text-[10px] text-slate-500 block">Sold</span>
-                  <span className="font-bold text-slate-900">{selectedProductDetails.soldInPeriod} pcs</span>
+                  <span className="font-bold font-mono text-slate-900 tabular-nums">{selectedProductDetails.soldInPeriod} pcs</span>
                 </div>
-                <div className="p-2 bg-slate-50 rounded-lg border border-slate-100">
+                <div className="p-2 bg-slate-50 rounded-md border border-slate-200">
                   <span className="text-[10px] text-slate-500 block">Expected Shelf</span>
-                  <span className="font-bold text-emerald-700">{selectedProductDetails.currentRemainingStock} pcs</span>
+                  <span className="font-bold font-mono text-emerald-700 tabular-nums">{selectedProductDetails.currentRemainingStock} pcs</span>
                 </div>
               </div>
             </div>
 
-            <div className="p-3.5 bg-blue-50 rounded-xl border border-blue-100 space-y-1">
+            <div className="p-3 bg-blue-50 rounded-lg border border-blue-100 space-y-1">
               <div className="flex justify-between font-medium text-blue-900">
                 <span>Revenue from this item:</span>
-                <span className="font-bold">₹{selectedProductDetails.salesRevenue.toLocaleString('en-IN')}</span>
+                <span className="font-bold font-mono tabular-nums">₹{selectedProductDetails.salesRevenue.toLocaleString('en-IN')}</span>
               </div>
               <div className="flex justify-between text-blue-800">
                 <span>Cost of Goods Sold (COGS):</span>
-                <span>{selectedProductDetails.cogs !== null ? `₹${selectedProductDetails.cogs.toLocaleString('en-IN')}` : 'Unavailable'}</span>
+                <span className="font-mono tabular-nums">{selectedProductDetails.cogs !== null ? `₹${selectedProductDetails.cogs.toLocaleString('en-IN')}` : 'Unavailable'}</span>
               </div>
               <div className="flex justify-between font-bold text-blue-950 pt-1 border-t border-blue-200">
                 <span>Gross Profit:</span>
-                <span>{selectedProductDetails.grossProfit !== null ? `₹${selectedProductDetails.grossProfit.toLocaleString('en-IN')}` : 'Profit unavailable — cost data missing'}</span>
+                <span className="font-mono tabular-nums">{selectedProductDetails.grossProfit !== null ? `₹${selectedProductDetails.grossProfit.toLocaleString('en-IN')}` : 'Profit unavailable — cost data missing'}</span>
               </div>
             </div>
 
@@ -839,10 +839,10 @@ export const ShopAnalytics: React.FC = () => {
           title={selectedEventDetails.title}
         >
           <div className="space-y-4 text-xs">
-            <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 space-y-2">
+            <div className="p-3 bg-slate-50 rounded-lg border border-slate-200 space-y-2">
               <div className="flex justify-between">
                 <span className="text-slate-500">Transaction Date:</span>
-                <span className="font-bold text-slate-800">{selectedEventDetails.date}</span>
+                <span className="font-bold font-mono text-slate-800 tabular-nums">{selectedEventDetails.date}</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-slate-500">Event Type:</span>

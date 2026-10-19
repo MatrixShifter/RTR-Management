@@ -7,6 +7,7 @@ import {
   Store, 
   Banknote,
   BarChart3,
+  Package,
   LogOut, 
   Wifi, 
   WifiOff, 
@@ -64,11 +65,12 @@ export const Navbar: React.FC<NavbarProps> = ({
 
   const ownerLinks = [
     { label: 'Overview', to: '/', icon: Boxes },
+    { label: 'Shops', to: '/shops', icon: Store },
     { label: 'Deliveries', to: '/deliveries', icon: Truck },
     { label: 'Stock Ledger', to: '/stock-ledger', icon: ClipboardCheck },
     { label: 'Payments', to: '/payments', icon: Banknote },
     { label: 'History & Analytics', to: '/analytics', icon: BarChart3 },
-    { label: 'Catalog & Shops', to: '/management', icon: Store }
+    { label: 'Product Catalog', to: '/catalog', icon: Package }
   ];
 
   const employeeLinks = [
@@ -79,7 +81,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   const links = userRole === 'owner' ? ownerLinks : employeeLinks;
 
   // Active page title for the desktop top header
-  const currentLink = links.find(l => l.to === location.pathname);
+  const currentLink = links.find(l => l.to === location.pathname) || (location.pathname === '/management' ? { label: 'Shops & Catalog' } : null);
   const activeTitle = currentLink ? currentLink.label : 'Wholesale Portal';
 
   return (
@@ -88,36 +90,36 @@ export const Navbar: React.FC<NavbarProps> = ({
           1. DESKTOP LEFT SIDEBAR (Visible on lg: 1024px and up)
          ======================================================== */}
       <aside 
-        className="fixed inset-y-0 left-0 w-64 bg-crimpston-navy text-white z-30 hidden lg:flex lg:flex-col border-r border-slate-800 shadow-xl select-none print:hidden"
+        className="fixed inset-y-0 left-0 w-64 bg-crimpston-navy bg-slate-900 text-slate-200 z-30 hidden lg:flex lg:flex-col border-r border-slate-800 shadow-sm select-none print:hidden"
         aria-label="Main Desktop Navigation"
       >
         {/* Sidebar Brand Header */}
-        <div className="h-16 flex items-center px-5 border-b border-slate-800 flex-shrink-0">
+        <div className="h-16 flex items-center px-5 border-b border-slate-800/80 flex-shrink-0">
           <Link 
             to="/" 
-            className="flex items-center space-x-3 focus:outline-none focus:ring-2 focus:ring-crimpston-electric rounded-lg p-1 group"
+            className="flex items-center space-x-3 focus:outline-none focus:ring-2 focus:ring-blue-500 rounded-lg p-1 group"
             aria-label="RTR Wholesale Management Home"
           >
-            <div className="w-8 h-8 rounded-lg bg-crimpston-electric flex items-center justify-center font-black text-white text-xs tracking-wider shadow-sm flex-shrink-0 group-hover:bg-crimpston-electric-hover transition-colors">
+            <div className="w-8 h-8 rounded-lg bg-crimpston-electric bg-blue-600 flex items-center justify-center font-bold text-white text-xs tracking-wider shadow-sm flex-shrink-0">
               RTR
             </div>
             <div className="flex flex-col leading-none">
               <span className="font-bold text-sm tracking-tight text-white flex items-center gap-1.5">
-                RTR
+                RTR Wholesale
               </span>
-              <span className="text-[10px] tracking-wider text-slate-400 uppercase font-medium mt-0.5 whitespace-nowrap">
-                Wholesale Management
+              <span className="text-[10px] tracking-wider text-slate-400 font-medium mt-1 uppercase">
+                Accessories Ledger
               </span>
             </div>
           </Link>
         </div>
 
         {/* Vertical Navigation Links */}
-        <div className="flex-1 overflow-y-auto px-3.5 py-5 space-y-1">
-          <div className="px-3 pb-2 text-[10px] font-bold text-slate-400 uppercase tracking-wider">
-            Menu Navigation
+        <div className="flex-1 overflow-y-auto px-3 py-4 space-y-1">
+          <div className="px-3 pb-2 text-[10px] font-semibold text-slate-400 uppercase tracking-wider">
+            Workspace
           </div>
-          <nav className="space-y-1" aria-label="Sidebar Navigation Links">
+          <nav className="space-y-0.5" aria-label="Sidebar Navigation Links">
             {links.map(link => {
               const Icon = link.icon;
               const isActive = location.pathname === link.to;
@@ -125,10 +127,10 @@ export const Navbar: React.FC<NavbarProps> = ({
                 <Link
                   key={link.to}
                   to={link.to}
-                  className={`flex items-center space-x-3 px-3 py-2.5 rounded-xl text-xs font-semibold tracking-wide whitespace-nowrap transition-all duration-150 ${
+                  className={`flex items-center space-x-3 px-3 py-2 rounded-md text-xs font-medium tracking-normal whitespace-nowrap transition-colors ${
                     isActive
-                      ? 'bg-crimpston-electric/20 text-blue-400 border border-crimpston-electric/40 shadow-xs font-bold'
-                      : 'text-slate-300 hover:text-white hover:bg-slate-800/60 border border-transparent'
+                      ? 'bg-slate-800 text-white font-semibold border-l-2 border-crimpston-electric/40 border-blue-500 pl-2.5'
+                      : 'text-slate-300 hover:text-white hover:bg-slate-800/60'
                   }`}
                 >
                   <Icon className={`w-4 h-4 flex-shrink-0 ${isActive ? 'text-blue-400' : 'text-slate-400'}`} />
@@ -329,7 +331,7 @@ export const Navbar: React.FC<NavbarProps> = ({
               <div className="px-3 pb-2 text-[10px] font-bold text-slate-400 uppercase tracking-wider">
                 Menu Navigation
               </div>
-              <nav className="space-y-1" aria-label="Mobile Drawer Links">
+              <nav className="space-y-0.5" aria-label="Mobile Drawer Links">
                 {links.map(link => {
                   const Icon = link.icon;
                   const isActive = location.pathname === link.to;
@@ -338,10 +340,10 @@ export const Navbar: React.FC<NavbarProps> = ({
                       key={link.to}
                       to={link.to}
                       onClick={() => setMobileMenuOpen(false)}
-                      className={`flex items-center space-x-3 px-3.5 py-3 rounded-xl text-sm font-medium transition-all ${
+                      className={`flex items-center space-x-3 px-3 py-2.5 rounded-md text-sm font-medium transition-colors ${
                         isActive
-                          ? 'bg-crimpston-electric/20 text-blue-400 font-bold border border-crimpston-electric/40 shadow-xs'
-                          : 'text-slate-300 hover:text-white hover:bg-slate-800/60 border border-transparent'
+                          ? 'bg-slate-800 text-white font-semibold border-l-2 border-blue-500 pl-2.5'
+                          : 'text-slate-300 hover:text-white hover:bg-slate-800/60'
                       }`}
                     >
                       <Icon className={`w-4 h-4 flex-shrink-0 ${isActive ? 'text-blue-400' : 'text-slate-400'}`} />

@@ -4,7 +4,7 @@ import { MemoryRouter } from 'react-router-dom';
 import { Navbar } from './Navbar.js';
 
 describe('Navbar Component — Responsive Sidebar & Top Header Architecture', () => {
-  it('renders all 6 owner navigation links vertically in the sidebar with whitespace-nowrap', () => {
+  it('renders all 7 owner navigation links vertically in the sidebar with whitespace-nowrap', () => {
     const html = renderToString(
       <MemoryRouter initialEntries={['/analytics']}>
         <Navbar
@@ -16,13 +16,14 @@ describe('Navbar Component — Responsive Sidebar & Top Header Architecture', ()
       </MemoryRouter>
     );
 
-    // Verify all 6 links
+    // Verify all 7 links
     expect(html).toContain('Overview');
+    expect(html).toContain('Shops');
     expect(html).toContain('Deliveries');
     expect(html).toContain('Stock Ledger');
     expect(html).toContain('Payments');
     expect(html).toContain('History &amp; Analytics');
-    expect(html).toContain('Catalog &amp; Shops');
+    expect(html).toContain('Product Catalog');
 
     // Verify whitespace-nowrap is present on navigation items
     expect(html).toContain('whitespace-nowrap');
@@ -64,7 +65,7 @@ describe('Navbar Component — Responsive Sidebar & Top Header Architecture', ()
 
   it('correctly distinguishes active route with refined styling in sidebar', () => {
     const html = renderToString(
-      <MemoryRouter initialEntries={['/management']}>
+      <MemoryRouter initialEntries={['/catalog']}>
         <Navbar
           userRole="owner"
           userName="Business Owner"
@@ -122,7 +123,7 @@ describe('Navbar Component — Responsive Sidebar & Top Header Architecture', ()
 
     expect(html).toContain('Daily Report');
     expect(html).toContain('Stock Overview');
-    expect(html).not.toContain('Catalog &amp; Shops');
+    expect(html).not.toContain('Product Catalog');
   });
 
   it('includes accessible mobile toggle button with aria attributes', () => {

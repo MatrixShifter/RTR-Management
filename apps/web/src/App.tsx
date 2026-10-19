@@ -5,6 +5,7 @@ import { Navbar } from './components/Navbar.js';
 import { OwnerDashboard } from './pages/owner/OwnerDashboard.js';
 import { DeliveryManagement } from './pages/owner/DeliveryManagement.js';
 import { StockLedger } from './pages/owner/StockLedger.js';
+import { ShopWorkspace } from './pages/owner/ShopWorkspace.js';
 import { CatalogManagement } from './pages/owner/CatalogManagement.js';
 import { PaymentTracking } from './pages/owner/PaymentTracking.js';
 import { ShopAnalytics } from './pages/owner/ShopAnalytics.js';
@@ -31,6 +32,8 @@ export interface UserState {
   assignedShop?: string;
 }
 
+import { supabase, isSupabaseConfigured } from './lib/supabase.js';
+
 const STORAGE_USER_KEY = 'rtr_current_user';
 const STORAGE_EXPIRY_KEY = 'rtr_session_expiry';
 const SESSION_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
@@ -43,39 +46,83 @@ const AppContent: React.FC = () => {
 
   // 1. Session verification & hydration
   useEffect(() => {
-    try {
-      const storedUser = localStorage.getItem(STORAGE_USER_KEY);
-      const storedExpiry = localStorage.getItem(STORAGE_EXPIRY_KEY);
+    let isMounted = true;
 
-      if (storedUser) {
-        const expiryTime = storedExpiry ? parseInt(storedExpiry, 10) : 0;
-        if (expiryTime && Date.now() > expiryTime) {
-          localStorage.removeItem(STORAGE_USER_KEY);
-          localStorage.removeItem(STORAGE_EXPIRY_KEY);
-          warning('Your session has expired. Please sign in again.');
-        } else {
-          setCurrentUser(JSON.parse(storedUser));
+    async function initSession() {
+      try {
+        if (isSupabaseConfigured && supabase) {
+          const { data: { session } } = await supabase.auth.getSession();
+          if (session?.user) {
+            const { data: membership } = await supabase
+              .from('business_memberships')
+              .select('role')
+              .eq('user_id', session.user.id)
+              .maybeSingle();
+
+            const role = membership?.role === 'owner' ? 'owner' : 'employee';
+
+            let assignedShopName: string | undefined;
+            if (role === 'employee') {
+              const { data: shopMember } = await supabase
+                .from('shop_memberships')
+                .select('shop_id')
+                .eq('user_id', session.user.id)
+                .maybeSingle();
+
+              if (shopMember?.shop_id) {
+                const { data: shopData } = await supabase
+                  .from('shops')
+                  .select('name')
+                  .eq('id', shopMember.shop_id)
+                  .maybeSingle();
+                assignedShopName = shopData?.name;
+              }
+            }
+
+            if (isMounted) {
+              const userState: UserState = {
+                id: session.user.id,
+                email: session.user.email || '',
+                name: session.user.user_metadata?.full_name || (role === 'owner' ? 'Business Owner' : 'Store Staff'),
+                role,
+                assignedShop: assignedShopName
+              };
+              setCurrentUser(userState);
+              localStorage.setItem(STORAGE_USER_KEY, JSON.stringify(userState));
+              localStorage.setItem(STORAGE_EXPIRY_KEY, String(Date.now() + SESSION_TTL_MS));
+              return;
+            }
+          }
         }
-      } else {
-        // Default initial session for immediate workspace access
-        const defaultOwner: UserState = {
-          id: 'u0000000-0000-0000-0000-000000000001',
-          email: 'owner@rtrmobiles.com',
-          name: 'Business Owner',
-          role: 'owner',
-        };
-        setCurrentUser(defaultOwner);
-        localStorage.setItem(STORAGE_USER_KEY, JSON.stringify(defaultOwner));
-        localStorage.setItem(STORAGE_EXPIRY_KEY, String(Date.now() + SESSION_TTL_MS));
+
+        // Stored local session fallback
+        const storedUser = localStorage.getItem(STORAGE_USER_KEY);
+        const storedExpiry = localStorage.getItem(STORAGE_EXPIRY_KEY);
+
+        if (storedUser) {
+          const expiryTime = storedExpiry ? parseInt(storedExpiry, 10) : 0;
+          if (expiryTime && Date.now() > expiryTime) {
+            localStorage.removeItem(STORAGE_USER_KEY);
+            localStorage.removeItem(STORAGE_EXPIRY_KEY);
+            warning('Your session has expired. Please sign in again.');
+          } else {
+            setCurrentUser(JSON.parse(storedUser));
+          }
+        }
+      } catch (err) {
+        console.warn('Could not restore stored session:', err);
+      } finally {
+        if (isMounted) {
+          setIsBootstrapping(false);
+        }
       }
-    } catch (err) {
-      console.warn('Could not restore stored session:', err);
-    } finally {
-      const timer = setTimeout(() => {
-        setIsBootstrapping(false);
-      }, 250);
-      return () => clearTimeout(timer);
     }
+
+    initSession();
+
+    return () => {
+      isMounted = false;
+    };
   }, [warning]);
 
   // 2. Network connectivity listeners
@@ -125,8 +172,11 @@ const AppContent: React.FC = () => {
     success(`Welcome back, ${user.name}`);
   };
 
-  const handleSignOut = () => {
+  const handleSignOut = async () => {
     try {
+      if (isSupabaseConfigured && supabase) {
+        await supabase.auth.signOut();
+      }
       localStorage.removeItem(STORAGE_USER_KEY);
       localStorage.removeItem(STORAGE_EXPIRY_KEY);
     } catch (err) {
@@ -160,10 +210,12 @@ const AppContent: React.FC = () => {
               {currentUser.role === 'owner' ? (
                 <>
                   <Route path="/" element={<OwnerDashboard />} />
+                  <Route path="/shops" element={<ShopWorkspace />} />
                   <Route path="/deliveries" element={<DeliveryManagement />} />
                   <Route path="/stock-ledger" element={<StockLedger />} />
                   <Route path="/payments" element={<PaymentTracking />} />
                   <Route path="/analytics" element={<ShopAnalytics />} />
+                  <Route path="/catalog" element={<CatalogManagement />} />
                   <Route path="/management" element={<CatalogManagement />} />
                   <Route path="/employee" element={<EmployeeReporting />} />
                   <Route path="*" element={<Navigate to="/" replace />} />

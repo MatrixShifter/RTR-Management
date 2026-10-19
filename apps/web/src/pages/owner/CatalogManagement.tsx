@@ -1,5 +1,12 @@
-import React, { useState, useEffect } from 'react';
-import { Store, Package, Plus, Trash2, RotateCcw } from 'lucide-react';
+import React, { useState, useEffect, useMemo } from 'react';
+import { 
+  Package, 
+  Plus, 
+  Trash2, 
+  Search, 
+  Store 
+} from 'lucide-react';
+import { Link } from 'react-router-dom';
 import { Card } from '../../components/ui/Card.js';
 import { Button } from '../../components/ui/Button.js';
 import { Input } from '../../components/ui/Input.js';
@@ -7,47 +14,52 @@ import { Badge } from '../../components/ui/Badge.js';
 import { Modal } from '../../components/ui/Modal.js';
 import type { ProductCategory } from '@crimpston/shared';
 import { 
-  getShops, 
-  saveShop, 
-  deleteShop, 
   getProducts, 
   saveProduct, 
   deleteProduct,
-  resetWorkspaceToCleanEmptyState,
-  type Shop, 
-  type Product 
+  getShops,
+  type Product,
+  type Shop 
 } from '../../services/db.js';
 
+const CATEGORIES: ProductCategory[] = [
+  'Mobile Cases',
+  'Tempered Glass',
+  'Chargers & Adapters',
+  'USB Cables',
+  'Earphones & Audio',
+  'Other Accessories'
+];
+
 export const CatalogManagement: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<'shops' | 'products'>('shops');
-  const [shops, setShops] = useState<Shop[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
+  const [shops, setShops] = useState<Shop[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
-  // Modal form states
-  const [isShopModalOpen, setIsShopModalOpen] = useState(false);
-  const [shopName, setShopName] = useState('');
-  const [shopCode, setShopCode] = useState('');
-  const [shopAddress, setShopAddress] = useState('');
-  const [shopPhone, setShopPhone] = useState('');
+  // Filters
+  const [searchQuery, setSearchQuery] = useState('');
+  const [selectedCategory, setSelectedCategory] = useState<string>('all');
 
-  const [isProductModalOpen, setIsProductModalOpen] = useState(false);
+  // Add/Edit Product Modal
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [prodName, setProdName] = useState('');
   const [prodSku, setProdSku] = useState('');
   const [prodCategory, setProdCategory] = useState<ProductCategory>('Mobile Cases');
-  const [prodMinStock, setProdMinStock] = useState(5);
+  const [prodMinStock, setProdMinStock] = useState(10);
+  const [isSaving, setIsSaving] = useState(false);
 
   const loadData = async () => {
     setIsLoading(true);
     try {
-      const [loadedShops, loadedProducts] = await Promise.all([
-        getShops(),
-        getProducts()
+      const [loadedProducts, loadedShops] = await Promise.all([
+        getProducts(),
+        getShops()
       ]);
-      setShops(loadedShops);
       setProducts(loadedProducts);
+      setShops(loadedShops);
     } catch (err) {
-      console.error('Failed to load catalog data:', err);
+      console.error('Failed to load product catalog data:', err);
     } finally {
       setIsLoading(false);
     }
@@ -60,301 +72,287 @@ export const CatalogManagement: React.FC = () => {
     return () => window.removeEventListener('rtr_data_sync', handleSync);
   }, []);
 
-  const handleAddShop = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!shopName.trim() || !shopCode.trim()) return;
-
-    await saveShop({
-      name: shopName.trim(),
-      code: shopCode.trim().toUpperCase(),
-      address: shopAddress.trim(),
-      phone: shopPhone.trim(),
-      isActive: true,
-      assignedEmployees: []
-    });
-
-    setIsShopModalOpen(false);
-    setShopName('');
-    setShopCode('');
-    setShopAddress('');
-    setShopPhone('');
-    await loadData();
+  const openAddModal = () => {
+    setEditingProduct(null);
+    setProdName('');
+    setProdSku('');
+    setProdCategory('Mobile Cases');
+    setProdMinStock(10);
+    setIsModalOpen(true);
   };
 
-  const handleDeleteShop = async (id: string, name: string) => {
-    if (confirm(`Are you sure you want to delete "${name}"?`)) {
-      await deleteShop(id);
-      await loadData();
-    }
+  const openEditModal = (p: Product) => {
+    setEditingProduct(p);
+    setProdName(p.name);
+    setProdSku(p.sku);
+    setProdCategory((p.category as ProductCategory) || 'Mobile Cases');
+    setProdMinStock(p.minStock ?? 10);
+    setIsModalOpen(true);
   };
 
-  const handleAddProduct = async (e: React.FormEvent) => {
+  const handleSaveProduct = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!prodName.trim() || !prodSku.trim()) return;
 
-    await saveProduct({
-      name: prodName.trim(),
-      sku: prodSku.trim().toUpperCase(),
-      category: prodCategory,
-      minStock: prodMinStock,
-      isActive: true
-    });
+    setIsSaving(true);
+    try {
+      await saveProduct({
+        id: editingProduct?.id,
+        name: prodName.trim(),
+        sku: prodSku.trim().toUpperCase(),
+        category: prodCategory,
+        minStock: Number(prodMinStock) || 5,
+        isActive: true
+      });
 
-    setIsProductModalOpen(false);
-    setProdName('');
-    setProdSku('');
-    setProdMinStock(5);
-    await loadData();
+      setIsModalOpen(false);
+      await loadData();
+    } catch (err) {
+      console.error('Failed to save product:', err);
+      alert('Error saving product to database.');
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   const handleDeleteProduct = async (id: string, name: string) => {
-    if (confirm(`Are you sure you want to delete "${name}"?`)) {
-      await deleteProduct(id);
-      await loadData();
+    if (window.confirm(`Are you sure you want to remove "${name}" from the catalog?`)) {
+      try {
+        await deleteProduct(id);
+        await loadData();
+      } catch (err) {
+        console.error('Failed to delete product:', err);
+      }
     }
   };
 
-  const handleResetData = () => {
-    if (confirm('Are you sure you want to clear all business data and return to a fresh empty state?')) {
-      resetWorkspaceToCleanEmptyState();
-      loadData();
-    }
-  };
+  // Filtered products
+  const filteredProducts = useMemo(() => {
+    return products.filter(p => {
+      const matchesSearch = 
+        p.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        p.sku.toLowerCase().includes(searchQuery.toLowerCase());
+      const matchesCategory = selectedCategory === 'all' || p.category === selectedCategory;
+      return matchesSearch && matchesCategory;
+    });
+  }, [products, searchQuery, selectedCategory]);
+
+  // Category counts
+  const categoryCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    products.forEach(p => {
+      counts[p.category] = (counts[p.category] || 0) + 1;
+    });
+    return counts;
+  }, [products]);
 
   return (
-    <div className="space-y-6">
-      {/* Header and Quick Actions */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+    <div className="space-y-5">
+      {/* Page Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 pb-1 border-b border-slate-200">
         <div>
-          <h1 className="text-xl font-bold text-slate-900">Catalog & Retail Stores</h1>
+          <div className="flex items-center space-x-2">
+            <h1 className="text-xl font-bold tracking-tight text-slate-900">Product Catalog</h1>
+            <Badge variant="neutral" size="sm">
+              {products.length} SKUs
+            </Badge>
+          </div>
           <p className="text-xs text-slate-500 mt-0.5">
-            Configure partner retail store locations and your wholesale accessories product catalog.
+            Master SKU catalog, product categories, and reorder threshold levels across all partner shops.
           </p>
         </div>
-        <div className="flex items-center space-x-2">
-          {activeTab === 'shops' ? (
-            <Button variant="primary" size="sm" onClick={() => setIsShopModalOpen(true)}>
-              <Plus className="w-3.5 h-3.5 mr-1.5" />
-              Add Shop
+
+        <div className="flex items-center space-x-2.5">
+          <Link to="/shops">
+            <Button variant="outline" size="sm">
+              <Store className="w-3.5 h-3.5 mr-1.5 text-slate-500" />
+              <span>Shop Workspace ({shops.length})</span>
             </Button>
-          ) : (
-            <Button variant="primary" size="sm" onClick={() => setIsProductModalOpen(true)}>
-              <Plus className="w-3.5 h-3.5 mr-1.5" />
-              Add Product
-            </Button>
-          )}
-          {(shops.length > 0 || products.length > 0) && (
-            <Button variant="outline" size="sm" onClick={handleResetData} title="Reset all data to clean empty state">
-              <RotateCcw className="w-3.5 h-3.5 mr-1.5 text-slate-500" />
-              Clear Workspace
-            </Button>
-          )}
+          </Link>
+          <Button variant="primary" size="sm" onClick={openAddModal}>
+            <Plus className="w-3.5 h-3.5 mr-1.5" />
+            <span>Add New Product</span>
+          </Button>
         </div>
       </div>
 
-      {/* Navigation Tabs */}
-      <div className="flex border-b border-slate-200 space-x-4">
-        <button
-          onClick={() => setActiveTab('shops')}
-          className={`flex items-center space-x-2 py-3 px-1 border-b-2 font-semibold text-xs transition-colors ${
-            activeTab === 'shops'
-              ? 'border-crimpston-electric text-crimpston-electric'
-              : 'border-transparent text-slate-500 hover:text-slate-700'
-          }`}
-        >
-          <Store className="w-4 h-4" />
-          <span>Retail Stores ({shops.length})</span>
-        </button>
-        <button
-          onClick={() => setActiveTab('products')}
-          className={`flex items-center space-x-2 py-3 px-1 border-b-2 font-semibold text-xs transition-colors ${
-            activeTab === 'products'
-              ? 'border-crimpston-electric text-crimpston-electric'
-              : 'border-transparent text-slate-500 hover:text-slate-700'
-          }`}
-        >
-          <Package className="w-4 h-4" />
-          <span>Product Catalog ({products.length})</span>
-        </button>
+      {/* KPI / Metric Ribbon */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <div className="p-3 bg-white rounded-lg border border-slate-200 shadow-xs">
+          <span className="text-[11px] font-medium text-slate-500 uppercase tracking-wider block">Total SKUs</span>
+          <span className="text-lg font-bold font-mono text-slate-900 tabular-nums">{products.length}</span>
+        </div>
+        <div className="p-3 bg-white rounded-lg border border-slate-200 shadow-xs">
+          <span className="text-[11px] font-medium text-slate-500 uppercase tracking-wider block">Categories</span>
+          <span className="text-lg font-bold font-mono text-slate-900 tabular-nums">{Object.keys(categoryCounts).length}</span>
+        </div>
+        <div className="p-3 bg-white rounded-lg border border-slate-200 shadow-xs">
+          <span className="text-[11px] font-medium text-slate-500 uppercase tracking-wider block">Active Products</span>
+          <span className="text-lg font-bold font-mono text-emerald-600 tabular-nums">
+            {products.filter(p => p.isActive).length}
+          </span>
+        </div>
+        <div className="p-3 bg-white rounded-lg border border-slate-200 shadow-xs">
+          <span className="text-[11px] font-medium text-slate-500 uppercase tracking-wider block">Partner Shops</span>
+          <span className="text-lg font-bold font-mono text-slate-900 tabular-nums">{shops.length}</span>
+        </div>
       </div>
 
-      {/* Tab 1: Shops */}
-      {activeTab === 'shops' && (
-        <Card title="Active Retail Shops">
-          {isLoading ? (
-            <div className="py-8 text-center text-xs text-slate-400">Loading shops...</div>
-          ) : shops.length === 0 ? (
-            <div className="text-center py-12 px-4">
-              <div className="w-12 h-12 rounded-xl bg-slate-100 text-slate-400 flex items-center justify-center mx-auto mb-3">
-                <Store className="w-6 h-6" />
-              </div>
-              <h3 className="text-sm font-bold text-slate-800">No shops added yet</h3>
-              <p className="text-xs text-slate-500 max-w-sm mx-auto mt-1 mb-4">
-                Get started by adding your first retail partner shop to track accessories delivery and sales.
-              </p>
-              <Button variant="primary" size="sm" onClick={() => setIsShopModalOpen(true)}>
-                <Plus className="w-3.5 h-3.5 mr-1.5" />
-                Add First Shop
-              </Button>
-            </div>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs">
-                <thead className="bg-slate-50 text-slate-500 font-semibold border-b border-slate-100">
-                  <tr>
-                    <th className="py-2.5 px-3">Shop Code</th>
-                    <th className="py-2.5 px-3">Store Name</th>
-                    <th className="py-2.5 px-3">Address</th>
-                    <th className="py-2.5 px-3">Phone</th>
-                    <th className="py-2.5 px-3">Status</th>
-                    <th className="py-2.5 px-3 text-right">Actions</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100">
-                  {shops.map(shop => (
-                    <tr key={shop.id} className="hover:bg-slate-50/50">
-                      <td className="py-3 px-3 font-mono font-bold text-slate-700">{shop.code}</td>
-                      <td className="py-3 px-3 font-semibold text-slate-900">{shop.name}</td>
-                      <td className="py-3 px-3 text-slate-500">{shop.address || '-'}</td>
-                      <td className="py-3 px-3 text-slate-500">{shop.phone || '-'}</td>
-                      <td className="py-3 px-3">
-                        <Badge variant={shop.isActive ? 'success' : 'neutral'}>
-                          {shop.isActive ? 'Active' : 'Archived'}
-                        </Badge>
-                      </td>
-                      <td className="py-3 px-3 text-right">
-                        <Button 
-                          variant="ghost" 
-                          size="sm"
-                          onClick={() => handleDeleteShop(shop.id, shop.name)}
-                          className="text-slate-400 hover:text-rose-600"
-                          title="Delete Shop"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </Button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </Card>
-      )}
+      {/* Filter and Category Ribbon */}
+      <div className="bg-white rounded-lg border border-slate-200 p-3 shadow-xs space-y-3">
+        {/* Search & Category Filter Row */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="relative flex-1 max-w-sm">
+            <Search className="w-4 h-4 absolute left-3 top-2.5 text-slate-400" />
+            <input
+              type="text"
+              placeholder="Search by product name or SKU..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="w-full pl-9 pr-3 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-600 focus:bg-white text-slate-900 placeholder:text-slate-400"
+            />
+          </div>
 
-      {/* Tab 2: Products */}
-      {activeTab === 'products' && (
-        <Card title="Catalog Products & Thresholds">
-          {isLoading ? (
-            <div className="py-8 text-center text-xs text-slate-400">Loading products...</div>
-          ) : products.length === 0 ? (
-            <div className="text-center py-12 px-4">
-              <div className="w-12 h-12 rounded-xl bg-slate-100 text-slate-400 flex items-center justify-center mx-auto mb-3">
-                <Package className="w-6 h-6" />
-              </div>
-              <h3 className="text-sm font-bold text-slate-800">No products added yet</h3>
-              <p className="text-xs text-slate-500 max-w-sm mx-auto mt-1 mb-4">
-                Add accessory items (cases, tempered glass, chargers, cables) to your catalog.
-              </p>
-              <Button variant="primary" size="sm" onClick={() => setIsProductModalOpen(true)}>
+          <div className="text-xs text-slate-500">
+            Showing <strong className="text-slate-800 tabular-nums">{filteredProducts.length}</strong> of {products.length} items
+          </div>
+        </div>
+
+        {/* Category Filter Pills */}
+        <div className="flex items-center gap-1.5 overflow-x-auto pb-1 text-xs">
+          <button
+            onClick={() => setSelectedCategory('all')}
+            className={`px-2.5 py-1 rounded-md font-medium text-xs whitespace-nowrap transition-colors ${
+              selectedCategory === 'all'
+                ? 'bg-slate-900 text-white shadow-xs'
+                : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+            }`}
+          >
+            All Categories ({products.length})
+          </button>
+          {CATEGORIES.map(cat => {
+            const count = categoryCounts[cat] || 0;
+            return (
+              <button
+                key={cat}
+                onClick={() => setSelectedCategory(cat)}
+                className={`px-2.5 py-1 rounded-md font-medium text-xs whitespace-nowrap transition-colors ${
+                  selectedCategory === cat
+                    ? 'bg-slate-900 text-white shadow-xs'
+                    : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                }`}
+              >
+                {cat} {count > 0 ? `(${count})` : ''}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Main Product Table */}
+      <Card title={`Wholesale Product Catalog (${filteredProducts.length})`}>
+        {isLoading ? (
+          <div className="py-12 text-center text-xs text-slate-400">Loading catalog from database...</div>
+        ) : filteredProducts.length === 0 ? (
+          <div className="text-center py-12 px-4">
+            <div className="w-10 h-10 rounded-lg bg-slate-100 text-slate-400 flex items-center justify-center mx-auto mb-3">
+              <Package className="w-5 h-5" />
+            </div>
+            <h3 className="text-sm font-semibold text-slate-800">No matching products found</h3>
+            <p className="text-xs text-slate-500 max-w-sm mx-auto mt-1 mb-4">
+              {searchQuery || selectedCategory !== 'all'
+                ? 'No items match your active search or category filters. Try clearing them.'
+                : 'Get started by creating your wholesale accessories catalog items.'}
+            </p>
+            {searchQuery || selectedCategory !== 'all' ? (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  setSearchQuery('');
+                  setSelectedCategory('all');
+                }}
+              >
+                Clear Filters
+              </Button>
+            ) : (
+              <Button variant="primary" size="sm" onClick={openAddModal}>
                 <Plus className="w-3.5 h-3.5 mr-1.5" />
                 Add First Product
               </Button>
-            </div>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs">
-                <thead className="bg-slate-50 text-slate-500 font-semibold border-b border-slate-100">
-                  <tr>
-                    <th className="py-2.5 px-3">SKU</th>
-                    <th className="py-2.5 px-3">Product Name</th>
-                    <th className="py-2.5 px-3">Category</th>
-                    <th className="py-2.5 px-3 text-right">Min Threshold</th>
-                    <th className="py-2.5 px-3">Status</th>
-                    <th className="py-2.5 px-3 text-right">Actions</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100">
-                  {products.map(prod => (
-                    <tr key={prod.id} className="hover:bg-slate-50/50">
-                      <td className="py-3 px-3 font-mono font-bold text-slate-700">{prod.sku}</td>
-                      <td className="py-3 px-3 font-semibold text-slate-900">{prod.name}</td>
-                      <td className="py-3 px-3 text-slate-600">{prod.category}</td>
-                      <td className="py-3 px-3 text-right font-medium text-slate-800">{prod.minStock} pcs</td>
-                      <td className="py-3 px-3">
-                        <Badge variant={prod.isActive ? 'success' : 'neutral'}>
-                          {prod.isActive ? 'Active' : 'Archived'}
-                        </Badge>
-                      </td>
-                      <td className="py-3 px-3 text-right">
+            )}
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-xs">
+              <thead className="bg-slate-50/80 text-slate-500 font-semibold border-b border-slate-200">
+                <tr>
+                  <th className="py-2.5 px-3">SKU</th>
+                  <th className="py-2.5 px-3">Product Name</th>
+                  <th className="py-2.5 px-3">Category</th>
+                  <th className="py-2.5 px-3 text-right">Min Threshold</th>
+                  <th className="py-2.5 px-3 text-center">Status</th>
+                  <th className="py-2.5 px-3 text-right">Actions</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {filteredProducts.map(prod => (
+                  <tr key={prod.id} className="hover:bg-slate-50/60 transition-colors">
+                    <td className="py-2.5 px-3 font-mono font-bold text-slate-800 tabular-nums">
+                      {prod.sku}
+                    </td>
+                    <td className="py-2.5 px-3 font-medium text-slate-900">
+                      {prod.name}
+                    </td>
+                    <td className="py-2.5 px-3">
+                      <span className="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-medium bg-slate-100 text-slate-700">
+                        {prod.category}
+                      </span>
+                    </td>
+                    <td className="py-2.5 px-3 text-right font-mono font-semibold text-slate-700 tabular-nums">
+                      {prod.minStock ?? 5} pcs
+                    </td>
+                    <td className="py-2.5 px-3 text-center">
+                      <Badge variant={prod.isActive ? 'success' : 'neutral'} size="sm">
+                        {prod.isActive ? 'Active' : 'Archived'}
+                      </Badge>
+                    </td>
+                    <td className="py-2.5 px-3 text-right">
+                      <div className="flex items-center justify-end space-x-1">
+                        <Button 
+                          variant="ghost" 
+                          size="sm"
+                          onClick={() => openEditModal(prod)}
+                          className="text-slate-600 hover:text-slate-900 px-2 py-1 h-auto text-xs"
+                        >
+                          Edit
+                        </Button>
                         <Button 
                           variant="ghost" 
                           size="sm"
                           onClick={() => handleDeleteProduct(prod.id, prod.name)}
-                          className="text-slate-400 hover:text-rose-600"
+                          className="text-slate-400 hover:text-rose-600 px-2 py-1 h-auto text-xs"
                           title="Delete Product"
                         >
                           <Trash2 className="w-3.5 h-3.5" />
                         </Button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </Card>
-      )}
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Card>
 
-      {/* Add Shop Modal */}
-      <Modal isOpen={isShopModalOpen} onClose={() => setIsShopModalOpen(false)} title="Add Retail Partner Shop">
-        <form onSubmit={handleAddShop} className="space-y-4">
-          <Input
-            label="Shop Name"
-            placeholder="e.g. Metro Mobile Care"
-            value={shopName}
-            onChange={(e) => setShopName(e.target.value)}
-            required
-          />
-          <div className="grid grid-cols-2 gap-3">
-            <Input
-              label="Shop Code"
-              placeholder="e.g. SH-01"
-              value={shopCode}
-              onChange={(e) => setShopCode(e.target.value)}
-              required
-            />
-            <Input
-              label="Phone Number"
-              placeholder="e.g. +91 9876543210"
-              value={shopPhone}
-              onChange={(e) => setShopPhone(e.target.value)}
-            />
-          </div>
-          <div>
-            <label className="block text-xs font-semibold text-slate-700 mb-1">Store Address</label>
-            <textarea
-              rows={2}
-              value={shopAddress}
-              onChange={(e) => setShopAddress(e.target.value)}
-              placeholder="e.g. Shop 12, Commercial Complex, Sector 4"
-              className="w-full text-xs p-2.5 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-crimpston-electric"
-            />
-          </div>
-          <div className="pt-2 flex justify-end space-x-2">
-            <Button variant="ghost" size="sm" type="button" onClick={() => setIsShopModalOpen(false)}>
-              Cancel
-            </Button>
-            <Button variant="primary" size="sm" type="submit">
-              Save Shop
-            </Button>
-          </div>
-        </form>
-      </Modal>
-
-      {/* Add Product Modal */}
-      <Modal isOpen={isProductModalOpen} onClose={() => setIsProductModalOpen(false)} title="Add Catalog Product">
-        <form onSubmit={handleAddProduct} className="space-y-4">
+      {/* Add / Edit Product Modal */}
+      <Modal 
+        isOpen={isModalOpen} 
+        onClose={() => setIsModalOpen(false)} 
+        title={editingProduct ? "Edit Catalog Product" : "Add New Catalog Product"}
+      >
+        <form onSubmit={handleSaveProduct} className="space-y-4">
           <Input
             label="Product Name"
             placeholder="e.g. 65W GaN Fast Charger"
@@ -364,7 +362,7 @@ export const CatalogManagement: React.FC = () => {
           />
           <div className="grid grid-cols-2 gap-3">
             <Input
-              label="SKU"
+              label="SKU Code"
               placeholder="e.g. CHG-65W-GAN"
               value={prodSku}
               onChange={(e) => setProdSku(e.target.value)}
@@ -384,22 +382,19 @@ export const CatalogManagement: React.FC = () => {
             <select
               value={prodCategory}
               onChange={(e) => setProdCategory(e.target.value as ProductCategory)}
-              className="w-full text-xs p-2.5 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-crimpston-electric bg-white"
+              className="w-full text-xs p-2.5 rounded-md border border-slate-200 focus:outline-none focus:ring-1 focus:ring-blue-600 bg-white"
             >
-              <option value="Mobile Cases">Mobile Cases</option>
-              <option value="Tempered Glass">Tempered Glass</option>
-              <option value="Chargers & Adapters">Chargers & Adapters</option>
-              <option value="USB Cables">USB Cables</option>
-              <option value="Earphones & Audio">Earphones & Audio</option>
-              <option value="Other Accessories">Other Accessories</option>
+              {CATEGORIES.map(cat => (
+                <option key={cat} value={cat}>{cat}</option>
+              ))}
             </select>
           </div>
           <div className="pt-2 flex justify-end space-x-2">
-            <Button variant="ghost" size="sm" type="button" onClick={() => setIsProductModalOpen(false)}>
+            <Button variant="ghost" size="sm" type="button" onClick={() => setIsModalOpen(false)}>
               Cancel
             </Button>
-            <Button variant="primary" size="sm" type="submit">
-              Save Product
+            <Button variant="primary" size="sm" type="submit" isLoading={isSaving}>
+              {editingProduct ? "Update Product" : "Save Product"}
             </Button>
           </div>
         </form>

@@ -11,6 +11,6 @@ export const isSupabaseConfigured = Boolean(
   !supabaseUrl.includes('placeholder')
 );
 
-export const supabase: SupabaseClient<Database> | null = isSupabaseConfigured
-  ? createClient<Database>(supabaseUrl, supabaseAnonKey)
+export const supabase: SupabaseClient<any> | null = isSupabaseConfigured
+  ? (createClient<Database>(supabaseUrl, supabaseAnonKey) as unknown as SupabaseClient<any>)
   : null;

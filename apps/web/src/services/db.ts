@@ -136,6 +136,37 @@ function setLocalItem<T>(key: string, value: T): void {
   }
 }
 
+const DEFAULT_BUSINESS_ID = '4fba6fb7-4e1b-4106-ac84-908f821d73c3';
+let cachedBusinessId: string | null = null;
+
+async function getBusinessId(): Promise<string> {
+  if (cachedBusinessId) return cachedBusinessId;
+  if (isSupabaseConfigured && supabase) {
+    try {
+      const { data } = await supabase.from('businesses').select('id').limit(1).maybeSingle();
+      if (data?.id) {
+        cachedBusinessId = data.id;
+        return data.id;
+      }
+    } catch (e) {
+      console.warn('Failed to resolve business id:', e);
+    }
+  }
+  return DEFAULT_BUSINESS_ID;
+}
+
+async function getCurrentUserId(): Promise<string> {
+  if (isSupabaseConfigured && supabase) {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user?.id) return user.id;
+    } catch (e) {
+      console.warn('Failed to resolve current user id:', e);
+    }
+  }
+  return 'b46689e9-754e-49b5-b79b-ebc1ee42538f';
+}
+
 function generateId(prefix: string): string {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
 }
@@ -145,18 +176,24 @@ function generateId(prefix: string): string {
 // ----------------------------------------------------
 export async function getShops(): Promise<Shop[]> {
   if (isSupabaseConfigured && supabase) {
-    const { data, error } = await supabase.from('shops').select('*').order('name');
-    if (!error && data) {
-      return (data as unknown as ShopRow[]).map(s => ({
-        id: s.id,
-        name: s.name,
-        code: s.code,
-        address: s.address || '',
-        phone: s.phone || '',
-        isActive: s.is_active ?? true,
-        assignedEmployees: [],
-        createdAt: s.created_at
-      }));
+    try {
+      const { data, error } = await supabase.from('shops').select('*').order('name');
+      if (!error && data) {
+        const shops: Shop[] = (data as unknown as ShopRow[]).map(s => ({
+          id: s.id,
+          name: s.name,
+          code: s.code,
+          address: s.address || '',
+          phone: s.phone || '',
+          isActive: s.is_active ?? true,
+          assignedEmployees: [],
+          createdAt: s.created_at
+        }));
+        setLocalItem(STORAGE_KEYS.SHOPS, shops);
+        return shops;
+      }
+    } catch (err) {
+      console.warn('Supabase getShops error, using local fallback:', err);
     }
   }
   return getLocalItem<Shop[]>(STORAGE_KEYS.SHOPS, []);
@@ -165,6 +202,85 @@ export async function getShops(): Promise<Shop[]> {
 export async function saveShop(input: Omit<Shop, 'id'> & { id?: string }): Promise<Shop> {
   const shops = await getShops();
   const now = new Date().toISOString();
+
+  if (isSupabaseConfigured && supabase) {
+    try {
+      const businessId = await getBusinessId();
+      const userId = await getCurrentUserId();
+
+      if (input.id && !input.id.startsWith('shop-')) {
+        const { data, error } = await supabase
+          .from('shops')
+          .update({
+            name: input.name,
+            code: input.code,
+            address: input.address,
+            phone: input.phone,
+            is_active: input.isActive,
+            updated_at: now
+          })
+          .eq('id', input.id)
+          .select()
+          .single();
+
+        if (!error && data) {
+          const updated: Shop = {
+            id: data.id,
+            name: data.name,
+            code: data.code,
+            address: data.address || '',
+            phone: data.phone || '',
+            isActive: data.is_active ?? true,
+            assignedEmployees: input.assignedEmployees || [],
+            createdAt: data.created_at
+          };
+          const next = shops.map(s => s.id === updated.id ? updated : s);
+          setLocalItem(STORAGE_KEYS.SHOPS, next);
+          return updated;
+        }
+      } else {
+        const { data, error } = await supabase
+          .from('shops')
+          .insert({
+            business_id: businessId,
+            name: input.name,
+            code: input.code,
+            address: input.address,
+            phone: input.phone,
+            is_active: input.isActive ?? true
+          })
+          .select()
+          .single();
+
+        if (!error && data) {
+          // Assign creator to shop_memberships so RLS policies allow report operations
+          try {
+            await supabase.from('shop_memberships').insert({
+              shop_id: data.id,
+              user_id: userId
+            });
+          } catch {
+            // Already member
+          }
+
+          const created: Shop = {
+            id: data.id,
+            name: data.name,
+            code: data.code,
+            address: data.address || '',
+            phone: data.phone || '',
+            isActive: data.is_active ?? true,
+            assignedEmployees: input.assignedEmployees || [],
+            createdAt: data.created_at
+          };
+          setLocalItem(STORAGE_KEYS.SHOPS, [...shops, created]);
+          return created;
+        }
+      }
+    } catch (err) {
+      console.warn('Supabase saveShop error, using local fallback:', err);
+    }
+  }
 
   if (input.id) {
     const updated = shops.map(s => s.id === input.id ? { ...s, ...input } : s);
@@ -182,6 +298,13 @@ export async function saveShop(input: Omit<Shop, 'id'> & { id?: string }): Promi
 }
 
 export async function deleteShop(id: string): Promise<void> {
+  if (isSupabaseConfigured && supabase && !id.startsWith('shop-')) {
+    try {
+      await supabase.from('shops').delete().eq('id', id);
+    } catch (err) {
+      console.warn('Supabase deleteShop error:', err);
+    }
+  }
   const shops = await getShops();
   setLocalItem(STORAGE_KEYS.SHOPS, shops.filter(s => s.id !== id));
 }
@@ -191,19 +314,31 @@ export async function deleteShop(id: string): Promise<void> {
 // ----------------------------------------------------
 export async function getProducts(): Promise<Product[]> {
   if (isSupabaseConfigured && supabase) {
-    const { data, error } = await supabase.from('products').select('*').order('name');
-    if (!error && data) {
-      return (data as unknown as ProductRow[]).map(p => ({
-        id: p.id,
-        name: p.name,
-        sku: p.sku,
-        category: p.category as ProductCategory,
-        minStock: p.min_stock_threshold || 0,
-        unitPrice: p.unit_price || 0,
-        costPrice: p.cost_price ?? null,
-        isActive: p.is_active ?? true,
-        createdAt: p.created_at
-      }));
+    try {
+      const { data, error } = await supabase.from('products').select('*').order('name');
+      if (!error && data) {
+        const localProds = getLocalItem<Product[]>(STORAGE_KEYS.PRODUCTS, []);
+        const localMap = new Map(localProds.map(p => [p.id, p]));
+
+        const prods: Product[] = (data as unknown as ProductRow[]).map(p => {
+          const local = localMap.get(p.id);
+          return {
+            id: p.id,
+            name: p.name,
+            sku: p.sku,
+            category: p.category as ProductCategory,
+            minStock: p.min_stock_threshold || 0,
+            unitPrice: (p as any).unit_price ?? local?.unitPrice ?? 0,
+            costPrice: (p as any).cost_price ?? local?.costPrice ?? null,
+            isActive: p.is_active ?? true,
+            createdAt: p.created_at
+          };
+        });
+        setLocalItem(STORAGE_KEYS.PRODUCTS, prods);
+        return prods;
+      }
+    } catch (err) {
+      console.warn('Supabase getProducts error, using local fallback:', err);
     }
   }
   return getLocalItem<Product[]>(STORAGE_KEYS.PRODUCTS, []);
@@ -212,6 +347,77 @@ export async function getProducts(): Promise<Product[]> {
 export async function saveProduct(input: Omit<Product, 'id'> & { id?: string }): Promise<Product> {
   const products = await getProducts();
   const now = new Date().toISOString();
+
+  if (isSupabaseConfigured && supabase) {
+    try {
+      const businessId = await getBusinessId();
+
+      if (input.id && !input.id.startsWith('prod-')) {
+        const { data, error } = await supabase
+          .from('products')
+          .update({
+            name: input.name,
+            sku: input.sku,
+            category: input.category,
+            min_stock_threshold: input.minStock,
+            is_active: input.isActive,
+            updated_at: now
+          })
+          .eq('id', input.id)
+          .select()
+          .single();
+
+        if (!error && data) {
+          const updated: Product = {
+            id: data.id,
+            name: data.name,
+            sku: data.sku,
+            category: data.category as ProductCategory,
+            minStock: data.min_stock_threshold || 0,
+            unitPrice: input.unitPrice ?? 0,
+            costPrice: input.costPrice ?? null,
+            isActive: data.is_active ?? true,
+            createdAt: data.created_at
+          };
+          const next = products.map(p => p.id === updated.id ? updated : p);
+          setLocalItem(STORAGE_KEYS.PRODUCTS, next);
+          return updated;
+        }
+      } else {
+        const { data, error } = await supabase
+          .from('products')
+          .insert({
+            business_id: businessId,
+            name: input.name,
+            sku: input.sku,
+            category: input.category,
+            unit_of_measure: 'piece',
+            min_stock_threshold: input.minStock || 0,
+            is_active: input.isActive ?? true
+          })
+          .select()
+          .single();
+
+        if (!error && data) {
+          const created: Product = {
+            id: data.id,
+            name: data.name,
+            sku: data.sku,
+            category: data.category as ProductCategory,
+            minStock: data.min_stock_threshold || 0,
+            unitPrice: input.unitPrice ?? 0,
+            costPrice: input.costPrice ?? null,
+            isActive: data.is_active ?? true,
+            createdAt: data.created_at
+          };
+          setLocalItem(STORAGE_KEYS.PRODUCTS, [...products, created]);
+          return created;
+        }
+      }
+    } catch (err) {
+      console.warn('Supabase saveProduct error, using local fallback:', err);
+    }
+  }
 
   if (input.id) {
     const updated = products.map(p => p.id === input.id ? { ...p, ...input } : p);
@@ -231,6 +437,13 @@ export async function saveProduct(input: Omit<Product, 'id'> & { id?: string }):
 }
 
 export async function deleteProduct(id: string): Promise<void> {
+  if (isSupabaseConfigured && supabase && !id.startsWith('prod-')) {
+    try {
+      await supabase.from('products').delete().eq('id', id);
+    } catch (err) {
+      console.warn('Supabase deleteProduct error:', err);
+    }
+  }
   const products = await getProducts();
   setLocalItem(STORAGE_KEYS.PRODUCTS, products.filter(p => p.id !== id));
 }
@@ -239,10 +452,106 @@ export async function deleteProduct(id: string): Promise<void> {
 // DELIVERIES
 // ----------------------------------------------------
 export async function getDeliveries(): Promise<DeliveryRecord[]> {
+  if (isSupabaseConfigured && supabase) {
+    try {
+      const { data, error } = await supabase
+        .from('deliveries')
+        .select('*, delivery_items(*)')
+        .order('delivery_date', { ascending: false });
+
+      if (!error && data) {
+        const [shops, prods] = await Promise.all([getShops(), getProducts()]);
+        const shopMap = new Map(shops.map(s => [s.id, s.name]));
+        const prodMap = new Map(prods.map(p => [p.id, p]));
+
+        const deliveries: DeliveryRecord[] = data.map((d: any) => ({
+          id: d.id,
+          shopId: d.shop_id,
+          shopName: shopMap.get(d.shop_id) || 'Retail Store',
+          deliveryDate: d.delivery_date,
+          status: d.status as 'delivered' | 'pending' | 'cancelled',
+          notes: d.notes || '',
+          createdBy: 'Business Owner',
+          items: (d.delivery_items || []).map((i: any) => ({
+            productId: i.product_id,
+            productName: prodMap.get(i.product_id)?.name || 'Product',
+            productSku: prodMap.get(i.product_id)?.sku || '',
+            quantity: i.quantity
+          })),
+          createdAt: d.created_at
+        }));
+        setLocalItem(STORAGE_KEYS.DELIVERIES, deliveries);
+        return deliveries;
+      }
+    } catch (err) {
+      console.warn('Supabase getDeliveries error, using local fallback:', err);
+    }
+  }
   return getLocalItem<DeliveryRecord[]>(STORAGE_KEYS.DELIVERIES, []);
 }
 
 export async function recordDelivery(input: Omit<DeliveryRecord, 'id' | 'createdAt'>): Promise<DeliveryRecord> {
+  if (isSupabaseConfigured && supabase) {
+    try {
+      const businessId = await getBusinessId();
+      const userId = await getCurrentUserId();
+
+      // 1. Insert delivery record
+      const { data: delivData, error: delivErr } = await supabase
+        .from('deliveries')
+        .insert({
+          business_id: businessId,
+          shop_id: input.shopId,
+          delivery_date: input.deliveryDate,
+          status: input.status,
+          notes: input.notes || null,
+          created_by: userId
+        })
+        .select()
+        .single();
+
+      if (delivErr) {
+        console.error('Supabase recordDelivery error:', delivErr);
+      } else if (delivData) {
+        // 2. Insert items
+        const itemsToInsert = input.items.map(item => ({
+          delivery_id: delivData.id,
+          product_id: item.productId,
+          quantity: item.quantity
+        }));
+
+        await supabase.from('delivery_items').insert(itemsToInsert);
+
+        // 3. Insert stock movement
+        if (input.status === 'delivered') {
+          const movements = input.items.map(item => ({
+            business_id: businessId,
+            shop_id: input.shopId,
+            product_id: item.productId,
+            movement_type: 'DELIVERY_IN',
+            quantity: item.quantity,
+            reference_id: delivData.id,
+            is_provisional: false,
+            reason: `Delivery supply #${delivData.id.slice(-6)}`,
+            actor_id: userId
+          }));
+          await supabase.from('stock_movements').insert(movements);
+        }
+
+        const newDelivery: DeliveryRecord = {
+          ...input,
+          id: delivData.id,
+          createdAt: delivData.created_at
+        };
+        const localDeliveries = getLocalItem<DeliveryRecord[]>(STORAGE_KEYS.DELIVERIES, []);
+        setLocalItem(STORAGE_KEYS.DELIVERIES, [newDelivery, ...localDeliveries]);
+        return newDelivery;
+      }
+    } catch (err) {
+      console.warn('Supabase recordDelivery exception, using local fallback:', err);
+    }
+  }
+
   const deliveries = await getDeliveries();
   const newDelivery: DeliveryRecord = {
     ...input,
@@ -257,10 +566,110 @@ export async function recordDelivery(input: Omit<DeliveryRecord, 'id' | 'created
 // DAILY REPORTS
 // ----------------------------------------------------
 export async function getDailyReports(): Promise<DailyReportRecord[]> {
+  if (isSupabaseConfigured && supabase) {
+    try {
+      const { data, error } = await supabase
+        .from('daily_reports')
+        .select('*, daily_report_items(*)')
+        .order('report_date', { ascending: false });
+
+      if (!error && data) {
+        const [shops, prods] = await Promise.all([getShops(), getProducts()]);
+        const shopMap = new Map(shops.map(s => [s.id, s.name]));
+        const prodMap = new Map(prods.map(p => [p.id, p]));
+
+        const reports: DailyReportRecord[] = data.map((r: any) => {
+          const items = (r.daily_report_items || []).map((i: any) => ({
+            productId: i.product_id,
+            productName: prodMap.get(i.product_id)?.name || 'Product',
+            quantitySold: i.quantity_sold,
+            physicalCount: null
+          }));
+          const totalQuantitySold = items.reduce((s: number, i: any) => s + i.quantitySold, 0);
+
+          return {
+            id: r.id,
+            shopId: r.shop_id,
+            shopName: shopMap.get(r.shop_id) || 'Retail Store',
+            reportDate: r.report_date,
+            isZeroSales: r.is_zero_sales,
+            status: r.status as 'submitted' | 'approved' | 'rejected',
+            submittedBy: 'Store Staff',
+            submittedAt: new Date(r.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+            notes: r.notes || '',
+            items,
+            totalQuantitySold,
+            createdAt: r.created_at
+          };
+        });
+        setLocalItem(STORAGE_KEYS.REPORTS, reports);
+        return reports;
+      }
+    } catch (err) {
+      console.warn('Supabase getDailyReports error, using local fallback:', err);
+    }
+  }
   return getLocalItem<DailyReportRecord[]>(STORAGE_KEYS.REPORTS, []);
 }
 
 export async function submitDailyReport(input: Omit<DailyReportRecord, 'id' | 'createdAt'>): Promise<DailyReportRecord> {
+  if (isSupabaseConfigured && supabase) {
+    try {
+      const businessId = await getBusinessId();
+      const userId = await getCurrentUserId();
+
+      // Ensure shop membership exists for current user so RLS check passes
+      try {
+        await supabase.from('shop_memberships').insert({
+          shop_id: input.shopId,
+          user_id: userId
+        });
+      } catch {
+        // Membership already exists
+      }
+
+      // 1. Insert daily_report
+      const { data: repData, error: repErr } = await supabase
+        .from('daily_reports')
+        .insert({
+          business_id: businessId,
+          shop_id: input.shopId,
+          report_date: input.reportDate,
+          is_zero_sales: input.isZeroSales,
+          status: input.status,
+          notes: input.notes || null,
+          submitted_by: userId
+        })
+        .select()
+        .single();
+
+      if (repErr) {
+        console.error('Supabase submitDailyReport error:', repErr);
+      } else if (repData) {
+        // 2. Insert items
+        if (!input.isZeroSales && input.items.length > 0) {
+          const itemsToInsert = input.items.map(item => ({
+            report_id: repData.id,
+            product_id: item.productId,
+            quantity_sold: item.quantitySold
+          }));
+          await supabase.from('daily_report_items').insert(itemsToInsert);
+        }
+
+        const newReport: DailyReportRecord = {
+          ...input,
+          id: repData.id,
+          createdAt: repData.created_at
+        };
+        const localReports = getLocalItem<DailyReportRecord[]>(STORAGE_KEYS.REPORTS, []);
+        setLocalItem(STORAGE_KEYS.REPORTS, [newReport, ...localReports]);
+        return newReport;
+      }
+    } catch (err) {
+      console.warn('Supabase submitDailyReport exception, using local fallback:', err);
+    }
+  }
+
   const reports = await getDailyReports();
   const newReport: DailyReportRecord = {
     ...input,
@@ -272,6 +681,50 @@ export async function submitDailyReport(input: Omit<DailyReportRecord, 'id' | 'c
 }
 
 export async function approveDailyReport(id: string): Promise<void> {
+  if (isSupabaseConfigured && supabase && !id.startsWith('rep-')) {
+    try {
+      const userId = await getCurrentUserId();
+      const businessId = await getBusinessId();
+
+      const { data: repData, error: repErr } = await supabase
+        .from('daily_reports')
+        .update({
+          status: 'approved',
+          reviewed_by: userId,
+          reviewed_at: new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', id)
+        .select('*, daily_report_items(*)')
+        .single();
+
+      if (!repErr && repData) {
+        const items = repData.daily_report_items || [];
+        if (items.length > 0) {
+          const movements = items
+            .filter((item: any) => item.quantity_sold > 0)
+            .map((item: any) => ({
+              business_id: businessId,
+              shop_id: repData.shop_id,
+              product_id: item.product_id,
+              movement_type: 'SALE_OUT',
+              quantity: -item.quantity_sold,
+              reference_id: id,
+              is_provisional: false,
+              reason: 'Approved daily sales report deduction',
+              actor_id: userId
+            }));
+
+          if (movements.length > 0) {
+            await supabase.from('stock_movements').insert(movements);
+          }
+        }
+      }
+    } catch (err) {
+      console.warn('Supabase approveDailyReport error:', err);
+    }
+  }
+
   const reports = await getDailyReports();
   const updated = reports.map(r => r.id === id ? { ...r, status: 'approved' as const } : r);
   setLocalItem(STORAGE_KEYS.REPORTS, updated);
@@ -299,10 +752,70 @@ export async function recordStockTransfer(input: Omit<StockTransferRecord, 'id' 
 // STOCK AUDITS (PHYSICAL COUNTS)
 // ----------------------------------------------------
 export async function getStockAudits(): Promise<StockAuditRecord[]> {
+  if (isSupabaseConfigured && supabase) {
+    try {
+      const { data, error } = await supabase.from('stock_counts').select('*').order('created_at', { ascending: false });
+      if (!error && data) {
+        const audits: StockAuditRecord[] = data.map((c: any) => ({
+          id: c.id,
+          shopId: c.shop_id,
+          productId: c.product_id,
+          physicalCount: c.counted_quantity,
+          expectedCount: c.expected_quantity,
+          discrepancy: c.variance,
+          countedAt: c.created_at.slice(0, 10),
+          notes: c.notes || undefined
+        }));
+        setLocalItem(STORAGE_KEYS.AUDITS, audits);
+        return audits;
+      }
+    } catch (err) {
+      console.warn('Supabase getStockAudits error, fallback to local:', err);
+    }
+  }
   return getLocalItem<StockAuditRecord[]>(STORAGE_KEYS.AUDITS, []);
 }
 
 export async function recordStockAudit(input: Omit<StockAuditRecord, 'id'>): Promise<StockAuditRecord> {
+  if (isSupabaseConfigured && supabase) {
+    try {
+      const businessId = await getBusinessId();
+      const userId = await getCurrentUserId();
+
+      const { data, error } = await supabase
+        .from('stock_counts')
+        .insert({
+          business_id: businessId,
+          shop_id: input.shopId,
+          product_id: input.productId,
+          counted_quantity: input.physicalCount,
+          expected_quantity: input.expectedCount,
+          counted_by: userId,
+          notes: input.notes || null
+        })
+        .select()
+        .single();
+
+      if (!error && data) {
+        const newAudit: StockAuditRecord = {
+          id: data.id,
+          shopId: data.shop_id,
+          productId: data.product_id,
+          physicalCount: data.counted_quantity,
+          expectedCount: data.expected_quantity,
+          discrepancy: data.variance,
+          countedAt: data.created_at.slice(0, 10),
+          notes: data.notes || undefined
+        };
+        const audits = getLocalItem<StockAuditRecord[]>(STORAGE_KEYS.AUDITS, []);
+        setLocalItem(STORAGE_KEYS.AUDITS, [newAudit, ...audits]);
+        return newAudit;
+      }
+    } catch (err) {
+      console.warn('Supabase recordStockAudit error, fallback to local:', err);
+    }
+  }
+
   const audits = await getStockAudits();
   const newAudit: StockAuditRecord = {
     ...input,

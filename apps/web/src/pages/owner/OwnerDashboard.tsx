@@ -5,33 +5,56 @@ import {
   Clock, 
   CheckCircle2, 
   Plus, 
-  Store,
-  ChevronRight,
-  Filter,
-  FileCheck2,
-  Banknote,
-  Boxes
+  Store, 
+  ChevronRight, 
+  FileCheck2, 
+  Banknote
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
-import { Card, MetricCard } from '../../components/ui/Card.js';
 import { Button } from '../../components/ui/Button.js';
 import { Badge } from '../../components/ui/Badge.js';
-import { CardSkeleton, TableSkeleton } from '../../components/ui/Skeleton.js';
+import { TableSkeleton } from '../../components/ui/Skeleton.js';
+import { 
+  calculatePaymentStatus, 
+  type StockBalance,
+  type Invoice, 
+  type PaymentRecord 
+} from '@crimpston/shared';
 import { 
   getShops, 
   getDeliveries, 
   getDailyReports, 
+  getInvoices, 
+  getPayments, 
+  calculateStockBalances, 
   approveDailyReport, 
   type Shop, 
   type DeliveryRecord, 
   type DailyReportRecord 
 } from '../../services/db.js';
 
+interface ShopRowSnapshot {
+  shop: Shop;
+  stockUnits: number;
+  totalSupplied: number;
+  totalSold: number;
+  totalBilled: number;
+  totalPaid: number;
+  outstandingBalance: number;
+  paymentStatus: 'fully_paid' | 'partially_paid' | 'unpaid';
+  statusLabel: string;
+  badgeClasses: { bg: string; text: string; border: string };
+  reportedToday: boolean;
+}
+
 export const OwnerDashboard: React.FC = () => {
   const [selectedShopId, setSelectedShopId] = useState<string>('all');
   const [shops, setShops] = useState<Shop[]>([]);
   const [deliveries, setDeliveries] = useState<DeliveryRecord[]>([]);
   const [reports, setReports] = useState<DailyReportRecord[]>([]);
+  const [invoices, setInvoices] = useState<Invoice[]>([]);
+  const [payments, setPayments] = useState<PaymentRecord[]>([]);
+  const [balances, setBalances] = useState<StockBalance[]>([]);
   const [approvedNotice, setApprovedNotice] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
@@ -40,16 +63,22 @@ export const OwnerDashboard: React.FC = () => {
   const loadData = async () => {
     setIsLoading(true);
     try {
-      const [sList, dList, rList] = await Promise.all([
+      const [sList, dList, rList, iList, pList, bList] = await Promise.all([
         getShops(),
         getDeliveries(),
-        getDailyReports()
+        getDailyReports(),
+        getInvoices(),
+        getPayments(),
+        calculateStockBalances()
       ]);
       setShops(sList);
       setDeliveries(dList);
       setReports(rList);
+      setInvoices(iList);
+      setPayments(pList);
+      setBalances(bList);
     } catch (err) {
-      console.error('Failed to load dashboard data:', err);
+      console.error('Failed to load dashboard operational data:', err);
     } finally {
       setIsLoading(false);
     }
@@ -64,16 +93,12 @@ export const OwnerDashboard: React.FC = () => {
 
   const handleApprove = async (id: string, shopName: string) => {
     await approveDailyReport(id);
-    setApprovedNotice(`Report for ${shopName} approved and confirmed in inventory ledger.`);
+    setApprovedNotice(`Report for ${shopName} approved and confirmed into stock ledger.`);
     setTimeout(() => setApprovedNotice(null), 4000);
     await loadData();
   };
 
   // Filtered dataset
-  const filteredShops = selectedShopId === 'all'
-    ? shops
-    : shops.filter(s => s.id === selectedShopId);
-
   const filteredDeliveries = selectedShopId === 'all'
     ? deliveries
     : deliveries.filter(d => d.shopId === selectedShopId);
@@ -82,7 +107,7 @@ export const OwnerDashboard: React.FC = () => {
     ? reports
     : reports.filter(r => r.shopId === selectedShopId);
 
-  // Dynamic Calculations
+  // Operational metrics
   const todayDeliveriesUnits = filteredDeliveries
     .filter(d => d.deliveryDate === todayStr)
     .reduce((sum, d) => sum + d.items.reduce((s, i) => s + i.quantity, 0), 0);
@@ -94,25 +119,54 @@ export const OwnerDashboard: React.FC = () => {
     .filter(r => r.reportDate === todayStr && !r.isZeroSales)
     .reduce((sum, r) => sum + r.totalQuantitySold, 0);
 
-  // Awaiting review
-  const awaitingReviewList = filteredReports.filter(r => r.status === 'submitted');
-
-  // Shops pending report submission today
-  const pendingShops = filteredShops.filter(shop => {
-    const hasReportToday = reports.some(r => r.shopId === shop.id && r.reportDate === todayStr);
-    return !hasReportToday;
+  // Pending Actions
+  const awaitingReviewList = reports.filter(r => r.status === 'submitted');
+  const pendingShops = shops.filter(shop => {
+    return !reports.some(r => r.shopId === shop.id && r.reportDate === todayStr);
   });
+
+  // Calculate per-shop snapshot
+  const shopSnapshots: ShopRowSnapshot[] = shops.map(shop => {
+    const shopBals = balances.filter(b => b.shop_id === shop.id);
+    const stockUnits = shopBals.reduce((sum, b) => sum + Math.max(0, b.expected_stock), 0);
+    const totalSupplied = shopBals.reduce((sum, b) => sum + b.total_delivered, 0);
+    const totalSold = shopBals.reduce((sum, b) => sum + b.confirmed_sold + b.provisional_sold, 0);
+
+    const shopInvoices = invoices.filter(i => i.shop_id === shop.id);
+    const shopPayments = payments.filter(p => p.shop_id === shop.id && p.status === 'COMPLETED');
+    const totalBilled = shopInvoices.reduce((sum, i) => sum + i.total_amount, 0);
+    const totalPaid = shopPayments.reduce((sum, p) => sum + p.amount, 0);
+    const statusCalc = calculatePaymentStatus(totalBilled, totalPaid);
+    const reportedToday = reports.some(r => r.shopId === shop.id && r.reportDate === todayStr);
+
+    return {
+      shop,
+      stockUnits,
+      totalSupplied,
+      totalSold,
+      totalBilled,
+      totalPaid,
+      outstandingBalance: statusCalc.outstandingBalance,
+      paymentStatus: statusCalc.status,
+      statusLabel: statusCalc.statusLabel,
+      badgeClasses: statusCalc.badgeClasses,
+      reportedToday
+    };
+  });
+
+  const totalOutstandingAllShops = shopSnapshots.reduce((sum, s) => sum + s.outstandingBalance, 0);
 
   if (isLoading) {
     return (
       <div className="space-y-6">
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          <CardSkeleton />
-          <CardSkeleton />
-          <CardSkeleton />
-          <CardSkeleton />
+        <div className="h-10 bg-slate-200 animate-pulse rounded-md w-1/3"></div>
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          <div className="h-24 bg-slate-200 animate-pulse rounded-md"></div>
+          <div className="h-24 bg-slate-200 animate-pulse rounded-md"></div>
+          <div className="h-24 bg-slate-200 animate-pulse rounded-md"></div>
+          <div className="h-24 bg-slate-200 animate-pulse rounded-md"></div>
         </div>
-        <TableSkeleton rows={4} />
+        <TableSkeleton rows={5} />
       </div>
     );
   }
@@ -121,200 +175,287 @@ export const OwnerDashboard: React.FC = () => {
     <div className="space-y-6">
       {/* Alert Notice upon Approval */}
       {approvedNotice && (
-        <div className="p-4 bg-emerald-50 border border-emerald-200 rounded-xl flex items-center justify-between text-xs text-emerald-900 shadow-sm animate-fade-in">
-          <div className="flex items-center space-x-2.5">
+        <div className="p-3.5 bg-emerald-50 border border-emerald-200 rounded-md flex items-center justify-between text-xs text-emerald-900 shadow-sm animate-fade-in font-medium">
+          <div className="flex items-center space-x-2">
             <CheckCircle2 className="w-4 h-4 text-emerald-600 flex-shrink-0" />
-            <span className="font-semibold">{approvedNotice}</span>
+            <span>{approvedNotice}</span>
           </div>
           <button 
             onClick={() => setApprovedNotice(null)} 
-            className="text-slate-400 hover:text-slate-600 font-bold ml-4"
+            className="text-slate-400 hover:text-slate-600"
           >
             ✕
           </button>
         </div>
       )}
 
-      {/* Top Header & Filter Controls */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
+      {/* Top Header & Fast Action Toolbar */}
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 pb-4 border-b border-slate-200">
         <div>
-          <div className="flex items-center space-x-2 text-xs font-semibold uppercase tracking-wider text-crimpston-electric mb-1">
-            <Store className="w-3.5 h-3.5" />
-            <span>Operational Management</span>
-          </div>
-          <h1 className="text-xl sm:text-2xl font-bold text-slate-900 tracking-tight">Business Overview & Control</h1>
-          <p className="text-xs text-slate-500 mt-1">
-            Real-time accessory distribution, reporting cutoffs, and verified stock movements.
+          <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-slate-900">
+            Wholesale Operations Overview
+          </h1>
+          <p className="text-xs text-slate-500 mt-0.5">
+            Monitor accessory distribution, missing daily reports, and outstanding shop balances.
           </p>
         </div>
-        
-        <div className="flex flex-wrap items-center gap-3">
-          {/* Shop Filter */}
-          <div className="flex items-center space-x-2 bg-slate-50 hover:bg-slate-100 transition-colors px-3 py-2 rounded-xl border border-slate-200 text-xs text-slate-700">
-            <Filter className="w-3.5 h-3.5 text-slate-400" />
-            <select
-              value={selectedShopId}
-              onChange={(e) => setSelectedShopId(e.target.value)}
-              className="bg-transparent focus:outline-none font-semibold cursor-pointer text-slate-800"
-              aria-label="Filter by Retail Shop"
-            >
-              <option value="all">All Retail Stores ({shops.length})</option>
-              {shops.map(s => (
-                <option key={s.id} value={s.id}>{s.name} ({s.code})</option>
-              ))}
-            </select>
-          </div>
 
-          {/* Record Delivery CTA */}
+        {/* Quick Action Bar & Shop Filter */}
+        <div className="flex flex-wrap items-center gap-2">
+          <select
+            value={selectedShopId}
+            onChange={(e) => setSelectedShopId(e.target.value)}
+            className="text-xs bg-slate-50 border border-slate-200 rounded-md px-2.5 py-1.5 font-medium text-slate-700 focus:outline-none focus:ring-1 focus:ring-blue-600"
+          >
+            <option value="all">All Retail Shops</option>
+            {shops.map(s => (
+              <option key={s.id} value={s.id}>{s.name}</option>
+            ))}
+          </select>
           <Link to="/deliveries">
-            <Button 
-              variant="primary" 
-              size="md" 
-              className="shadow-sm font-semibold"
-            >
-              <Plus className="w-4 h-4 mr-1.5" />
-              Record Delivery
+            <Button variant="primary" size="sm" className="shadow-xs font-medium">
+              <Plus className="w-3.5 h-3.5 mr-1.5" />
+              <span>Record Delivery</span>
+            </Button>
+          </Link>
+          <Link to="/employee">
+            <Button variant="outline" size="sm" className="font-medium">
+              <ShoppingBag className="w-3.5 h-3.5 mr-1.5 text-slate-500" />
+              <span>Enter Sales</span>
+            </Button>
+          </Link>
+          <Link to="/payments">
+            <Button variant="outline" size="sm" className="font-medium">
+              <Banknote className="w-3.5 h-3.5 mr-1.5 text-slate-500" />
+              <span>Record Payment</span>
+            </Button>
+          </Link>
+          <Link to="/shops">
+            <Button variant="outline" size="sm" className="font-medium">
+              <Store className="w-3.5 h-3.5 mr-1.5 text-slate-500" />
+              <span>Add Shop</span>
             </Button>
           </Link>
         </div>
       </div>
 
-      {/* 4 Primary KPI Metric Tiles */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <MetricCard
-          label="Today's Deliveries"
-          value={`${todayDeliveriesUnits} Units`}
-          subtext={todayDeliveriesUnits > 0 ? "Supplied today" : `${totalDeliveredUnits} units all-time`}
-          icon={<Truck className="w-4 h-4 text-crimpston-electric" />}
-          variant="highlight"
-        />
-        <MetricCard
-          label="Reported Sales Today"
-          value={`${todaySalesUnits} Units`}
-          subtext={todaySalesUnits > 0 ? "Units sold across stores" : "No sales reported yet today"}
-          icon={<ShoppingBag className="w-4 h-4 text-emerald-600" />}
-        />
-        <MetricCard
-          label="Reports Pending"
-          value={pendingShops.length}
-          subtext={pendingShops.length > 0 ? `${pendingShops.length} shops due by 21:00` : "All shops submitted today"}
-          icon={<Clock className="w-4 h-4 text-amber-600" />}
-          variant={pendingShops.length > 0 ? 'alert' : 'default'}
-        />
-        <MetricCard
-          label="Awaiting Approval"
-          value={awaitingReviewList.length}
-          subtext={awaitingReviewList.length > 0 ? "Requires owner stock confirmation" : "Review queue clear"}
-          icon={<FileCheck2 className="w-4 h-4 text-crimpston-electric" />}
-          variant={awaitingReviewList.length > 0 ? 'highlight' : 'default'}
-        />
+      {/* 1. Concise Operational Summary Bar (No floating cards) */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 bg-white border border-slate-200 rounded-lg p-3.5 shadow-sm">
+        <div className="p-2.5 bg-slate-50/70 rounded-md border border-slate-100">
+          <div className="flex items-center justify-between text-slate-500 mb-1">
+            <span className="text-[11px] font-medium">Today's Deliveries</span>
+            <Truck className="w-3.5 h-3.5 text-blue-600" />
+          </div>
+          <span className="text-lg sm:text-xl font-bold text-slate-900 tabular-nums">
+            {todayDeliveriesUnits} pcs
+          </span>
+          <span className="text-[11px] text-slate-400 block mt-0.5">
+            {todayDeliveriesUnits > 0 ? "Supplied today" : `${totalDeliveredUnits} units all-time`}
+          </span>
+        </div>
+
+        <div className="p-2.5 bg-slate-50/70 rounded-md border border-slate-100">
+          <div className="flex items-center justify-between text-slate-500 mb-1">
+            <span className="text-[11px] font-medium">Reported Sales Today</span>
+            <ShoppingBag className="w-3.5 h-3.5 text-emerald-600" />
+          </div>
+          <span className="text-lg sm:text-xl font-bold text-slate-900 tabular-nums">
+            {todaySalesUnits} pcs
+          </span>
+          <span className="text-[11px] text-slate-400 block mt-0.5">
+            {todaySalesUnits > 0 ? "Units sold across stores" : "No sales reported yet"}
+          </span>
+        </div>
+
+        <div className="p-2.5 bg-slate-50/70 rounded-md border border-slate-100">
+          <div className="flex items-center justify-between text-slate-500 mb-1">
+            <span className="text-[11px] font-medium">Action Required</span>
+            <Clock className="w-3.5 h-3.5 text-amber-600" />
+          </div>
+          <span className="text-lg sm:text-xl font-bold text-slate-900 tabular-nums">
+            {pendingShops.length + awaitingReviewList.length}
+          </span>
+          <span className="text-[11px] text-slate-400 block mt-0.5">
+            {pendingShops.length} missing • {awaitingReviewList.length} to review
+          </span>
+        </div>
+
+        <div className="p-2.5 bg-slate-50/70 rounded-md border border-slate-100">
+          <div className="flex items-center justify-between text-slate-500 mb-1">
+            <span className="text-[11px] font-medium">Total Balance Due</span>
+            <Banknote className="w-3.5 h-3.5 text-slate-600" />
+          </div>
+          <span className="text-lg sm:text-xl font-bold text-slate-900 tabular-nums font-mono">
+            ₹{totalOutstandingAllShops.toLocaleString('en-IN')}
+          </span>
+          <span className="text-[11px] text-slate-400 block mt-0.5">
+            Across {shops.length} partner stores
+          </span>
+        </div>
       </div>
 
-      {/* Section 1: Pending Work & Missing Daily Reports */}
-      <Card
-        title="Pending Reports & Duty Monitoring"
-        action={
-          <Badge variant={pendingShops.length > 0 ? 'warning' : 'success'}>
-            {pendingShops.length > 0 ? `${pendingShops.length} Stores Due` : 'All Reports Current'}
-          </Badge>
-        }
-      >
-        {pendingShops.length === 0 ? (
-          <div className="py-8 text-center text-xs text-slate-500">
-            {shops.length === 0 ? (
-              <div>
-                <span>No shops configured yet. </span>
-                <Link to="/management" className="text-crimpston-electric underline font-semibold">
-                  Add retail stores
-                </Link>
+      {/* 2. Priority Action Center: Review Queue & Missing Daily Reports */}
+      {(awaitingReviewList.length > 0 || pendingShops.length > 0) && (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          
+          {/* Review Queue: Reports Awaiting Approval */}
+          <div className="bg-white border border-slate-200 rounded-lg shadow-sm overflow-hidden flex flex-col">
+            <div className="px-4 py-3 bg-amber-50/40 border-b border-amber-100 flex items-center justify-between">
+              <div className="flex items-center space-x-2">
+                <FileCheck2 className="w-4 h-4 text-amber-700" />
+                <h3 className="text-xs font-bold text-slate-900 uppercase tracking-wider">
+                  Reports Awaiting Owner Review ({awaitingReviewList.length})
+                </h3>
               </div>
-            ) : (
-              'All retail shops have submitted their updates for today.'
-            )}
-          </div>
-        ) : (
-          <div className="divide-y divide-slate-100">
-            {pendingShops.map(shop => (
-              <div key={shop.id} className="py-3.5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 text-xs">
-                <div>
-                  <div className="flex items-center space-x-2">
-                    <span className="font-semibold text-slate-800">{shop.name}</span>
-                    <span className="text-slate-400 font-mono text-[11px]">({shop.code})</span>
-                    <Badge variant="warning">Missing Today</Badge>
-                  </div>
-                  <span className="text-slate-500 mt-1 block">
-                    Daily cutoff: 21:00 IST • Date: {todayStr}
-                  </span>
+              <Badge variant="warning" size="sm">Requires Confirmation</Badge>
+            </div>
+            
+            <div className="divide-y divide-slate-100 flex-1">
+              {awaitingReviewList.length === 0 ? (
+                <div className="p-4 text-center text-xs text-slate-400">
+                  Review queue is clear. No reports pending confirmation.
                 </div>
-                <div className="flex items-center space-x-2">
-                  <Link to="/employee">
-                    <Button variant="outline" size="sm">
-                      Submit for Shop
+              ) : (
+                awaitingReviewList.map(item => (
+                  <div key={item.id} className="p-3.5 flex items-center justify-between gap-3 text-xs">
+                    <div>
+                      <div className="flex items-center space-x-2">
+                        <span className="font-semibold text-slate-900">{item.shopName}</span>
+                        <span className="text-slate-400 font-mono text-[11px]">{item.reportDate}</span>
+                      </div>
+                      <span className="text-slate-500 text-[11px] block mt-0.5">
+                        Sold: <strong className="text-slate-800">{item.isZeroSales ? '0 (Zero Sales)' : `${item.totalQuantitySold} pcs`}</strong> • Staff: {item.submittedBy}
+                      </span>
+                    </div>
+                    <Button 
+                      variant="primary" 
+                      size="sm"
+                      onClick={() => handleApprove(item.id, item.shopName || 'Shop')}
+                    >
+                      Approve & Post
                     </Button>
-                  </Link>
-                </div>
-              </div>
-            ))}
+                  </div>
+                ))
+              )}
+            </div>
           </div>
-        )}
-      </Card>
 
-      {/* Section 2: Review Queue — Reports Awaiting Approval */}
-      <Card
-        title="Review Queue — Reports Awaiting Owner Approval"
-        action={
-          <Badge variant={awaitingReviewList.length > 0 ? 'info' : 'neutral'}>
-            {awaitingReviewList.length} Pending Approval
-          </Badge>
-        }
-      >
-        {awaitingReviewList.length === 0 ? (
-          <div className="py-8 text-center text-xs text-slate-500">
-            No sales reports currently awaiting review.
+          {/* Missing Daily Reports */}
+          <div className="bg-white border border-slate-200 rounded-lg shadow-sm overflow-hidden flex flex-col">
+            <div className="px-4 py-3 bg-slate-50 border-b border-slate-100 flex items-center justify-between">
+              <div className="flex items-center space-x-2">
+                <Clock className="w-4 h-4 text-slate-600" />
+                <h3 className="text-xs font-bold text-slate-900 uppercase tracking-wider">
+                  Missing Daily Reports Today ({pendingShops.length})
+                </h3>
+              </div>
+              <span className="text-[11px] text-slate-500">Cutoff: 21:00 IST</span>
+            </div>
+
+            <div className="divide-y divide-slate-100 max-h-[220px] overflow-y-auto flex-1">
+              {pendingShops.length === 0 ? (
+                <div className="p-4 text-center text-xs text-slate-400">
+                  All active shops have submitted reports for today!
+                </div>
+              ) : (
+                pendingShops.map(shop => (
+                  <div key={shop.id} className="p-3 flex items-center justify-between gap-2 text-xs">
+                    <div>
+                      <span className="font-semibold text-slate-900">{shop.name}</span>
+                      <span className="text-slate-400 font-mono text-[11px] ml-1.5">({shop.code})</span>
+                    </div>
+                    <Link to="/employee">
+                      <Button variant="outline" size="sm">
+                        Enter Report
+                      </Button>
+                    </Link>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+
+        </div>
+      )}
+
+      {/* 3. Core Shop Ledger & Payment Balance Snapshot Table */}
+      <div className="bg-white border border-slate-200 rounded-lg shadow-sm overflow-hidden">
+        <div className="px-4 py-3 border-b border-slate-200 bg-slate-50/50 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+          <div>
+            <h3 className="text-sm font-bold text-slate-900">
+              Retail Stores Ledger & Payment Balances
+            </h3>
+            <p className="text-xs text-slate-500 mt-0.5">
+              Live stock on-site, total billed, collections, and payment statuses across partner shops.
+            </p>
+          </div>
+          <Link to="/shops" className="text-xs text-blue-600 hover:underline font-medium inline-flex items-center">
+            <span>Manage All Shops</span>
+            <ChevronRight className="w-3.5 h-3.5 ml-0.5" />
+          </Link>
+        </div>
+
+        {shops.length === 0 ? (
+          <div className="p-8 text-center text-xs text-slate-400">
+            No retail stores found. <Link to="/shops" className="text-blue-600 underline font-semibold">Add your first shop</Link>.
           </div>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs">
-              <thead className="bg-slate-50 text-slate-500 font-semibold border-b border-slate-100">
+          <div className="overflow-x-auto text-xs">
+            <table className="w-full text-left">
+              <thead className="bg-slate-50 text-slate-600 font-semibold border-b border-slate-200">
                 <tr>
-                  <th className="py-2.5 px-3">Shop</th>
-                  <th className="py-2.5 px-3">Date</th>
-                  <th className="py-2.5 px-3">Submitted By</th>
-                  <th className="py-2.5 px-3 text-right">Items Sold</th>
-                  <th className="py-2.5 px-3 text-center">Status</th>
+                  <th className="py-2.5 px-3.5">Shop Name</th>
+                  <th className="py-2.5 px-3">Code</th>
+                  <th className="py-2.5 px-3 text-right">On-Hand Stock</th>
+                  <th className="py-2.5 px-3 text-right">Supplied</th>
+                  <th className="py-2.5 px-3 text-right">Sold</th>
+                  <th className="py-2.5 px-3 text-right font-mono">Billed</th>
+                  <th className="py-2.5 px-3 text-right font-mono">Collected</th>
+                  <th className="py-2.5 px-3 text-right font-mono font-bold">Outstanding</th>
+                  <th className="py-2.5 px-3 text-center">Payment Status</th>
                   <th className="py-2.5 px-3 text-right">Action</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {awaitingReviewList.map(item => (
-                  <tr key={item.id} className="hover:bg-slate-50/50">
-                    <td className="py-3 px-3 font-semibold text-slate-800">
-                      {item.shopName}
+                {shopSnapshots.map(row => (
+                  <tr key={row.shop.id} className="hover:bg-slate-50/60">
+                    <td className="py-3 px-3.5 font-semibold text-slate-900">
+                      <Link to="/shops" className="hover:text-blue-600 transition-colors">
+                        {row.shop.name}
+                      </Link>
                     </td>
-                    <td className="py-3 px-3 text-slate-600">
-                      {item.reportDate} <span className="text-slate-400 text-[10px]">({item.submittedAt})</span>
+                    <td className="py-3 px-3 font-mono text-slate-500">
+                      {row.shop.code}
                     </td>
-                    <td className="py-3 px-3 text-slate-600">
-                      {item.submittedBy}
+                    <td className="py-3 px-3 text-right font-bold tabular-nums text-blue-600">
+                      {row.stockUnits} pcs
                     </td>
-                    <td className="py-3 px-3 text-right font-bold text-slate-900">
-                      {item.isZeroSales ? (
-                        <span className="text-slate-500 font-normal italic">0 (Zero Sales)</span>
-                      ) : (
-                        `${item.totalQuantitySold} pcs`
-                      )}
+                    <td className="py-3 px-3 text-right tabular-nums text-slate-600">
+                      {row.totalSupplied}
+                    </td>
+                    <td className="py-3 px-3 text-right tabular-nums text-slate-600">
+                      {row.totalSold}
+                    </td>
+                    <td className="py-3 px-3 text-right tabular-nums font-mono text-slate-600">
+                      ₹{row.totalBilled.toLocaleString('en-IN')}
+                    </td>
+                    <td className="py-3 px-3 text-right tabular-nums font-mono text-emerald-700">
+                      ₹{row.totalPaid.toLocaleString('en-IN')}
+                    </td>
+                    <td className="py-3 px-3 text-right tabular-nums font-mono font-bold text-slate-900">
+                      ₹{row.outstandingBalance.toLocaleString('en-IN')}
                     </td>
                     <td className="py-3 px-3 text-center">
-                      <Badge variant="warning">Awaiting Approval</Badge>
+                      <span className={`inline-flex items-center px-2 py-0.5 rounded text-[11px] font-semibold border ${row.badgeClasses.bg} ${row.badgeClasses.text} ${row.badgeClasses.border}`}>
+                        {row.statusLabel}
+                      </span>
                     </td>
-                    <td className="py-3 px-3 text-right space-x-2">
-                      <Button 
-                        variant="primary" 
-                        size="sm"
-                        onClick={() => handleApprove(item.id, item.shopName || 'Shop')}
-                      >
-                        Approve & Post
-                      </Button>
+                    <td className="py-3 px-3 text-right">
+                      <Link to="/shops">
+                        <Button variant="outline" size="sm" className="h-7 text-xs">
+                          Workspace
+                        </Button>
+                      </Link>
                     </td>
                   </tr>
                 ))}
@@ -322,64 +463,58 @@ export const OwnerDashboard: React.FC = () => {
             </table>
           </div>
         )}
-      </Card>
-
-      {/* Quick Access Grid */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <Link
-          to="/stock-ledger"
-          className="p-5 rounded-xl border border-slate-200 bg-white hover:border-crimpston-electric hover:shadow-md cursor-pointer transition-all group flex items-center justify-between"
-        >
-          <div className="flex items-center space-x-3.5">
-            <div className="w-11 h-11 rounded-xl bg-blue-50 text-crimpston-electric border border-blue-100 flex items-center justify-center transition-colors group-hover:bg-crimpston-electric group-hover:text-white">
-              <Boxes className="w-5 h-5" />
-            </div>
-            <div>
-              <h4 className="text-sm font-bold text-slate-900 group-hover:text-crimpston-electric transition-colors">
-                Stock Ledger
-              </h4>
-              <p className="text-xs text-slate-500 mt-0.5">Multi-shop balance reconciliation</p>
-            </div>
-          </div>
-          <ChevronRight className="w-4 h-4 text-slate-400 group-hover:text-crimpston-electric group-hover:translate-x-0.5 transition-all" />
-        </Link>
-
-        <Link
-          to="/payments"
-          className="p-5 rounded-xl border border-slate-200 bg-white hover:border-crimpston-electric hover:shadow-md cursor-pointer transition-all group flex items-center justify-between"
-        >
-          <div className="flex items-center space-x-3.5">
-            <div className="w-11 h-11 rounded-xl bg-emerald-50 text-emerald-700 border border-emerald-100 flex items-center justify-center transition-colors group-hover:bg-emerald-600 group-hover:text-white">
-              <Banknote className="w-5 h-5" />
-            </div>
-            <div>
-              <h4 className="text-sm font-bold text-slate-900 group-hover:text-crimpston-electric transition-colors">
-                Cash Payments
-              </h4>
-              <p className="text-xs text-slate-500 mt-0.5">Record collections & audit balances</p>
-            </div>
-          </div>
-          <ChevronRight className="w-4 h-4 text-slate-400 group-hover:text-crimpston-electric group-hover:translate-x-0.5 transition-all" />
-        </Link>
-
-        <Link
-          to="/management"
-          className="p-5 rounded-xl border border-slate-200 bg-white hover:border-crimpston-electric hover:shadow-md cursor-pointer transition-all group flex items-center justify-between"
-        >
-          <div className="flex items-center space-x-3.5">
-            <div className="w-11 h-11 rounded-xl bg-slate-100 text-slate-700 border border-slate-200 flex items-center justify-center transition-colors group-hover:bg-crimpston-navy group-hover:text-white">
-              <Store className="w-5 h-5" />
-            </div>
-            <div>
-              <h4 className="text-sm font-bold text-slate-900 group-hover:text-crimpston-electric transition-colors">
-                Shops & Catalog
-              </h4>
-              <p className="text-xs text-slate-500 mt-0.5">Configure locations & products</p>
-            </div>
-          </div>
-          <ChevronRight className="w-4 h-4 text-slate-400 group-hover:text-crimpston-electric group-hover:translate-x-0.5 transition-all" />
-        </Link>
       </div>
+
+      {/* 4. Recent Delivery Activity Log */}
+      <div className="bg-white border border-slate-200 rounded-lg shadow-sm overflow-hidden">
+        <div className="px-4 py-3 border-b border-slate-200 bg-slate-50/50 flex items-center justify-between">
+          <div className="flex items-center space-x-2">
+            <Truck className="w-4 h-4 text-slate-600" />
+            <h3 className="text-xs font-bold text-slate-900 uppercase tracking-wider">
+              Recent Supply Deliveries
+            </h3>
+          </div>
+          <Link to="/deliveries" className="text-xs text-blue-600 hover:underline font-medium">
+            View All Deliveries →
+          </Link>
+        </div>
+
+        {deliveries.length === 0 ? (
+          <div className="p-6 text-center text-xs text-slate-400">
+            No supply deliveries recorded yet.
+          </div>
+        ) : (
+          <div className="overflow-x-auto text-xs">
+            <table className="w-full text-left">
+              <thead className="bg-slate-50 text-slate-600 font-semibold border-b border-slate-200">
+                <tr>
+                  <th className="py-2.5 px-3.5">Date</th>
+                  <th className="py-2.5 px-3">Target Retail Shop</th>
+                  <th className="py-2.5 px-3">Batch Reference</th>
+                  <th className="py-2.5 px-3 text-right">Quantity Delivered</th>
+                  <th className="py-2.5 px-3 text-center">Status</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {deliveries.slice(0, 5).map(deliv => (
+                  <tr key={deliv.id} className="hover:bg-slate-50/50">
+                    <td className="py-2.5 px-3.5 font-mono text-slate-700">{deliv.deliveryDate}</td>
+                    <td className="py-2.5 px-3 font-semibold text-slate-900">{deliv.shopName}</td>
+                    <td className="py-2.5 px-3 text-slate-600">{deliv.notes || `Supply Batch #${deliv.id.slice(-6)}`}</td>
+                    <td className="py-2.5 px-3 text-right font-bold tabular-nums text-slate-900">
+                      {deliv.items.reduce((s, i) => s + i.quantity, 0)} units
+                    </td>
+                    <td className="py-2.5 px-3 text-center">
+                      <Badge variant="success" size="sm">Delivered</Badge>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
     </div>
   );
 };
