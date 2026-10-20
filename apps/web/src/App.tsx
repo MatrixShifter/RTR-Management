@@ -1,19 +1,24 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import React, { useState, useEffect, useCallback, lazy, Suspense } from 'react';
+import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Navbar } from './components/Navbar.js';
-import { OwnerDashboard } from './pages/owner/OwnerDashboard.js';
-import { DeliveryManagement } from './pages/owner/DeliveryManagement.js';
-import { StockLedger } from './pages/owner/StockLedger.js';
-import { ShopWorkspace } from './pages/owner/ShopWorkspace.js';
-import { CatalogManagement } from './pages/owner/CatalogManagement.js';
-import { PaymentTracking } from './pages/owner/PaymentTracking.js';
-import { ShopAnalytics } from './pages/owner/ShopAnalytics.js';
-import { EmployeeReporting } from './pages/employee/EmployeeReporting.js';
-import { Login } from './pages/auth/Login.js';
 import { ToastProvider, useToast } from './components/ui/Toast.js';
 import { ErrorBoundary } from './components/ui/ErrorBoundary.js';
 import { AppLoadingScreen } from './components/ui/AppLoadingScreen.js';
+import { TableSkeleton } from './components/ui/Skeleton.js';
+import { supabase, isSupabaseConfigured } from './lib/supabase.js';
+
+// Route-level code splitting & lazy loading
+const OwnerDashboard = lazy(() => import('./pages/owner/OwnerDashboard.js').then(m => ({ default: m.OwnerDashboard })));
+const DeliveryManagement = lazy(() => import('./pages/owner/DeliveryManagement.js').then(m => ({ default: m.DeliveryManagement })));
+const StockLedger = lazy(() => import('./pages/owner/StockLedger.js').then(m => ({ default: m.StockLedger })));
+const ShopWorkspace = lazy(() => import('./pages/owner/ShopWorkspace.js').then(m => ({ default: m.ShopWorkspace })));
+const CatalogManagement = lazy(() => import('./pages/owner/CatalogManagement.js').then(m => ({ default: m.CatalogManagement })));
+const PaymentTracking = lazy(() => import('./pages/owner/PaymentTracking.js').then(m => ({ default: m.PaymentTracking })));
+const ShopAnalytics = lazy(() => import('./pages/owner/ShopAnalytics.js').then(m => ({ default: m.ShopAnalytics })));
+const EmployeeReporting = lazy(() => import('./pages/employee/EmployeeReporting.js').then(m => ({ default: m.EmployeeReporting })));
+const Login = lazy(() => import('./pages/auth/Login.js').then(m => ({ default: m.Login })));
+const NotFound = lazy(() => import('./pages/NotFound.js').then(m => ({ default: m.NotFound })));
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -31,8 +36,6 @@ export interface UserState {
   role: 'owner' | 'employee';
   assignedShop?: string;
 }
-
-import { supabase, isSupabaseConfigured } from './lib/supabase.js';
 
 const STORAGE_USER_KEY = 'rtr_current_user';
 const STORAGE_EXPIRY_KEY = 'rtr_session_expiry';
@@ -191,7 +194,11 @@ const AppContent: React.FC = () => {
   }
 
   if (!currentUser) {
-    return <Login onLoginSuccess={handleSignIn} />;
+    return (
+      <Suspense fallback={<AppLoadingScreen message="Loading wholesale portal..." />}>
+        <Login onLoginSuccess={handleSignIn} />
+      </Suspense>
+    );
   }
 
   return (
@@ -206,28 +213,30 @@ const AppContent: React.FC = () => {
         />
         <main className="flex-1 w-full lg:pl-64 print:pl-0 animate-fade-in">
           <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-            <Routes>
-              {currentUser.role === 'owner' ? (
-                <>
-                  <Route path="/" element={<OwnerDashboard />} />
-                  <Route path="/shops" element={<ShopWorkspace />} />
-                  <Route path="/deliveries" element={<DeliveryManagement />} />
-                  <Route path="/stock-ledger" element={<StockLedger />} />
-                  <Route path="/payments" element={<PaymentTracking />} />
-                  <Route path="/analytics" element={<ShopAnalytics />} />
-                  <Route path="/catalog" element={<CatalogManagement />} />
-                  <Route path="/management" element={<CatalogManagement />} />
-                  <Route path="/employee" element={<EmployeeReporting />} />
-                  <Route path="*" element={<Navigate to="/" replace />} />
-                </>
-              ) : (
-                <>
-                  <Route path="/employee" element={<EmployeeReporting />} />
-                  <Route path="/stock-ledger" element={<StockLedger />} />
-                  <Route path="*" element={<Navigate to="/employee" replace />} />
-                </>
-              )}
-            </Routes>
+            <Suspense fallback={<div className="py-6"><TableSkeleton rows={5} /></div>}>
+              <Routes>
+                {currentUser.role === 'owner' ? (
+                  <>
+                    <Route path="/" element={<OwnerDashboard />} />
+                    <Route path="/shops" element={<ShopWorkspace />} />
+                    <Route path="/deliveries" element={<DeliveryManagement />} />
+                    <Route path="/stock-ledger" element={<StockLedger />} />
+                    <Route path="/payments" element={<PaymentTracking />} />
+                    <Route path="/analytics" element={<ShopAnalytics />} />
+                    <Route path="/catalog" element={<CatalogManagement />} />
+                    <Route path="/management" element={<CatalogManagement />} />
+                    <Route path="/employee" element={<EmployeeReporting />} />
+                    <Route path="*" element={<NotFound userRole={currentUser.role} />} />
+                  </>
+                ) : (
+                  <>
+                    <Route path="/employee" element={<EmployeeReporting />} />
+                    <Route path="/stock-ledger" element={<StockLedger />} />
+                    <Route path="*" element={<NotFound userRole={currentUser.role} />} />
+                  </>
+                )}
+              </Routes>
+            </Suspense>
           </div>
         </main>
       </div>

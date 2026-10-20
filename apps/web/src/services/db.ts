@@ -3,7 +3,6 @@ import {
   type Invoice, 
   type PaymentRecord, 
   type ProductCategory,
-  type Database,
   type ShopBusinessSummary,
   type ProductHistoryItem,
   type CategorySalesAnalytics,
@@ -12,9 +11,6 @@ import {
   calculateGrossProfit
 } from '@crimpston/shared';
 import { supabase, isSupabaseConfigured } from '../lib/supabase.js';
-
-type ShopRow = Database['public']['Tables']['shops']['Row'];
-type ProductRow = Database['public']['Tables']['products']['Row'];
 
 export interface Shop {
   id: string;
@@ -118,6 +114,7 @@ const STORAGE_KEYS = {
 // Helper for local persistent storage
 function getLocalItem<T>(key: string, defaultValue: T): T {
   try {
+    if (typeof localStorage === 'undefined') return defaultValue;
     const raw = localStorage.getItem(key);
     if (!raw) return defaultValue;
     return JSON.parse(raw);
@@ -127,10 +124,63 @@ function getLocalItem<T>(key: string, defaultValue: T): T {
   }
 }
 
+// Silent local caching - does NOT trigger 'rtr_data_sync' event storm
+function setLocalCache<T>(key: string, value: T): void {
+  try {
+    if (typeof localStorage === 'undefined') return;
+    localStorage.setItem(key, JSON.stringify(value));
+  } catch (err) {
+    console.warn(`Error saving cache for ${key}:`, err);
+  }
+}
+
+// In-memory cache & in-flight request deduplication
+interface CacheEntry<T> {
+  data: T;
+  timestamp: number;
+}
+const memCache = new Map<string, CacheEntry<any>>();
+const inFlightRequests = new Map<string, Promise<any>>();
+const CACHE_TTL_MS = 2500; // 2.5 seconds cache TTL
+
+export function clearMemoryCache(): void {
+  memCache.clear();
+}
+
+async function dedupeRequest<T>(key: string, fetcher: () => Promise<T>): Promise<T> {
+  const cached = memCache.get(key);
+  if (cached && Date.now() - cached.timestamp < CACHE_TTL_MS) {
+    return cached.data;
+  }
+  const inFlight = inFlightRequests.get(key);
+  if (inFlight) {
+    return inFlight as Promise<T>;
+  }
+
+  const promise = (async () => {
+    try {
+      const data = await fetcher();
+      memCache.set(key, { data, timestamp: Date.now() });
+      return data;
+    } finally {
+      inFlightRequests.delete(key);
+    }
+  })();
+
+  inFlightRequests.set(key, promise);
+  return promise;
+}
+
+// Mutate local storage and notify listeners of data change (ONLY on user mutations)
 function setLocalItem<T>(key: string, value: T): void {
   try {
-    localStorage.setItem(key, JSON.stringify(value));
-    window.dispatchEvent(new CustomEvent('rtr_data_sync', { detail: { key } }));
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem(key, JSON.stringify(value));
+    }
+    clearMemoryCache();
+    if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function') {
+      window.dispatchEvent(new CustomEvent('rtr_data_sync', { detail: { key } }));
+    }
   } catch (err) {
     console.error(`Error saving ${key} to storage:`, err);
   }
@@ -175,28 +225,33 @@ function generateId(prefix: string): string {
 // SHOPS
 // ----------------------------------------------------
 export async function getShops(): Promise<Shop[]> {
-  if (isSupabaseConfigured && supabase) {
-    try {
-      const { data, error } = await supabase.from('shops').select('*').order('name');
-      if (!error && data) {
-        const shops: Shop[] = (data as unknown as ShopRow[]).map(s => ({
-          id: s.id,
-          name: s.name,
-          code: s.code,
-          address: s.address || '',
-          phone: s.phone || '',
-          isActive: s.is_active ?? true,
-          assignedEmployees: [],
-          createdAt: s.created_at
-        }));
-        setLocalItem(STORAGE_KEYS.SHOPS, shops);
-        return shops;
+  return dedupeRequest('shops', async () => {
+    if (isSupabaseConfigured && supabase) {
+      try {
+        const { data, error } = await supabase
+          .from('shops')
+          .select('id, name, code, address, phone, is_active, created_at')
+          .order('name');
+        if (!error && Array.isArray(data)) {
+          const shops: Shop[] = data.map((s: any) => ({
+            id: s.id,
+            name: s.name,
+            code: s.code,
+            address: s.address || '',
+            phone: s.phone || '',
+            isActive: s.is_active ?? true,
+            assignedEmployees: [],
+            createdAt: s.created_at
+          }));
+          setLocalCache(STORAGE_KEYS.SHOPS, shops);
+          return shops;
+        }
+      } catch (err) {
+        console.warn('Supabase getShops error, using local fallback:', err);
       }
-    } catch (err) {
-      console.warn('Supabase getShops error, using local fallback:', err);
     }
-  }
-  return getLocalItem<Shop[]>(STORAGE_KEYS.SHOPS, []);
+    return getLocalItem<Shop[]>(STORAGE_KEYS.SHOPS, []);
+  });
 }
 
 export async function saveShop(input: Omit<Shop, 'id'> & { id?: string }): Promise<Shop> {
@@ -313,35 +368,40 @@ export async function deleteShop(id: string): Promise<void> {
 // PRODUCTS
 // ----------------------------------------------------
 export async function getProducts(): Promise<Product[]> {
-  if (isSupabaseConfigured && supabase) {
-    try {
-      const { data, error } = await supabase.from('products').select('*').order('name');
-      if (!error && data) {
-        const localProds = getLocalItem<Product[]>(STORAGE_KEYS.PRODUCTS, []);
-        const localMap = new Map(localProds.map(p => [p.id, p]));
+  return dedupeRequest('products', async () => {
+    if (isSupabaseConfigured && supabase) {
+      try {
+        const { data, error } = await supabase
+          .from('products')
+          .select('id, name, sku, category, min_stock_threshold, is_active, created_at')
+          .order('name');
+        if (!error && Array.isArray(data)) {
+          const localProds = getLocalItem<Product[]>(STORAGE_KEYS.PRODUCTS, []);
+          const localMap = new Map(localProds.map(p => [p.id, p]));
 
-        const prods: Product[] = (data as unknown as ProductRow[]).map(p => {
-          const local = localMap.get(p.id);
-          return {
-            id: p.id,
-            name: p.name,
-            sku: p.sku,
-            category: p.category as ProductCategory,
-            minStock: p.min_stock_threshold || 0,
-            unitPrice: (p as any).unit_price ?? local?.unitPrice ?? 0,
-            costPrice: (p as any).cost_price ?? local?.costPrice ?? null,
-            isActive: p.is_active ?? true,
-            createdAt: p.created_at
-          };
-        });
-        setLocalItem(STORAGE_KEYS.PRODUCTS, prods);
-        return prods;
+          const prods: Product[] = data.map((p: any) => {
+            const local = localMap.get(p.id);
+            return {
+              id: p.id,
+              name: p.name,
+              sku: p.sku,
+              category: p.category as ProductCategory,
+              minStock: p.min_stock_threshold || 0,
+              unitPrice: p.unit_price ?? local?.unitPrice ?? 0,
+              costPrice: p.cost_price ?? local?.costPrice ?? null,
+              isActive: p.is_active ?? true,
+              createdAt: p.created_at
+            };
+          });
+          setLocalCache(STORAGE_KEYS.PRODUCTS, prods);
+          return prods;
+        }
+      } catch (err) {
+        console.warn('Supabase getProducts error, using local fallback:', err);
       }
-    } catch (err) {
-      console.warn('Supabase getProducts error, using local fallback:', err);
     }
-  }
-  return getLocalItem<Product[]>(STORAGE_KEYS.PRODUCTS, []);
+    return getLocalItem<Product[]>(STORAGE_KEYS.PRODUCTS, []);
+  });
 }
 
 export async function saveProduct(input: Omit<Product, 'id'> & { id?: string }): Promise<Product> {
@@ -452,42 +512,48 @@ export async function deleteProduct(id: string): Promise<void> {
 // DELIVERIES
 // ----------------------------------------------------
 export async function getDeliveries(): Promise<DeliveryRecord[]> {
-  if (isSupabaseConfigured && supabase) {
-    try {
-      const { data, error } = await supabase
-        .from('deliveries')
-        .select('*, delivery_items(*)')
-        .order('delivery_date', { ascending: false });
+  return dedupeRequest('deliveries', async () => {
+    if (isSupabaseConfigured && supabase) {
+      try {
+        const { data, error } = await supabase
+          .from('deliveries')
+          .select('id, shop_id, delivery_date, status, notes, created_at, delivery_items(product_id, quantity)')
+          .order('delivery_date', { ascending: false });
 
-      if (!error && data) {
-        const [shops, prods] = await Promise.all([getShops(), getProducts()]);
-        const shopMap = new Map(shops.map(s => [s.id, s.name]));
-        const prodMap = new Map(prods.map(p => [p.id, p]));
+        if (!error && Array.isArray(data)) {
+          const [shops, prods] = await Promise.all([getShops(), getProducts()]);
+          const shopMap = new Map(shops.map(s => [s.id, s.name]));
+          const prodMap = new Map(prods.map(p => [p.id, p]));
 
-        const deliveries: DeliveryRecord[] = data.map((d: any) => ({
-          id: d.id,
-          shopId: d.shop_id,
-          shopName: shopMap.get(d.shop_id) || 'Retail Store',
-          deliveryDate: d.delivery_date,
-          status: d.status as 'delivered' | 'pending' | 'cancelled',
-          notes: d.notes || '',
-          createdBy: 'Business Owner',
-          items: (d.delivery_items || []).map((i: any) => ({
-            productId: i.product_id,
-            productName: prodMap.get(i.product_id)?.name || 'Product',
-            productSku: prodMap.get(i.product_id)?.sku || '',
-            quantity: i.quantity
-          })),
-          createdAt: d.created_at
-        }));
-        setLocalItem(STORAGE_KEYS.DELIVERIES, deliveries);
-        return deliveries;
+          const deliveries: DeliveryRecord[] = data.map((d: any) => ({
+            id: d.id,
+            shopId: d.shop_id,
+            shopName: shopMap.get(d.shop_id) || 'Retail Store',
+            deliveryDate: d.delivery_date,
+            status: (d.status as 'delivered' | 'pending' | 'cancelled') || 'delivered',
+            notes: d.notes || '',
+            createdBy: 'Business Owner',
+            items: Array.isArray(d.delivery_items) ? d.delivery_items.map((i: any) => ({
+              productId: i.product_id,
+              productName: prodMap.get(i.product_id)?.name || 'Product',
+              productSku: prodMap.get(i.product_id)?.sku || '',
+              quantity: Number(i.quantity) || 0
+            })) : [],
+            createdAt: d.created_at
+          }));
+          setLocalCache(STORAGE_KEYS.DELIVERIES, deliveries);
+          return deliveries;
+        }
+      } catch (err) {
+        console.warn('Supabase getDeliveries error, using local fallback:', err);
       }
-    } catch (err) {
-      console.warn('Supabase getDeliveries error, using local fallback:', err);
     }
-  }
-  return getLocalItem<DeliveryRecord[]>(STORAGE_KEYS.DELIVERIES, []);
+    const local = getLocalItem<DeliveryRecord[]>(STORAGE_KEYS.DELIVERIES, []);
+    return local.map(d => ({
+      ...d,
+      items: Array.isArray(d.items) ? d.items : []
+    }));
+  });
 }
 
 export async function recordDelivery(input: Omit<DeliveryRecord, 'id' | 'createdAt'>): Promise<DeliveryRecord> {
@@ -566,50 +632,58 @@ export async function recordDelivery(input: Omit<DeliveryRecord, 'id' | 'created
 // DAILY REPORTS
 // ----------------------------------------------------
 export async function getDailyReports(): Promise<DailyReportRecord[]> {
-  if (isSupabaseConfigured && supabase) {
-    try {
-      const { data, error } = await supabase
-        .from('daily_reports')
-        .select('*, daily_report_items(*)')
-        .order('report_date', { ascending: false });
+  return dedupeRequest('daily_reports', async () => {
+    if (isSupabaseConfigured && supabase) {
+      try {
+        const { data, error } = await supabase
+          .from('daily_reports')
+          .select('id, shop_id, report_date, is_zero_sales, status, notes, created_at, daily_report_items(product_id, quantity_sold)')
+          .order('report_date', { ascending: false });
 
-      if (!error && data) {
-        const [shops, prods] = await Promise.all([getShops(), getProducts()]);
-        const shopMap = new Map(shops.map(s => [s.id, s.name]));
-        const prodMap = new Map(prods.map(p => [p.id, p]));
+        if (!error && Array.isArray(data)) {
+          const [shops, prods] = await Promise.all([getShops(), getProducts()]);
+          const shopMap = new Map(shops.map(s => [s.id, s.name]));
+          const prodMap = new Map(prods.map(p => [p.id, p]));
 
-        const reports: DailyReportRecord[] = data.map((r: any) => {
-          const items = (r.daily_report_items || []).map((i: any) => ({
-            productId: i.product_id,
-            productName: prodMap.get(i.product_id)?.name || 'Product',
-            quantitySold: i.quantity_sold,
-            physicalCount: null
-          }));
-          const totalQuantitySold = items.reduce((s: number, i: any) => s + i.quantitySold, 0);
+          const reports: DailyReportRecord[] = data.map((r: any) => {
+            const rawItems = Array.isArray(r.daily_report_items) ? r.daily_report_items : [];
+            const items = rawItems.map((i: any) => ({
+              productId: i.product_id,
+              productName: prodMap.get(i.product_id)?.name || 'Product',
+              quantitySold: Number(i.quantity_sold) || 0,
+              physicalCount: null
+            }));
+            const totalQuantitySold = items.reduce((s: number, i: any) => s + (i.quantitySold || 0), 0);
 
-          return {
-            id: r.id,
-            shopId: r.shop_id,
-            shopName: shopMap.get(r.shop_id) || 'Retail Store',
-            reportDate: r.report_date,
-            isZeroSales: r.is_zero_sales,
-            status: r.status as 'submitted' | 'approved' | 'rejected',
-            submittedBy: 'Store Staff',
-            submittedAt: new Date(r.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-            notes: r.notes || '',
-            items,
-            totalQuantitySold,
-            createdAt: r.created_at
-          };
-        });
-        setLocalItem(STORAGE_KEYS.REPORTS, reports);
-        return reports;
+            return {
+              id: r.id,
+              shopId: r.shop_id,
+              shopName: shopMap.get(r.shop_id) || 'Retail Store',
+              reportDate: r.report_date,
+              isZeroSales: Boolean(r.is_zero_sales),
+              status: (r.status as 'submitted' | 'approved' | 'rejected') || 'submitted',
+              submittedBy: 'Store Staff',
+              submittedAt: r.created_at ? new Date(r.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '18:00',
+              notes: r.notes || '',
+              items,
+              totalQuantitySold,
+              createdAt: r.created_at
+            };
+          });
+          setLocalCache(STORAGE_KEYS.REPORTS, reports);
+          return reports;
+        }
+      } catch (err) {
+        console.warn('Supabase getDailyReports error, using local fallback:', err);
       }
-    } catch (err) {
-      console.warn('Supabase getDailyReports error, using local fallback:', err);
     }
-  }
-  return getLocalItem<DailyReportRecord[]>(STORAGE_KEYS.REPORTS, []);
+    const local = getLocalItem<DailyReportRecord[]>(STORAGE_KEYS.REPORTS, []);
+    return local.map(r => ({
+      ...r,
+      items: Array.isArray(r.items) ? r.items : [],
+      totalQuantitySold: typeof r.totalQuantitySold === 'number' ? r.totalQuantitySold : (Array.isArray(r.items) ? r.items.reduce((s, i) => s + (i.quantitySold || 0), 0) : 0)
+    }));
+  });
 }
 
 export async function submitDailyReport(input: Omit<DailyReportRecord, 'id' | 'createdAt'>): Promise<DailyReportRecord> {
@@ -734,7 +808,9 @@ export async function approveDailyReport(id: string): Promise<void> {
 // STOCK TRANSFERS
 // ----------------------------------------------------
 export async function getStockTransfers(): Promise<StockTransferRecord[]> {
-  return getLocalItem<StockTransferRecord[]>(STORAGE_KEYS.TRANSFERS, []);
+  return dedupeRequest('transfers', async () => {
+    return getLocalItem<StockTransferRecord[]>(STORAGE_KEYS.TRANSFERS, []);
+  });
 }
 
 export async function recordStockTransfer(input: Omit<StockTransferRecord, 'id' | 'createdAt'>): Promise<StockTransferRecord> {
@@ -752,28 +828,33 @@ export async function recordStockTransfer(input: Omit<StockTransferRecord, 'id' 
 // STOCK AUDITS (PHYSICAL COUNTS)
 // ----------------------------------------------------
 export async function getStockAudits(): Promise<StockAuditRecord[]> {
-  if (isSupabaseConfigured && supabase) {
-    try {
-      const { data, error } = await supabase.from('stock_counts').select('*').order('created_at', { ascending: false });
-      if (!error && data) {
-        const audits: StockAuditRecord[] = data.map((c: any) => ({
-          id: c.id,
-          shopId: c.shop_id,
-          productId: c.product_id,
-          physicalCount: c.counted_quantity,
-          expectedCount: c.expected_quantity,
-          discrepancy: c.variance,
-          countedAt: c.created_at.slice(0, 10),
-          notes: c.notes || undefined
-        }));
-        setLocalItem(STORAGE_KEYS.AUDITS, audits);
-        return audits;
+  return dedupeRequest('stock_audits', async () => {
+    if (isSupabaseConfigured && supabase) {
+      try {
+        const { data, error } = await supabase
+          .from('stock_counts')
+          .select('id, shop_id, product_id, counted_quantity, expected_quantity, variance, created_at, notes')
+          .order('created_at', { ascending: false });
+        if (!error && Array.isArray(data)) {
+          const audits: StockAuditRecord[] = data.map((c: any) => ({
+            id: c.id,
+            shopId: c.shop_id,
+            productId: c.product_id,
+            physicalCount: Number(c.counted_quantity) || 0,
+            expectedCount: Number(c.expected_quantity) || 0,
+            discrepancy: Number(c.variance) || 0,
+            countedAt: c.created_at ? c.created_at.slice(0, 10) : new Date().toISOString().slice(0, 10),
+            notes: c.notes || undefined
+          }));
+          setLocalCache(STORAGE_KEYS.AUDITS, audits);
+          return audits;
+        }
+      } catch (err) {
+        console.warn('Supabase getStockAudits error, fallback to local:', err);
       }
-    } catch (err) {
-      console.warn('Supabase getStockAudits error, fallback to local:', err);
     }
-  }
-  return getLocalItem<StockAuditRecord[]>(STORAGE_KEYS.AUDITS, []);
+    return getLocalItem<StockAuditRecord[]>(STORAGE_KEYS.AUDITS, []);
+  });
 }
 
 export async function recordStockAudit(input: Omit<StockAuditRecord, 'id'>): Promise<StockAuditRecord> {
@@ -829,7 +910,9 @@ export async function recordStockAudit(input: Omit<StockAuditRecord, 'id'>): Pro
 // INVOICES & PAYMENTS (SHOP CASH TRACKING)
 // ----------------------------------------------------
 export async function getInvoices(): Promise<Invoice[]> {
-  return getLocalItem<Invoice[]>(STORAGE_KEYS.INVOICES, []);
+  return dedupeRequest('invoices', async () => {
+    return getLocalItem<Invoice[]>(STORAGE_KEYS.INVOICES, []);
+  });
 }
 
 export async function saveInvoice(input: Omit<Invoice, 'id'> & { id?: string }): Promise<Invoice> {
@@ -848,7 +931,9 @@ export async function saveInvoice(input: Omit<Invoice, 'id'> & { id?: string }):
 }
 
 export async function getPayments(): Promise<PaymentRecord[]> {
-  return getLocalItem<PaymentRecord[]>(STORAGE_KEYS.PAYMENTS, []);
+  return dedupeRequest('payments', async () => {
+    return getLocalItem<PaymentRecord[]>(STORAGE_KEYS.PAYMENTS, []);
+  });
 }
 
 export async function recordPayment(input: Omit<PaymentRecord, 'id' | 'created_at'>): Promise<PaymentRecord> {
@@ -885,69 +970,92 @@ export async function recordPayment(input: Omit<PaymentRecord, 'id' | 'created_a
 // ----------------------------------------------------
 // DYNAMIC STOCK CALCULATION ENGINE
 // ----------------------------------------------------
-export async function calculateStockBalances(shopIdFilter?: string): Promise<StockBalance[]> {
-  const shops = await getShops();
-  const products = await getProducts();
-  const deliveries = await getDeliveries();
-  const reports = await getDailyReports();
-  const transfers = await getStockTransfers();
-  const audits = await getStockAudits();
+export interface PreloadedStockData {
+  shops?: Shop[];
+  products?: Product[];
+  deliveries?: DeliveryRecord[];
+  reports?: DailyReportRecord[];
+  transfers?: StockTransferRecord[];
+  audits?: StockAuditRecord[];
+}
+
+export async function calculateStockBalances(
+  shopIdFilter?: string,
+  preloaded?: PreloadedStockData
+): Promise<StockBalance[]> {
+  const [shops, products, deliveries, reports, transfers, audits] = await Promise.all([
+    preloaded?.shops ? Promise.resolve(preloaded.shops) : getShops(),
+    preloaded?.products ? Promise.resolve(preloaded.products) : getProducts(),
+    preloaded?.deliveries ? Promise.resolve(preloaded.deliveries) : getDeliveries(),
+    preloaded?.reports ? Promise.resolve(preloaded.reports) : getDailyReports(),
+    preloaded?.transfers ? Promise.resolve(preloaded.transfers) : getStockTransfers(),
+    preloaded?.audits ? Promise.resolve(preloaded.audits) : getStockAudits()
+  ]);
 
   const filteredShops = shopIdFilter && shopIdFilter !== 'all'
     ? shops.filter(s => s.id === shopIdFilter)
     : shops;
 
+  // Pre-index deliveries by `${shopId}:${productId}` -> total quantity
+  const deliveryMap = new Map<string, number>();
+  for (const d of deliveries) {
+    if (d.status === 'delivered' && Array.isArray(d.items)) {
+      for (const item of d.items) {
+        const key = `${d.shopId}:${item.productId}`;
+        deliveryMap.set(key, (deliveryMap.get(key) || 0) + (Number(item.quantity) || 0));
+      }
+    }
+  }
+
+  // Pre-index reports by `${shopId}:${productId}`
+  const confirmedSoldMap = new Map<string, number>();
+  const provisionalSoldMap = new Map<string, number>();
+  for (const rep of reports) {
+    if (!rep.isZeroSales && Array.isArray(rep.items)) {
+      for (const item of rep.items) {
+        const key = `${rep.shopId}:${item.productId}`;
+        const qty = Number(item.quantitySold) || 0;
+        if (rep.status === 'approved') {
+          confirmedSoldMap.set(key, (confirmedSoldMap.get(key) || 0) + qty);
+        } else if (rep.status === 'submitted') {
+          provisionalSoldMap.set(key, (provisionalSoldMap.get(key) || 0) + qty);
+        }
+      }
+    }
+  }
+
+  // Pre-index transfers
+  const transferredInMap = new Map<string, number>();
+  const transferredOutMap = new Map<string, number>();
+  for (const trf of transfers) {
+    const inKey = `${trf.toShopId}:${trf.productId}`;
+    const outKey = `${trf.fromShopId}:${trf.productId}`;
+    transferredInMap.set(inKey, (transferredInMap.get(inKey) || 0) + (Number(trf.quantity) || 0));
+    transferredOutMap.set(outKey, (transferredOutMap.get(outKey) || 0) + (Number(trf.quantity) || 0));
+  }
+
+  // Pre-index latest audits
+  const auditMap = new Map<string, StockAuditRecord>();
+  for (const a of audits) {
+    const key = `${a.shopId}:${a.productId}`;
+    if (!auditMap.has(key)) {
+      auditMap.set(key, a);
+    }
+  }
+
   const balances: StockBalance[] = [];
 
   for (const shop of filteredShops) {
     for (const prod of products) {
-      // 1. Deliveries sum
-      let totalDelivered = 0;
-      for (const d of deliveries) {
-        if (d.shopId === shop.id && d.status === 'delivered') {
-          for (const item of d.items) {
-            if (item.productId === prod.id) {
-              totalDelivered += item.quantity;
-            }
-          }
-        }
-      }
+      const key = `${shop.id}:${prod.id}`;
+      const totalDelivered = deliveryMap.get(key) || 0;
+      const confirmedSold = confirmedSoldMap.get(key) || 0;
+      const provisionalSold = provisionalSoldMap.get(key) || 0;
+      const transferredIn = transferredInMap.get(key) || 0;
+      const transferredOut = transferredOutMap.get(key) || 0;
 
-      // 2. Sales sum from daily reports
-      let confirmedSold = 0;
-      let provisionalSold = 0;
-      for (const rep of reports) {
-        if (rep.shopId === shop.id && !rep.isZeroSales) {
-          for (const item of rep.items) {
-            if (item.productId === prod.id) {
-              if (rep.status === 'approved') {
-                confirmedSold += item.quantitySold;
-              } else if (rep.status === 'submitted') {
-                provisionalSold += item.quantitySold;
-              }
-            }
-          }
-        }
-      }
-
-      // 3. Transfers sum
-      let transferredIn = 0;
-      let transferredOut = 0;
-      for (const trf of transfers) {
-        if (trf.productId === prod.id) {
-          if (trf.toShopId === shop.id) transferredIn += trf.quantity;
-          if (trf.fromShopId === shop.id) transferredOut += trf.quantity;
-        }
-      }
-
-      // 4. Expected stock calculation
       const expectedStock = totalDelivered - (confirmedSold + provisionalSold) + transferredIn - transferredOut;
-
-      // Only include products that have stock, deliveries, or are active in catalog
-      // 5. Audits
-      const shopAudits = audits.filter(a => a.shopId === shop.id && a.productId === prod.id);
-      const latestAudit = shopAudits[0] ?? null;
-
+      const latestAudit = auditMap.get(key) || null;
       const physicalCount = latestAudit ? latestAudit.physicalCount : null;
       const discrepancy = physicalCount !== null ? physicalCount - expectedStock : null;
 
