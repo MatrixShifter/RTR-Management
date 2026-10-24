@@ -1,7 +1,10 @@
 import { z } from 'zod';
 
-// Roles & Permissions
-export const UserRoleSchema = z.enum(['owner', 'employee']);
+// Roles & Permissions & Demo Config
+export const DEMO_USERNAME = 'demo-owner';
+export const DEMO_PASSWORD_PLACEHOLDER = 'Configure-a-unique-demo-password';
+
+export const UserRoleSchema = z.enum(['owner', 'employee', 'demo']);
 export type UserRole = z.infer<typeof UserRoleSchema>;
 
 // Business & Membership
@@ -72,6 +75,9 @@ export const CreateProductSchema = ProductSchema.omit({
 export type CreateProductInput = z.infer<typeof CreateProductSchema>;
 
 // Deliveries
+export const PaymentStatusSchema = z.enum(['fully_paid', 'partially_paid', 'unpaid']);
+export type PaymentStatus = z.infer<typeof PaymentStatusSchema>;
+
 export const DeliveryStatusSchema = z.enum(['pending', 'delivered', 'cancelled']);
 export type DeliveryStatus = z.infer<typeof DeliveryStatusSchema>;
 
@@ -80,6 +86,8 @@ export const DeliveryItemSchema = z.object({
   delivery_id: z.string().uuid().optional(),
   product_id: z.string().uuid(),
   quantity: z.number().int().positive('Quantity must be greater than 0'),
+  unit_price: z.number().nonnegative('Unit price must be non-negative').default(0).optional(),
+  total_price: z.number().nonnegative().optional(),
   notes: z.string().max(255).optional().nullable()
 });
 export type DeliveryItem = z.infer<typeof DeliveryItemSchema>;
@@ -88,6 +96,10 @@ export const CreateDeliverySchema = z.object({
   business_id: z.string().uuid(),
   shop_id: z.string().uuid(),
   delivery_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Format must be YYYY-MM-DD'),
+  status: DeliveryStatusSchema.default('delivered').optional(),
+  total_amount: z.number().nonnegative().optional(),
+  amount_paid: z.number().nonnegative().optional(),
+  payment_status: PaymentStatusSchema.optional(),
   notes: z.string().max(500).optional().nullable(),
   items: z.array(DeliveryItemSchema).min(1, 'At least one product item is required'),
   idempotency_key: z.string().uuid().optional()
@@ -171,8 +183,6 @@ export type CreateStockTransferInput = z.infer<typeof CreateStockTransferSchema>
 export const PaymentMethodSchema = z.enum(['CASH', 'UPI', 'BANK_TRANSFER', 'CHEQUE', 'OTHER']);
 export type PaymentMethod = z.infer<typeof PaymentMethodSchema>;
 
-export const PaymentStatusSchema = z.enum(['fully_paid', 'partially_paid', 'unpaid']);
-export type PaymentStatus = z.infer<typeof PaymentStatusSchema>;
 
 export const InvoiceSchema = z.object({
   id: z.string().uuid(),
@@ -208,6 +218,7 @@ export const PaymentRecordSchema = z.object({
   business_id: z.string().uuid(),
   shop_id: z.string().uuid(),
   shop_name: z.string().optional(),
+  delivery_id: z.string().uuid().optional().nullable(),
   invoice_id: z.string().uuid().optional().nullable(),
   payment_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Format must be YYYY-MM-DD'),
   amount: z.number().positive('Payment amount must be positive'),
@@ -223,6 +234,7 @@ export type PaymentRecord = z.infer<typeof PaymentRecordSchema>;
 export const CreatePaymentSchema = z.object({
   business_id: z.string().uuid(),
   shop_id: z.string().uuid(),
+  delivery_id: z.string().uuid().optional().nullable(),
   invoice_id: z.string().uuid().optional().nullable(),
   payment_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Format must be YYYY-MM-DD'),
   amount: z.number().positive('Payment amount must be greater than 0'),
@@ -316,6 +328,166 @@ export function calculatePaymentStatus(totalDue: number, totalPaid: number): {
     }
   };
 }
+
+// ==========================================
+// RECORD PRIORITY & DETERMINISTIC SORTING
+// ==========================================
+
+export type RecordPriorityRank = 1 | 2 | 3 | 4;
+
+export type RecordSortField = 'date' | 'shop' | 'product' | 'quantity' | 'unitPrice' | 'pendingAmount';
+export type RecordSortDirection = 'asc' | 'desc';
+
+export interface RecordPriorityInput {
+  deliveryStatus?: 'delivered' | 'pending' | 'cancelled' | string;
+  totalAmount?: number | null;
+  pendingAmount?: number | null;
+  amountPaid?: number | null;
+  quantity?: number | null;
+  unitPrice?: number | null;
+  date?: string;
+  createdAt?: string;
+  id?: string;
+  shopName?: string;
+  productName?: string;
+}
+
+/**
+ * Calculates deterministic priority rank for business records in RTR Wholesale Management:
+ *
+ * 1. Pending: Incomplete delivery or outstanding payment (specifically: delivery is pending and unpaid).
+ * 2. Partially completed / partially paid: Records in progress or with remaining balance
+ *    (e.g., delivered with partial payment, or delivery pending with partial payment or prepaid).
+ * 3. Delivered but payment pending: Delivery is complete, but customer still owes full money.
+ * 4. Completed and fully settled: Delivery is complete and outstanding payment is zero.
+ */
+export function getRecordPriority(record: RecordPriorityInput): RecordPriorityRank {
+  const deliveryStatus = record.deliveryStatus || 'delivered';
+
+  // Resolve total amount from totalAmount or quantity * unitPrice
+  let total = Number(record.totalAmount);
+  if (isNaN(total) || total <= 0) {
+    const qty = Number(record.quantity) || 0;
+    const price = Number(record.unitPrice) || 0;
+    total = Math.max(0, qty * price);
+  } else {
+    total = Math.max(0, total);
+  }
+
+  const pending = Math.max(0, Number(record.pendingAmount) || 0);
+
+  // Derive paid amount
+  let paid = 0;
+  if (record.amountPaid !== undefined && record.amountPaid !== null && !isNaN(Number(record.amountPaid))) {
+    paid = Math.max(0, Number(record.amountPaid));
+  } else if (total > 0) {
+    paid = Math.max(0, Math.round((total - pending) * 100) / 100);
+  }
+
+  const isDeliveryComplete = deliveryStatus === 'delivered';
+  const isDeliveryPending = deliveryStatus === 'pending';
+  const isFullySettled = pending <= 0;
+  const isPartiallyPaid = paid > 0 && pending > 0;
+
+  // 4. Completed and fully settled: delivery is complete (or cancelled) and outstanding payment is zero.
+  if ((isDeliveryComplete || deliveryStatus === 'cancelled') && isFullySettled) {
+    return 4;
+  }
+
+  // 2. Partially completed / partially paid:
+  // - Records that are in progress or have a remaining balance (partial payment recorded)
+  // - Or delivery is pending but payment is already settled (prepaid delivery in progress)
+  if (isPartiallyPaid || (isDeliveryPending && isFullySettled)) {
+    return 2;
+  }
+
+  // 3. Delivered but payment pending: delivery is complete, but customer still owes full money (unpaid)
+  if (isDeliveryComplete && pending > 0) {
+    return 3;
+  }
+
+  // 1. Pending: records with incomplete delivery and unpaid balance
+  return 1;
+}
+
+/**
+ * Deterministic multi-tier comparator for business records:
+ * 1. Primary order: Priority Group Rank (1 -> 2 -> 3 -> 4)
+ * 2. Secondary order: Selected sort field (defaults to date descending, newest first)
+ * 3. Tie-breaker: Newer date first, newer createdAt first, then id
+ */
+export function compareBusinessRecords<T extends RecordPriorityInput>(
+  a: T,
+  b: T,
+  sortField: RecordSortField = 'date',
+  sortDirection: RecordSortDirection = 'desc'
+): number {
+  // 1. Primary Sort: Priority Group Rank
+  const rankA = getRecordPriority(a);
+  const rankB = getRecordPriority(b);
+  if (rankA !== rankB) {
+    return rankA - rankB; // Lower rank = higher priority at top
+  }
+
+  // 2. Secondary Sort: Selected field within the same priority group
+  let comparison = 0;
+  switch (sortField) {
+    case 'date':
+      comparison = (b.date || '').localeCompare(a.date || '');
+      if (comparison === 0) {
+        comparison = (b.createdAt || '').localeCompare(a.createdAt || '');
+      }
+      return sortDirection === 'asc' ? -comparison : comparison;
+
+    case 'shop':
+      comparison = (a.shopName || '').localeCompare(b.shopName || '');
+      break;
+
+    case 'product':
+      comparison = (a.productName || '').localeCompare(b.productName || '');
+      break;
+
+    case 'quantity':
+      comparison = (Number(a.quantity) || 0) - (Number(b.quantity) || 0);
+      break;
+
+    case 'unitPrice':
+      comparison = (Number(a.unitPrice) || 0) - (Number(b.unitPrice) || 0);
+      break;
+
+    case 'pendingAmount':
+      comparison = (Number(a.pendingAmount) || 0) - (Number(b.pendingAmount) || 0);
+      break;
+
+    default:
+      comparison = (b.date || '').localeCompare(a.date || '');
+  }
+
+  if (comparison !== 0) {
+    return sortDirection === 'asc' ? comparison : -comparison;
+  }
+
+  // Deterministic fallback tie-breaker: newest date first, then newest createdAt, then id
+  const dateComp = (b.date || '').localeCompare(a.date || '');
+  if (dateComp !== 0) return dateComp;
+
+  const createdComp = (b.createdAt || '').localeCompare(a.createdAt || '');
+  if (createdComp !== 0) return createdComp;
+
+  return (b.id || '').localeCompare(a.id || '');
+}
+
+/**
+ * Sorts an array of business records according to required wholesale priority order.
+ */
+export function sortBusinessRecords<T extends RecordPriorityInput>(
+  records: T[],
+  sortField: RecordSortField = 'date',
+  sortDirection: RecordSortDirection = 'desc'
+): T[] {
+  return [...records].sort((a, b) => compareBusinessRecords(a, b, sortField, sortDirection));
+}
+
 
 // Pending Work Model (Task List)
 export const PendingReportTaskSchema = z.object({
@@ -522,6 +694,45 @@ export function calculateGrossProfit(
   };
 }
 
+// Record & Payment Mutation Validation Schemas
+export const SaveBusinessRecordSchema = z.object({
+  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Date must be formatted as YYYY-MM-DD'),
+  shopName: z.string().min(1, 'Shop name is required').max(100),
+  shopId: z.string().optional().nullable(),
+  productName: z.string().min(1, 'Product name is required').max(150),
+  productId: z.string().optional().nullable(),
+  quantity: z.number().int('Quantity must be an integer').positive('Quantity must be greater than zero'),
+  unitPrice: z.number().nonnegative('Unit price cannot be negative'),
+  deliveryStatus: z.enum(['delivered', 'pending', 'cancelled']),
+  pendingAmount: z.number().nonnegative('Pending amount cannot be negative'),
+  paidAmount: z.number().nonnegative('Paid amount cannot be negative').optional(),
+  notes: z.string().max(1000).optional().nullable()
+});
+export type SaveBusinessRecordSchemaType = z.infer<typeof SaveBusinessRecordSchema>;
+
+export const UpdateBusinessRecordSchema = SaveBusinessRecordSchema.extend({
+  deliveryId: z.string().min(1, 'Delivery ID is required')
+});
+export type UpdateBusinessRecordSchemaType = z.infer<typeof UpdateBusinessRecordSchema>;
+
+export const SettlePaymentSchema = z.object({
+  deliveryId: z.string().min(1, 'Delivery ID is required'),
+  amountToPay: z.number().positive('Settlement amount must be positive').optional()
+});
+export type SettlePaymentSchemaType = z.infer<typeof SettlePaymentSchema>;
+
 // Database Schema Types
 export * from './database.types.js';
+
+// Database Capacity and Storage Error Handling
+export * from './storageErrors.js';
+export {
+  DATABASE_STORAGE_FULL_TITLE,
+  DATABASE_STORAGE_FULL_MESSAGE,
+  isDatabaseCapacityError,
+  DatabaseCapacityError,
+  type DatabaseStorageHealth,
+  type ErrorLike,
+  evaluateStorageHealth
+} from './storageErrors.js';
 

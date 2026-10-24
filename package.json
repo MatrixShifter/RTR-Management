@@ -9,16 +9,18 @@
   ],
   "scripts": {
     "build:shared": "npm run build --workspace=@crimpston/shared",
-    "build:web": "npm run build --workspace=@crimpston/web",
+    "build:web": "npm run build:shared && npm run build --workspace=@crimpston/web",
     "build:api": "npm run build:shared && npm run build --workspace=@crimpston/api",
     "build": "npm run build:shared && npm run build --workspaces",
     "test": "npm run test --workspaces",
+    "setup:demo": "npm run setup:demo --workspace=@crimpston/api",
     "dev:api": "npm run dev --workspace=@crimpston/api",
     "dev:web": "npm run dev --workspace=@crimpston/web",
     "lint": "npm run lint --workspaces"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4.3.3",
+    "pg-mem": "^3.0.14",
     "typescript": "^5.5.4"
   }
 }

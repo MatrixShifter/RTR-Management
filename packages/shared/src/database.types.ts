@@ -218,6 +218,10 @@ export interface Database {
           delivery_date: string;
           delivery_number: string | null;
           status: 'pending' | 'delivered' | 'cancelled';
+          total_amount: number;
+          amount_paid: number;
+          outstanding_amount: number;
+          payment_status: 'unpaid' | 'partially_paid' | 'fully_paid';
           notes: string | null;
           created_by: string;
           created_at: string;
@@ -230,6 +234,9 @@ export interface Database {
           delivery_date: string;
           delivery_number?: string | null;
           status?: 'pending' | 'delivered' | 'cancelled';
+          total_amount?: number;
+          amount_paid?: number;
+          payment_status?: 'unpaid' | 'partially_paid' | 'fully_paid';
           notes?: string | null;
           created_by: string;
           created_at?: string;
@@ -242,6 +249,9 @@ export interface Database {
           delivery_date?: string;
           delivery_number?: string | null;
           status?: 'pending' | 'delivered' | 'cancelled';
+          total_amount?: number;
+          amount_paid?: number;
+          payment_status?: 'unpaid' | 'partially_paid' | 'fully_paid';
           notes?: string | null;
           created_by?: string;
           created_at?: string;
@@ -560,6 +570,7 @@ export interface Database {
           business_id: string;
           shop_id: string;
           invoice_id: string | null;
+          delivery_id: string | null;
           payment_date: string;
           amount: number;
           payment_method: 'CASH' | 'UPI' | 'BANK_TRANSFER' | 'CHEQUE' | 'OTHER';
@@ -574,6 +585,7 @@ export interface Database {
           business_id: string;
           shop_id: string;
           invoice_id?: string | null;
+          delivery_id?: string | null;
           payment_date: string;
           amount: number;
           payment_method?: 'CASH' | 'UPI' | 'BANK_TRANSFER' | 'CHEQUE' | 'OTHER';
@@ -588,6 +600,7 @@ export interface Database {
           business_id?: string;
           shop_id?: string;
           invoice_id?: string | null;
+          delivery_id?: string | null;
           payment_date?: string;
           amount?: number;
           payment_method?: 'CASH' | 'UPI' | 'BANK_TRANSFER' | 'CHEQUE' | 'OTHER';

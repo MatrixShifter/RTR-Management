@@ -1148,15 +1148,15 @@ CREATE POLICY "idempotency_records_manage"
 -- directly through the application by the business owner.
 
 INSERT INTO public.businesses (id, name, timezone, report_cutoff_time)
-VALUES ('b0000000-0000-0000-0000-000000000001', 'RTR Wholesale Management', 'Asia/Kolkata', '21:00:00')
+VALUES ('4fba6fb7-4e1b-4106-ac84-908f821d73c3', 'RTR Wholesale Management', 'Asia/Kolkata', '21:00:00')
 ON CONFLICT (id) DO UPDATE
 SET name = EXCLUDED.name,
     timezone = EXCLUDED.timezone,
     report_cutoff_time = EXCLUDED.report_cutoff_time;
 
 -- Optional Owner Profile Fixture for Local Testing (Safe ON CONFLICT)
--- Note: When an owner signs up via Supabase Auth with ID 'u0000000-0000-0000-0000-000000000001',
+-- Note: When an owner signs up via Supabase Auth with ID 'b46689e9-754e-49b5-b79b-ebc1ee42538f',
 -- this grant assigns them the owner role immediately.
 INSERT INTO public.business_memberships (business_id, user_id, role)
-VALUES ('b0000000-0000-0000-0000-000000000001', 'u0000000-0000-0000-0000-000000000001', 'owner')
+VALUES ('4fba6fb7-4e1b-4106-ac84-908f821d73c3', 'b46689e9-754e-49b5-b79b-ebc1ee42538f', 'owner')
 ON CONFLICT DO NOTHING;

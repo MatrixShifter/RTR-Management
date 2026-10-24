@@ -24,7 +24,7 @@ INSERT INTO auth.users (
 )
 VALUES 
   (
-    'u0000000-0000-0000-0000-000000000001', 
+    'b46689e9-754e-49b5-b79b-ebc1ee42538f', 
     '00000000-0000-0000-0000-000000000000', 
     'owner@rtrmobiles.com', 
     crypt('dev_fixture_token', gen_salt('bf')), 
@@ -40,7 +40,7 @@ ON CONFLICT (id) DO NOTHING;
 
 -- 2. RTR Mobiles Business Workspace
 INSERT INTO public.businesses (id, name, timezone, report_cutoff_time)
-VALUES ('b0000000-0000-0000-0000-000000000001', 'RTR Wholesale Management', 'Asia/Kolkata', '21:00:00')
+VALUES ('4fba6fb7-4e1b-4106-ac84-908f821d73c3', 'RTR Wholesale Management', 'Asia/Kolkata', '21:00:00')
 ON CONFLICT (id) DO UPDATE
 SET name = EXCLUDED.name,
     timezone = EXCLUDED.timezone,
@@ -49,25 +49,25 @@ SET name = EXCLUDED.name,
 -- 3. Owner Profile
 INSERT INTO public.profiles (id, email, full_name)
 VALUES 
-  ('u0000000-0000-0000-0000-000000000001', 'owner@rtrmobiles.com', 'Business Owner')
+  ('b46689e9-754e-49b5-b79b-ebc1ee42538f', 'owner@rtrmobiles.com', 'Business Owner')
 ON CONFLICT (id) DO UPDATE
 SET full_name = EXCLUDED.full_name, email = EXCLUDED.email;
 
 -- 4. Owner Business Membership
 INSERT INTO public.business_memberships (business_id, user_id, role)
 VALUES
-  ('b0000000-0000-0000-0000-000000000001', 'u0000000-0000-0000-0000-000000000001', 'owner')
+  ('4fba6fb7-4e1b-4106-ac84-908f821d73c3', 'b46689e9-754e-49b5-b79b-ebc1ee42538f', 'owner')
 ON CONFLICT DO NOTHING;
 
 -- 5. Initial Audit Log
 INSERT INTO public.audit_logs (business_id, actor_id, action, target_entity, target_id, details)
 VALUES
   (
-    'b0000000-0000-0000-0000-000000000001', 
-    'u0000000-0000-0000-0000-000000000001', 
+    '4fba6fb7-4e1b-4106-ac84-908f821d73c3', 
+    'b46689e9-754e-49b5-b79b-ebc1ee42538f', 
     'WORKSPACE_INITIALIZED', 
     'businesses', 
-    'b0000000-0000-0000-0000-000000000001', 
+    '4fba6fb7-4e1b-4106-ac84-908f821d73c3', 
     '{"environment": "production", "system": "RTR Wholesale Management", "version": "1.0.0"}'::jsonb
   )
 ON CONFLICT DO NOTHING;
