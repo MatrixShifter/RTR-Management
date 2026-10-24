@@ -9,7 +9,6 @@ import {
   Menu, 
   X 
 } from 'lucide-react';
-import { Badge } from './ui/Badge.js';
 
 interface NavbarProps {
   userRole?: 'owner' | 'demo';
@@ -78,7 +77,7 @@ export const Navbar: React.FC<NavbarProps> = ({
           1. DESKTOP LEFT SIDEBAR (Dark Navy, matching screenshot)
          ======================================================== */}
       <aside 
-        className="fixed inset-y-0 left-0 w-64 bg-crimpston-navy w-[205px] bg-slate-900 text-slate-200 z-30 hidden lg:flex lg:flex-col border-r border-slate-800 shadow-sm select-none print:hidden"
+        className="fixed inset-y-0 left-0 w-64 bg-crimpston-navy w-[205px] bg-[#0C1E38] text-slate-200 z-30 hidden lg:flex lg:flex-col border-r border-[#152744] shadow-sm select-none print:hidden"
         aria-label="Main Desktop Navigation"
       >
         {/* Sidebar Brand Header */}
@@ -88,16 +87,16 @@ export const Navbar: React.FC<NavbarProps> = ({
             className="group block focus:outline-none"
             aria-label="RTR Management Home"
           >
-            <div className="flex items-center gap-2">
-              <div className="w-8 h-8 rounded-lg bg-crimpston-electric bg-blue-600 flex items-center justify-center font-black text-white text-xs tracking-wider shadow-sm flex-shrink-0">
+            <div className="flex items-center gap-2.5">
+              <div className="w-8 h-8 rounded-lg bg-crimpston-electric bg-[#168BFF] flex items-center justify-center font-black text-white text-xs tracking-wider shadow-sm flex-shrink-0">
                 RTR
               </div>
               <div className="flex flex-col">
-                <span className="font-extrabold text-lg tracking-tight text-white leading-none">
+                <span className="font-extrabold text-base tracking-tight text-white leading-tight">
                   RTR
                 </span>
-                <span className="text-[11px] text-slate-400 font-medium tracking-wide mt-0.5">
-                  Management
+                <span className="text-[10px] text-[#8FA2BA] font-medium tracking-wide">
+                  Wholesale Management
                 </span>
               </div>
             </div>
@@ -115,14 +114,14 @@ export const Navbar: React.FC<NavbarProps> = ({
                 <Link
                   key={link.to}
                   to={link.to}
-                  className={`flex items-center space-x-3 px-3 py-2 rounded-xl text-xs sm:text-sm font-medium tracking-normal whitespace-nowrap transition-all ${
+                  className={`flex items-center space-x-3 px-3 py-2.5 rounded-xl text-xs sm:text-sm font-medium tracking-normal whitespace-nowrap transition-all ${
                     isActive
-                      ? 'bg-[#2563EB] text-white font-semibold shadow-xs border-l-2 border-crimpston-electric/40 text-blue-400'
+                      ? 'bg-[#168BFF] text-white font-semibold shadow-xs border-l-2 border-crimpston-electric/40 text-blue-400'
                       : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
                   }`}
                 >
                   <Icon className={`w-4 h-4 flex-shrink-0 ${isActive ? 'text-white text-blue-400' : 'text-slate-400'}`} />
-                  <span>{link.label}</span>
+                  <span className="text-white font-medium">{link.label}</span>
                   {link.alias && <span className="sr-only">{link.alias}</span>}
                 </Link>
               );
@@ -131,53 +130,55 @@ export const Navbar: React.FC<NavbarProps> = ({
         </div>
 
         {/* Sidebar Footer: User, Settings & Logout */}
-        <div className="p-3 border-t border-slate-800/90 flex-shrink-0 bg-slate-900/60 space-y-1.5">
+        <div className="p-3 border-t border-slate-800/80 flex-shrink-0 bg-[#0A192F]/60 space-y-2">
           {userName && (
-            <div className="px-2 py-0.5 flex items-center justify-between text-xs text-slate-400">
-              <span className="truncate font-medium text-slate-300 max-w-[110px]">{userName}</span>
-              <Badge variant={userRole === 'demo' ? 'warning' : 'info'} size="sm">
-                {userRole.toUpperCase()}
-              </Badge>
+            <div className="flex items-center gap-2.5 px-2 py-1">
+              <div className="w-8 h-8 rounded-full bg-[#168BFF] text-white flex items-center justify-center font-bold text-xs flex-shrink-0 shadow-xs">
+                {userName.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase() || 'DO'}
+              </div>
+              <div className="flex flex-col min-w-0 flex-1">
+                <div className="flex items-center justify-between gap-1">
+                  <span className="truncate font-semibold text-xs text-white max-w-[90px]">{userName}</span>
+                  <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded uppercase tracking-wider ${
+                    userRole === 'demo' ? 'bg-amber-400/20 text-amber-300' : 'bg-blue-400/20 text-blue-300'
+                  }`}>
+                    {userRole.toUpperCase()}
+                  </span>
+                </div>
+                <div 
+                  className="flex items-center gap-1.5 text-[10px] text-slate-400 mt-0.5"
+                  title={isOnline ? "System connected and live" : "Working in offline mode"}
+                >
+                  <span className={`w-1.5 h-1.5 rounded-full ${isOnline ? 'bg-emerald-400' : 'bg-amber-400'}`} />
+                  <span>{isOnline ? 'Online' : 'Offline'}</span>
+                  <span className="sr-only">{isOnline ? 'Live' : 'Offline'}</span>
+                  <span className="sr-only">{isOnline ? 'System connected and live' : 'Working in offline mode'}</span>
+                </div>
+              </div>
             </div>
           )}
 
-          {/* Connectivity Status in Sidebar */}
-          <div 
-            className="hidden lg:flex items-center gap-1.5 px-2 py-1 rounded-md bg-slate-800/50 text-[10px] text-slate-300"
-            title={isOnline ? "System connected and live" : "Working in offline mode"}
-          >
-            {isOnline ? (
-              <>
-                <Wifi className="w-3 h-3 text-emerald-400" />
-                <span>Live</span>
-              </>
-            ) : (
-              <>
-                <WifiOff className="w-3 h-3 text-amber-400" />
-                <span className="text-amber-300">Offline</span>
-              </>
-            )}
+          <div className="pt-1 space-y-0.5">
+            <Link
+              to="/settings"
+              className={`flex items-center space-x-3 px-3 py-1.5 rounded-xl text-xs font-medium transition-colors ${
+                location.pathname === '/settings' || location.pathname === '/management'
+                  ? 'bg-slate-800 text-white font-semibold'
+                  : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
+              }`}
+            >
+              <Settings className="w-4 h-4 text-slate-400" />
+              <span>Settings</span>
+            </Link>
+
+            <button
+              onClick={onSignOut}
+              className="w-full flex items-center space-x-3 px-3 py-1.5 rounded-xl text-xs font-medium text-slate-400 hover:text-rose-400 hover:bg-slate-800/60 transition-colors text-left cursor-pointer"
+            >
+              <LogOut className="w-4 h-4" />
+              <span>Logout</span>
+            </button>
           </div>
-
-          <Link
-            to="/settings"
-            className={`flex items-center space-x-3 px-3 py-1.5 rounded-xl text-xs font-medium transition-colors ${
-              location.pathname === '/settings' || location.pathname === '/management'
-                ? 'bg-slate-800 text-white font-semibold'
-                : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
-            }`}
-          >
-            <Settings className="w-4 h-4 text-slate-400" />
-            <span>Settings</span>
-          </Link>
-
-          <button
-            onClick={onSignOut}
-            className="w-full flex items-center space-x-3 px-3 py-1.5 rounded-xl text-xs font-medium text-slate-400 hover:text-rose-400 hover:bg-slate-800/60 transition-colors text-left cursor-pointer"
-          >
-            <LogOut className="w-4 h-4" />
-            <span>Logout</span>
-          </button>
         </div>
       </aside>
 

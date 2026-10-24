@@ -115,7 +115,7 @@ export const RecordActionsMenu: React.FC<RecordActionsMenuProps> = ({
         width: '175px',
         zIndex: 9999
       }}
-      className={`bg-white rounded-xl shadow-xl border border-slate-200/90 py-1.5 text-left text-xs font-medium text-slate-700 animate-fade-in outline-none select-none transition-transform ${
+      className={`bg-white rounded-xl shadow-xl border border-[#D8E7F7] py-1.5 text-left text-xs font-medium text-[#102A4C] animate-fade-in outline-none select-none transition-transform ${
         coords.openUpward ? 'origin-bottom-right' : 'origin-top-right'
       }`}
     >
@@ -127,9 +127,9 @@ export const RecordActionsMenu: React.FC<RecordActionsMenuProps> = ({
           onClose();
           if (handleView) handleView(record);
         }}
-        className="w-full flex items-center gap-2.5 px-3.5 py-2 hover:bg-slate-50 text-slate-700 transition-colors cursor-pointer text-left focus:bg-slate-50 focus:outline-none"
+        className="w-full flex items-center gap-2.5 px-3.5 py-2 hover:bg-[#F4F9FF] text-[#102A4C] transition-colors cursor-pointer text-left focus:bg-[#F4F9FF] focus:outline-none"
       >
-        <Eye className="w-3.5 h-3.5 text-slate-500 flex-shrink-0" />
+        <Eye className="w-3.5 h-3.5 text-[#637A98] flex-shrink-0" />
         <span>View Details</span>
       </button>
 
@@ -141,9 +141,9 @@ export const RecordActionsMenu: React.FC<RecordActionsMenuProps> = ({
           onClose();
           onEdit(record);
         }}
-        className="w-full flex items-center gap-2.5 px-3.5 py-2 hover:bg-slate-50 text-slate-700 transition-colors cursor-pointer text-left focus:bg-slate-50 focus:outline-none"
+        className="w-full flex items-center gap-2.5 px-3.5 py-2 hover:bg-[#F4F9FF] text-[#102A4C] transition-colors cursor-pointer text-left focus:bg-[#F4F9FF] focus:outline-none"
       >
-        <Edit2 className="w-3.5 h-3.5 text-slate-500 flex-shrink-0" />
+        <Edit2 className="w-3.5 h-3.5 text-[#168BFF] flex-shrink-0" />
         <span>Edit Record</span>
       </button>
 
@@ -163,7 +163,7 @@ export const RecordActionsMenu: React.FC<RecordActionsMenuProps> = ({
         </button>
       )}
 
-      <div className="border-t border-slate-100 my-1" />
+      <div className="border-t border-[#EAF2FA] my-1" />
 
       {/* 4. Delete Record */}
       <button

@@ -816,7 +816,7 @@ export const RecordEntryDrawer: React.FC<RecordEntryDrawerProps> = ({
               type="submit"
               form="record-entry-form"
               disabled={isSubmitting}
-              className="bg-[#2563EB] hover:bg-blue-700 text-white font-medium px-5 py-2.5 rounded-xl flex items-center gap-2 text-xs sm:text-sm shadow-sm transition-colors cursor-pointer disabled:opacity-50"
+              className="bg-[#168BFF] hover:bg-[#0876E8] active:bg-[#065EC2] text-white font-medium px-5 py-2.5 rounded-xl flex items-center gap-2 text-xs sm:text-sm shadow-xs transition-colors cursor-pointer disabled:opacity-50"
             >
               {isSubmitting ? (
                 <>

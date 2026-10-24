@@ -244,7 +244,7 @@ export const RecordDetailsModal: React.FC<RecordDetailsModalProps> = ({
                   onClose();
                   onEdit(record);
                 }}
-                className="bg-[#2563EB] hover:bg-blue-700 text-white px-3.5 py-2 rounded-xl text-xs font-semibold flex items-center gap-1.5 shadow-xs transition-colors cursor-pointer"
+                className="bg-[#168BFF] hover:bg-[#0876E8] text-white px-3.5 py-2 rounded-xl text-xs font-semibold flex items-center gap-1.5 shadow-xs transition-colors cursor-pointer"
               >
                 <Edit2 className="w-3.5 h-3.5" />
                 <span>Edit Record</span>

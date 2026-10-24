@@ -301,7 +301,7 @@ const AppContent: React.FC = () => {
         </Suspense>
       ) : (
         // Protected Workspace Routes (Owner Only)
-        <div className="min-h-screen bg-crimpston-offwhite text-slate-800 flex flex-col font-sans">
+        <div className="min-h-screen bg-[#F4F9FF] text-[#102A4C] flex flex-col font-sans">
           <Navbar
             userRole={currentUser.role}
             userName={currentUser.name}

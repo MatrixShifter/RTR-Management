@@ -1,17 +1,26 @@
 @import "tailwindcss";
 
 @theme {
-  --color-crimpston-navy: #0A192F;
+  --color-sky-primary: #168BFF;
+  --color-sky-hover: #0876E8;
+  --color-sky-bg: #F4F9FF;
+  --color-sky-surface: #EAF4FF;
+  --color-navy-text: #102A4C;
+  --color-text-secondary: #637A98;
+  --color-sky-border: #D8E7F7;
+  --color-crimpston-navy: #0B192C;
   --color-crimpston-slate: #1E293B;
-  --color-crimpston-electric: #2563EB;
-  --color-crimpston-electric-hover: #1D4ED8;
-  --color-crimpston-offwhite: #F8FAFC;
+  --color-crimpston-electric: #168BFF;
+  --color-crimpston-electric-hover: #0876E8;
+  --color-crimpston-offwhite: #F4F9FF;
   --color-crimpston-card: #FFFFFF;
-  --color-crimpston-border: #E2E8F0;
+  --color-crimpston-border: #D8E7F7;
 }
 
 @layer base {
   body {
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    background-color: #F4F9FF;
+    color: #102A4C;
   }
 }
