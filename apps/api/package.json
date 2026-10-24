@@ -4,6 +4,7 @@
   "main": "./dist/server.js",
   "type": "module",
   "scripts": {
+    "prebuild": "npm run build --workspace=@crimpston/shared",
     "dev": "tsx watch src/server.ts",
     "build": "tsc",
     "start": "node dist/server.js",
