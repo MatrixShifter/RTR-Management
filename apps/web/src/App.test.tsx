@@ -64,26 +64,25 @@ describe('SPA Fallback Routing & Vercel Deployment Configuration', () => {
   it('renders intended NotFound component for unknown routes', () => {
     const html = renderToString(
       <MemoryRouter initialEntries={['/non-existent-page-url']}>
-        <NotFound userRole="owner" />
+        <NotFound />
       </MemoryRouter>
     );
 
     expect(html).toContain('Error 404');
     expect(html).toContain('Page Not Found');
-    expect(html).toContain('Back to Overview');
-    expect(html).toContain('Stock Ledger');
-    expect(html).toContain('Deliveries');
+    expect(html).toContain('Back to Records');
   });
 
-  it('renders employee-specific return path on NotFound for staff role', () => {
+  it('renders owner return path on NotFound and does not include employee actions', () => {
     const html = renderToString(
       <MemoryRouter initialEntries={['/unknown-employee-path']}>
-        <NotFound userRole="employee" />
+        <NotFound />
       </MemoryRouter>
     );
 
     expect(html).toContain('Error 404');
-    expect(html).toContain('Back to Daily Report');
-    expect(html).not.toContain('Deliveries'); // Owner-only button omitted
+    expect(html).toContain('Back to Records');
+    expect(html).not.toContain('Back to Daily Report');
+    expect(html).not.toContain('Daily Report');
   });
 });

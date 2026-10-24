@@ -21,6 +21,28 @@ export function sanitizeData(data: unknown): unknown {
   return sanitized;
 }
 
+export interface SecurityEvent {
+  action: string;
+  actorId?: string;
+  targetId?: string;
+  status: 'SUCCESS' | 'FAILURE' | 'BLOCKED';
+  ip?: string;
+  details?: Record<string, unknown>;
+}
+
+export function logSecurityEvent(event: SecurityEvent): void {
+  const payload = {
+    level: 'security',
+    timestamp: new Date().toISOString(),
+    event: {
+      ...event,
+      details: sanitizeData(event.details)
+    }
+  };
+  // eslint-disable-next-line no-console
+  console.log(JSON.stringify(payload));
+}
+
 export const logger = {
   info: (message: string, meta?: unknown) => {
     // eslint-disable-next-line no-console

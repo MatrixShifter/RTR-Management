@@ -4,9 +4,9 @@ import { MemoryRouter } from 'react-router-dom';
 import { Navbar } from './Navbar.js';
 
 describe('Navbar Component — Responsive Sidebar & Top Header Architecture', () => {
-  it('renders all 7 owner navigation links vertically in the sidebar with whitespace-nowrap', () => {
+  it('renders Records, Settings, and Logout in the simplified sidebar with whitespace-nowrap', () => {
     const html = renderToString(
-      <MemoryRouter initialEntries={['/analytics']}>
+      <MemoryRouter initialEntries={['/']}>
         <Navbar
           userRole="owner"
           userName="Business Owner"
@@ -16,14 +16,15 @@ describe('Navbar Component — Responsive Sidebar & Top Header Architecture', ()
       </MemoryRouter>
     );
 
-    // Verify all 7 links
-    expect(html).toContain('Overview');
-    expect(html).toContain('Shops');
-    expect(html).toContain('Deliveries');
-    expect(html).toContain('Stock Ledger');
-    expect(html).toContain('Payments');
-    expect(html).toContain('History &amp; Analytics');
-    expect(html).toContain('Product Catalog');
+    // Verify Records is the central workspace link
+    expect(html).toContain('Records');
+    expect(html).toContain('Settings');
+    expect(html).toContain('Logout');
+
+    // Verify obsolete separate tabs are removed from user interface
+    expect(html).not.toContain('Stock Ledger');
+    expect(html).not.toContain('Product Catalog');
+    expect(html).not.toContain('Daily Report');
 
     // Verify whitespace-nowrap is present on navigation items
     expect(html).toContain('whitespace-nowrap');
@@ -65,7 +66,7 @@ describe('Navbar Component — Responsive Sidebar & Top Header Architecture', ()
 
   it('correctly distinguishes active route with refined styling in sidebar', () => {
     const html = renderToString(
-      <MemoryRouter initialEntries={['/catalog']}>
+      <MemoryRouter initialEntries={['/']}>
         <Navbar
           userRole="owner"
           userName="Business Owner"
@@ -108,22 +109,22 @@ describe('Navbar Component — Responsive Sidebar & Top Header Architecture', ()
     expect(htmlOffline).toContain('Offline');
   });
 
-  it('renders employee-specific links when userRole is employee', () => {
+  it('renders strictly owner badge and no employee links', () => {
     const html = renderToString(
-      <MemoryRouter initialEntries={['/employee']}>
+      <MemoryRouter initialEntries={['/']}>
         <Navbar
-          userRole="employee"
-          userName="Field Staff"
-          assignedShopName="City Central Mobiles"
+          userRole="owner"
+          userName="Business Owner"
           isOnline={true}
           onSignOut={vi.fn()}
         />
       </MemoryRouter>
     );
 
-    expect(html).toContain('Daily Report');
-    expect(html).toContain('Stock Overview');
-    expect(html).not.toContain('Product Catalog');
+    expect(html).toContain('OWNER');
+    expect(html).not.toContain('Daily Report');
+    expect(html).not.toContain('Stock Overview');
+    expect(html).not.toContain('EMPLOYEE');
   });
 
   it('includes accessible mobile toggle button with aria attributes', () => {

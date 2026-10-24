@@ -3,6 +3,7 @@ import path from 'path';
 
 const migrationPath = path.resolve('supabase/migrations/0001_initial_schema.sql');
 const seedPath = path.resolve('supabase/seed.sql');
+const canonicalSqlPath = path.resolve('database/rtr_complete.sql');
 
 function validateSqlFile(filePath) {
   const content = fs.readFileSync(filePath, 'utf8');
@@ -30,8 +31,8 @@ function validateSqlFile(filePath) {
     }
   }
 
-  // Verify key tables are present in migration
-  if (filePath.includes('0001_initial_schema.sql')) {
+  // Verify key tables are present in migration & canonical SQL
+  if (filePath.includes('0001_initial_schema.sql') || filePath.includes('rtr_complete.sql')) {
     const requiredTables = [
       'businesses',
       'profiles',
@@ -51,7 +52,7 @@ function validateSqlFile(filePath) {
     ];
 
     for (const table of requiredTables) {
-      if (!content.includes(`CREATE TABLE IF NOT EXISTS public.${table}`)) {
+      if (!content.includes(`CREATE TABLE IF NOT EXISTS public.${table}`) && !content.includes(`CREATE TABLE public.${table}`)) {
         throw new Error(`Missing table definition for public.${table}`);
       }
       if (!content.includes(`ALTER TABLE public.${table} ENABLE ROW LEVEL SECURITY;`)) {
@@ -68,6 +69,9 @@ function validateSqlFile(filePath) {
 try {
   validateSqlFile(migrationPath);
   validateSqlFile(seedPath);
+  if (fs.existsSync(canonicalSqlPath)) {
+    validateSqlFile(canonicalSqlPath);
+  }
   console.log('SUCCESS: All SQL migrations and seeds are validated!');
 } catch (err) {
   console.error('Validation failure:', err.message);

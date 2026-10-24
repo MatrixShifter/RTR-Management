@@ -1,0 +1,190 @@
+import React, { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
+import { Eye, Edit2, CreditCard, Trash2 } from 'lucide-react';
+import type { BusinessRecord } from '../services/db.js';
+
+export interface RecordActionsMenuProps {
+  record: BusinessRecord;
+  anchorRect: DOMRect | null;
+  onClose: () => void;
+  onView?: (record: BusinessRecord) => void;
+  onViewDetails?: (record: BusinessRecord) => void;
+  onEdit: (record: BusinessRecord) => void;
+  onSettlePayment?: (record: BusinessRecord) => void;
+  onRecordPayment?: (record: BusinessRecord) => void;
+  onDelete: (record: BusinessRecord) => void;
+}
+
+export const RecordActionsMenu: React.FC<RecordActionsMenuProps> = ({
+  record,
+  anchorRect,
+  onClose,
+  onView,
+  onViewDetails,
+  onEdit,
+  onSettlePayment,
+  onRecordPayment,
+  onDelete
+}) => {
+  const handleView = onViewDetails || onView;
+  const handleSettle = onRecordPayment || onSettlePayment;
+  const menuRef = useRef<HTMLDivElement>(null);
+  const pendingAmt = Number(record.pendingAmount) || 0;
+  const [coords, setCoords] = useState<{ top: number; left: number; openUpward: boolean }>({
+    top: 0,
+    left: 0,
+    openUpward: false
+  });
+
+  // Calculate collision-aware floating coordinates
+  useEffect(() => {
+    if (!anchorRect) return;
+
+    const menuWidth = 175;
+    const menuHeight = pendingAmt > 0 ? 155 : 118;
+    const padding = 8;
+
+    const spaceBelow = window.innerHeight - anchorRect.bottom;
+    const spaceAbove = anchorRect.top;
+    const openUpward = spaceBelow < menuHeight + padding && spaceAbove > menuHeight + padding;
+
+    const top = openUpward
+      ? Math.max(padding, anchorRect.top - menuHeight - 4)
+      : Math.min(window.innerHeight - menuHeight - padding, anchorRect.bottom + 4);
+
+    let left = anchorRect.right - menuWidth;
+    if (left < padding) left = padding;
+    if (left + menuWidth > window.innerWidth - padding) {
+      left = window.innerWidth - menuWidth - padding;
+    }
+
+    setCoords({ top, left, openUpward });
+  }, [anchorRect, pendingAmt]);
+
+  // Close handlers on outside click, Escape key, scroll, resize
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        onClose();
+      }
+    };
+
+    const handlePointerDown = (e: MouseEvent | TouchEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        onClose();
+      }
+    };
+
+    const handleScrollOrResize = () => {
+      onClose();
+    };
+
+    document.addEventListener('keydown', handleKeyDown);
+    document.addEventListener('mousedown', handlePointerDown);
+    document.addEventListener('touchstart', handlePointerDown);
+    window.addEventListener('scroll', handleScrollOrResize, true);
+    window.addEventListener('resize', handleScrollOrResize);
+
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown);
+      document.removeEventListener('mousedown', handlePointerDown);
+      document.removeEventListener('touchstart', handlePointerDown);
+      window.removeEventListener('scroll', handleScrollOrResize, true);
+      window.removeEventListener('resize', handleScrollOrResize);
+    };
+  }, [onClose]);
+
+  // Focus the menu container on open for keyboard accessibility
+  useEffect(() => {
+    menuRef.current?.focus();
+  }, []);
+
+  if (!anchorRect) return null;
+
+  const content = (
+    <div
+      ref={menuRef}
+      tabIndex={-1}
+      role="menu"
+      aria-label={`Actions for record ${record.shopName}`}
+      style={{
+        position: 'fixed',
+        top: `${coords.top}px`,
+        left: `${coords.left}px`,
+        width: '175px',
+        zIndex: 9999
+      }}
+      className={`bg-white rounded-xl shadow-xl border border-slate-200/90 py-1.5 text-left text-xs font-medium text-slate-700 animate-fade-in outline-none select-none transition-transform ${
+        coords.openUpward ? 'origin-bottom-right' : 'origin-top-right'
+      }`}
+    >
+      {/* 1. View Record Details */}
+      <button
+        type="button"
+        role="menuitem"
+        onClick={() => {
+          onClose();
+          if (handleView) handleView(record);
+        }}
+        className="w-full flex items-center gap-2.5 px-3.5 py-2 hover:bg-slate-50 text-slate-700 transition-colors cursor-pointer text-left focus:bg-slate-50 focus:outline-none"
+      >
+        <Eye className="w-3.5 h-3.5 text-slate-500 flex-shrink-0" />
+        <span>View Details</span>
+      </button>
+
+      {/* 2. Edit Record */}
+      <button
+        type="button"
+        role="menuitem"
+        onClick={() => {
+          onClose();
+          onEdit(record);
+        }}
+        className="w-full flex items-center gap-2.5 px-3.5 py-2 hover:bg-slate-50 text-slate-700 transition-colors cursor-pointer text-left focus:bg-slate-50 focus:outline-none"
+      >
+        <Edit2 className="w-3.5 h-3.5 text-slate-500 flex-shrink-0" />
+        <span>Edit Record</span>
+      </button>
+
+      {/* 3. Record Payment (Active when pending balance > 0) */}
+      {pendingAmt > 0 && (
+        <button
+          type="button"
+          role="menuitem"
+          onClick={() => {
+            onClose();
+            if (handleSettle) handleSettle(record);
+          }}
+          className="w-full flex items-center gap-2.5 px-3.5 py-2 hover:bg-emerald-50 text-emerald-700 transition-colors cursor-pointer text-left focus:bg-emerald-50 focus:outline-none"
+        >
+          <CreditCard className="w-3.5 h-3.5 text-emerald-600 flex-shrink-0" />
+          <span>Record Payment</span>
+        </button>
+      )}
+
+      <div className="border-t border-slate-100 my-1" />
+
+      {/* 4. Delete Record */}
+      <button
+        type="button"
+        role="menuitem"
+        onClick={() => {
+          onClose();
+          onDelete(record);
+        }}
+        className="w-full flex items-center gap-2.5 px-3.5 py-2 hover:bg-rose-50 text-rose-600 transition-colors cursor-pointer text-left focus:bg-rose-50 focus:outline-none"
+      >
+        <Trash2 className="w-3.5 h-3.5 text-rose-500 flex-shrink-0" />
+        <span>Delete Record</span>
+      </button>
+    </div>
+  );
+
+  // Use Portal to escape all table overflow clipping
+  if (typeof document !== 'undefined' && document.body) {
+    return createPortal(content, document.body);
+  }
+
+  return content;
+};

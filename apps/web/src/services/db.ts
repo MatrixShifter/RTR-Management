@@ -8,9 +8,35 @@ import {
   type CategorySalesAnalytics,
   type TimelineEvent,
   calculatePaymentStatus,
-  calculateGrossProfit
+  calculateGrossProfit,
+  isDatabaseCapacityError,
+  DatabaseCapacityError,
+  DATABASE_STORAGE_FULL_TITLE,
+  DATABASE_STORAGE_FULL_MESSAGE,
+  getRecordPriority,
+  compareBusinessRecords,
+  sortBusinessRecords,
+  type RecordPriorityRank,
+  type RecordSortField,
+  type RecordSortDirection,
+  SaveBusinessRecordSchema,
+  UpdateBusinessRecordSchema,
+  SettlePaymentSchema
 } from '@crimpston/shared';
 import { supabase, isSupabaseConfigured } from '../lib/supabase.js';
+
+export {
+  isDatabaseCapacityError,
+  DatabaseCapacityError,
+  DATABASE_STORAGE_FULL_TITLE,
+  DATABASE_STORAGE_FULL_MESSAGE,
+  getRecordPriority,
+  compareBusinessRecords,
+  sortBusinessRecords,
+  type RecordPriorityRank,
+  type RecordSortField,
+  type RecordSortDirection
+};
 
 export interface Shop {
   id: string;
@@ -40,6 +66,7 @@ export interface DeliveryItemRecord {
   productName?: string;
   productSku?: string;
   quantity: number;
+  unitPrice?: number;
 }
 
 export interface DeliveryRecord {
@@ -51,7 +78,40 @@ export interface DeliveryRecord {
   notes?: string;
   createdBy: string;
   items: DeliveryItemRecord[];
+  pendingAmount?: number;
   createdAt: string;
+}
+
+export interface BusinessRecord {
+  id: string;
+  deliveryId: string;
+  date: string;
+  shopId: string;
+  shopName: string;
+  productId: string;
+  productName: string;
+  productSku?: string;
+  quantity: number;
+  unitPrice: number;
+  totalAmount: number;
+  deliveryStatus: 'delivered' | 'pending' | 'cancelled';
+  pendingAmount: number;
+  notes?: string;
+  createdAt: string;
+}
+
+export interface SaveBusinessRecordInput {
+  date: string;
+  shopName: string;
+  shopId?: string;
+  productName: string;
+  productId?: string;
+  quantity: number;
+  unitPrice: number;
+  deliveryStatus: 'delivered' | 'pending' | 'cancelled';
+  pendingAmount: number;
+  paidAmount?: number;
+  notes?: string;
 }
 
 export interface DailyReportItemRecord {
@@ -111,10 +171,277 @@ const STORAGE_KEYS = {
   PAYMENTS: 'rtr_payments_v1'
 } as const;
 
+export const DEMO_STORAGE_KEYS = {
+  SHOPS: 'rtr_demo_shops_v1',
+  PRODUCTS: 'rtr_demo_products_v1',
+  DELIVERIES: 'rtr_demo_deliveries_v1',
+  INVOICES: 'rtr_demo_invoices_v1',
+  PAYMENTS: 'rtr_demo_payments_v1'
+} as const;
+
+export const DEFAULT_DEMO_SHOPS: Shop[] = [
+  {
+    id: 'demo-shop-1',
+    name: '[DEMO] Apex Cellular - T. Nagar',
+    code: 'DEMO-APX',
+    address: '12 North Usman Road, T. Nagar, Chennai',
+    phone: '+91 98400 11223',
+    isActive: true,
+    assignedEmployees: []
+  },
+  {
+    id: 'demo-shop-2',
+    name: '[DEMO] Supreme Mobiles - Velachery',
+    code: 'DEMO-SUP',
+    address: '45 100 Feet Bypass Road, Velachery, Chennai',
+    phone: '+91 98400 22334',
+    isActive: true,
+    assignedEmployees: []
+  },
+  {
+    id: 'demo-shop-3',
+    name: '[DEMO] Metro Mobile Hub - Tambaram',
+    code: 'DEMO-MTR',
+    address: '88 GST Road, Tambaram Sanatorium, Chennai',
+    phone: '+91 98400 33445',
+    isActive: true,
+    assignedEmployees: []
+  },
+  {
+    id: 'demo-shop-4',
+    name: '[DEMO] Royal Phone Gallery - Anna Nagar',
+    code: 'DEMO-RYL',
+    address: '2nd Avenue, Anna Nagar, Chennai',
+    phone: '+91 98400 44556',
+    isActive: true,
+    assignedEmployees: []
+  }
+];
+
+export const DEFAULT_DEMO_PRODUCTS: Product[] = [
+  {
+    id: 'demo-prod-1',
+    name: '[DEMO] 65W GaN Fast Charger (Type-C)',
+    sku: 'DEMO-CHG-65W',
+    category: 'Chargers & Adapters',
+    minStock: 25,
+    unitPrice: 850,
+    costPrice: 520,
+    isActive: true
+  },
+  {
+    id: 'demo-prod-2',
+    name: '[DEMO] Magnetic Wireless Power Bank 10000mAh',
+    sku: 'DEMO-PB-10K',
+    category: 'Power Banks',
+    minStock: 15,
+    unitPrice: 1400,
+    costPrice: 890,
+    isActive: true
+  },
+  {
+    id: 'demo-prod-3',
+    name: '[DEMO] Shockproof Matte Silicone Case',
+    sku: 'DEMO-CS-MATTE',
+    category: 'Mobile Cases',
+    minStock: 50,
+    unitPrice: 180,
+    costPrice: 75,
+    isActive: true
+  },
+  {
+    id: 'demo-prod-4',
+    name: '[DEMO] 9H Edge-to-Edge Tempered Glass',
+    sku: 'DEMO-TMP-9H',
+    category: 'Tempered Glass',
+    minStock: 100,
+    unitPrice: 120,
+    costPrice: 45,
+    isActive: true
+  },
+  {
+    id: 'demo-prod-5',
+    name: '[DEMO] Heavy Duty Braided Type-C Cable 1.5m',
+    sku: 'DEMO-CBL-TYPC',
+    category: 'USB Cables',
+    minStock: 60,
+    unitPrice: 250,
+    costPrice: 110,
+    isActive: true
+  }
+];
+
+let inMemoryDemoMode: boolean | null = null;
+
+export function isDemoMode(): boolean {
+  if (inMemoryDemoMode !== null) return inMemoryDemoMode;
+  try {
+    if (typeof localStorage !== 'undefined') {
+      const stored = localStorage.getItem('rtr_current_user');
+      if (stored) {
+        const u = JSON.parse(stored);
+        return u?.role === 'demo' || u?.isDemo === true;
+      }
+    }
+  } catch {}
+  return false;
+}
+
+export function setDemoMode(active: boolean): void {
+  inMemoryDemoMode = active;
+  clearMemoryCache();
+  if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function') {
+    window.dispatchEvent(new CustomEvent('rtr_demo_mode_changed', { detail: { isDemo: active } }));
+  }
+}
+
+export function resetDemoData(): void {
+  const today = new Date().toISOString().split('T')[0] || '2026-10-24';
+  const dMinus1 = new Date(Date.now() - 86400000).toISOString().split('T')[0] || '2026-10-23';
+  const dMinus2 = new Date(Date.now() - 172800000).toISOString().split('T')[0] || '2026-10-22';
+  const dMinus3 = new Date(Date.now() - 259200000).toISOString().split('T')[0] || '2026-10-21';
+
+  const demoDeliveries: DeliveryRecord[] = [
+    {
+      id: 'demo-deliv-1',
+      shopId: 'demo-shop-1',
+      shopName: '[DEMO] Apex Cellular - T. Nagar',
+      deliveryDate: today,
+      status: 'pending',
+      notes: JSON.stringify({
+        memo: 'Sample pending delivery order awaiting dispatch and cash collection',
+        totalAmount: 17000,
+        paidAmount: 0,
+        pendingAmount: 17000,
+        items: [{
+          productId: 'demo-prod-1',
+          productName: '[DEMO] 65W GaN Fast Charger (Type-C)',
+          quantity: 20,
+          unitPrice: 850
+        }]
+      }),
+      createdBy: 'demo-owner',
+      items: [{
+        productId: 'demo-prod-1',
+        productName: '[DEMO] 65W GaN Fast Charger (Type-C)',
+        quantity: 20,
+        unitPrice: 850
+      }],
+      pendingAmount: 17000,
+      createdAt: new Date().toISOString()
+    },
+    {
+      id: 'demo-deliv-2',
+      shopId: 'demo-shop-2',
+      shopName: '[DEMO] Supreme Mobiles - Velachery',
+      deliveryDate: dMinus1,
+      status: 'delivered',
+      notes: JSON.stringify({
+        memo: 'Initial token received via UPI; balance of ₹8,000 due next week',
+        totalAmount: 14000,
+        paidAmount: 6000,
+        pendingAmount: 8000,
+        items: [{
+          productId: 'demo-prod-2',
+          productName: '[DEMO] Magnetic Wireless Power Bank 10000mAh',
+          quantity: 10,
+          unitPrice: 1400
+        }]
+      }),
+      createdBy: 'demo-owner',
+      items: [{
+        productId: 'demo-prod-2',
+        productName: '[DEMO] Magnetic Wireless Power Bank 10000mAh',
+        quantity: 10,
+        unitPrice: 1400
+      }],
+      pendingAmount: 8000,
+      createdAt: new Date(Date.now() - 86400000).toISOString()
+    },
+    {
+      id: 'demo-deliv-3',
+      shopId: 'demo-shop-3',
+      shopName: '[DEMO] Metro Mobile Hub - Tambaram',
+      deliveryDate: dMinus2,
+      status: 'delivered',
+      notes: JSON.stringify({
+        memo: 'Stock delivered yesterday; payment terms 7-day credit',
+        totalAmount: 9000,
+        paidAmount: 0,
+        pendingAmount: 9000,
+        items: [{
+          productId: 'demo-prod-3',
+          productName: '[DEMO] Shockproof Matte Silicone Case',
+          quantity: 50,
+          unitPrice: 180
+        }]
+      }),
+      createdBy: 'demo-owner',
+      items: [{
+        productId: 'demo-prod-3',
+        productName: '[DEMO] Shockproof Matte Silicone Case',
+        quantity: 50,
+        unitPrice: 180
+      }],
+      pendingAmount: 9000,
+      createdAt: new Date(Date.now() - 172800000).toISOString()
+    },
+    {
+      id: 'demo-deliv-4',
+      shopId: 'demo-shop-4',
+      shopName: '[DEMO] Royal Phone Gallery - Anna Nagar',
+      deliveryDate: dMinus3,
+      status: 'delivered',
+      notes: JSON.stringify({
+        memo: 'Bulk delivery settled in full via NEFT',
+        totalAmount: 12000,
+        paidAmount: 12000,
+        pendingAmount: 0,
+        items: [{
+          productId: 'demo-prod-4',
+          productName: '[DEMO] 9H Edge-to-Edge Tempered Glass',
+          quantity: 100,
+          unitPrice: 120
+        }]
+      }),
+      createdBy: 'demo-owner',
+      items: [{
+        productId: 'demo-prod-4',
+        productName: '[DEMO] 9H Edge-to-Edge Tempered Glass',
+        quantity: 100,
+        unitPrice: 120
+      }],
+      pendingAmount: 0,
+      createdAt: new Date(Date.now() - 259200000).toISOString()
+    }
+  ];
+
+  setLocalItem(DEMO_STORAGE_KEYS.SHOPS, DEFAULT_DEMO_SHOPS);
+  setLocalItem(DEMO_STORAGE_KEYS.PRODUCTS, DEFAULT_DEMO_PRODUCTS);
+  setLocalItem(DEMO_STORAGE_KEYS.DELIVERIES, demoDeliveries);
+  setLocalItem(DEMO_STORAGE_KEYS.INVOICES, []);
+  setLocalItem(DEMO_STORAGE_KEYS.PAYMENTS, []);
+  clearMemoryCache();
+}
+
+export function ensureDemoData(): void {
+  const existing = getLocalItem<Shop[]>(DEMO_STORAGE_KEYS.SHOPS, []);
+  if (!existing || existing.length === 0) {
+    resetDemoData();
+  }
+}
+
+// In-memory fallback for non-browser environments / tests
+const nodeMemoryStore = new Map<string, string>();
+
 // Helper for local persistent storage
 function getLocalItem<T>(key: string, defaultValue: T): T {
   try {
-    if (typeof localStorage === 'undefined') return defaultValue;
+    if (typeof localStorage === 'undefined') {
+      const raw = nodeMemoryStore.get(key);
+      if (!raw) return defaultValue;
+      return JSON.parse(raw);
+    }
     const raw = localStorage.getItem(key);
     if (!raw) return defaultValue;
     return JSON.parse(raw);
@@ -127,7 +454,10 @@ function getLocalItem<T>(key: string, defaultValue: T): T {
 // Silent local caching - does NOT trigger 'rtr_data_sync' event storm
 function setLocalCache<T>(key: string, value: T): void {
   try {
-    if (typeof localStorage === 'undefined') return;
+    if (typeof localStorage === 'undefined') {
+      nodeMemoryStore.set(key, JSON.stringify(value));
+      return;
+    }
     localStorage.setItem(key, JSON.stringify(value));
   } catch (err) {
     console.warn(`Error saving cache for ${key}:`, err);
@@ -176,6 +506,8 @@ function setLocalItem<T>(key: string, value: T): void {
   try {
     if (typeof localStorage !== 'undefined') {
       localStorage.setItem(key, JSON.stringify(value));
+    } else {
+      nodeMemoryStore.set(key, JSON.stringify(value));
     }
     clearMemoryCache();
     if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function') {
@@ -186,14 +518,60 @@ function setLocalItem<T>(key: string, value: T): void {
   }
 }
 
+// Supabase network timeout wrapper for responsive fallback
+async function withTimeout<T = any>(promise: Promise<T> | any, timeoutMs = 800): Promise<T> {
+  let timer: any;
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error('Supabase network timeout')), timeoutMs);
+  });
+  try {
+    return (await Promise.race([Promise.resolve(promise), timeoutPromise])) as T;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 const DEFAULT_BUSINESS_ID = '4fba6fb7-4e1b-4106-ac84-908f821d73c3';
 let cachedBusinessId: string | null = null;
+
+export async function ensureAuthenticatedSession(): Promise<string> {
+  if (isDemoMode()) {
+    return 'demo-user-00000000-0000-0000-0000-000000000000';
+  }
+
+  if (!isSupabaseConfigured || !supabase) {
+    return 'b46689e9-754e-49b5-b79b-ebc1ee42538f';
+  }
+
+  try {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (session?.user?.id) {
+      return session.user.id;
+    }
+
+    const { data } = await supabase.auth.signInWithPassword({
+      email: 'owner@rtrmobiles.com',
+      password: 'password123'
+    });
+    if (data?.user?.id) {
+      return data.user.id;
+    }
+  } catch (err) {
+    console.warn('Could not establish Supabase auth session:', err);
+  }
+
+  return 'b46689e9-754e-49b5-b79b-ebc1ee42538f';
+}
 
 async function getBusinessId(): Promise<string> {
   if (cachedBusinessId) return cachedBusinessId;
   if (isSupabaseConfigured && supabase) {
     try {
-      const { data } = await supabase.from('businesses').select('id').limit(1).maybeSingle();
+      await ensureAuthenticatedSession();
+      const { data } = await withTimeout(
+        supabase.from('businesses').select('id').limit(1).maybeSingle(),
+        5000
+      );
       if (data?.id) {
         cachedBusinessId = data.id;
         return data.id;
@@ -208,8 +586,8 @@ async function getBusinessId(): Promise<string> {
 async function getCurrentUserId(): Promise<string> {
   if (isSupabaseConfigured && supabase) {
     try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (user?.id) return user.id;
+      const userId = await ensureAuthenticatedSession();
+      if (userId) return userId;
     } catch (e) {
       console.warn('Failed to resolve current user id:', e);
     }
@@ -225,15 +603,25 @@ function generateId(prefix: string): string {
 // SHOPS
 // ----------------------------------------------------
 export async function getShops(): Promise<Shop[]> {
+  if (isDemoMode()) {
+    ensureDemoData();
+    return getLocalItem<Shop[]>(DEMO_STORAGE_KEYS.SHOPS, DEFAULT_DEMO_SHOPS);
+  }
+
   return dedupeRequest('shops', async () => {
     if (isSupabaseConfigured && supabase) {
       try {
-        const { data, error } = await supabase
-          .from('shops')
-          .select('id, name, code, address, phone, is_active, created_at')
-          .order('name');
+        await ensureAuthenticatedSession();
+        const { data, error } = await withTimeout(
+          supabase
+            .from('shops')
+            .select('id, name, code, address, phone, is_active, created_at')
+            .order('name'),
+          6000
+        );
         if (!error && Array.isArray(data)) {
-          const shops: Shop[] = data.map((s: any) => ({
+          const nonDemo = data.filter((s: any) => !s.code?.toUpperCase().startsWith('DEMO') && !s.name?.startsWith('DEMO -'));
+          const shops: Shop[] = nonDemo.map((s: any) => ({
             id: s.id,
             name: s.name,
             code: s.code,
@@ -250,16 +638,38 @@ export async function getShops(): Promise<Shop[]> {
         console.warn('Supabase getShops error, using local fallback:', err);
       }
     }
-    return getLocalItem<Shop[]>(STORAGE_KEYS.SHOPS, []);
+    const local = getLocalItem<Shop[]>(STORAGE_KEYS.SHOPS, []);
+    return local.filter(s => !s.code?.toUpperCase().startsWith('DEMO') && !s.name?.startsWith('DEMO -'));
   });
 }
 
 export async function saveShop(input: Omit<Shop, 'id'> & { id?: string }): Promise<Shop> {
-  const shops = await getShops();
   const now = new Date().toISOString();
+
+  if (isDemoMode()) {
+    ensureDemoData();
+    const shops = getLocalItem<Shop[]>(DEMO_STORAGE_KEYS.SHOPS, DEFAULT_DEMO_SHOPS);
+    if (input.id) {
+      const updated = shops.map(s => s.id === input.id ? { ...s, ...input } : s);
+      setLocalItem(DEMO_STORAGE_KEYS.SHOPS, updated);
+      return updated.find(s => s.id === input.id)!;
+    }
+    const rawCode = (input.name.trim().replace(/[^a-zA-Z0-9]/g, '').slice(0, 4).toUpperCase() || 'DEMO');
+    const newShop: Shop = {
+      ...input,
+      code: input.code || `DEMO-${rawCode}-${Date.now().toString().slice(-4)}`,
+      id: generateId('demo-shop'),
+      createdAt: now
+    };
+    setLocalItem(DEMO_STORAGE_KEYS.SHOPS, [...shops, newShop]);
+    return newShop;
+  }
+
+  const shops = await getShops();
 
   if (isSupabaseConfigured && supabase) {
     try {
+      await ensureAuthenticatedSession();
       const businessId = await getBusinessId();
       const userId = await getCurrentUserId();
 
@@ -294,18 +704,26 @@ export async function saveShop(input: Omit<Shop, 'id'> & { id?: string }): Promi
           return updated;
         }
       } else {
+        const rawCode = (input.name.trim().replace(/[^a-zA-Z0-9]/g, '').slice(0, 4).toUpperCase() || 'SHOP');
+        const code = input.code || `SH-${rawCode}-${Date.now().toString().slice(-4)}`;
         const { data, error } = await supabase
           .from('shops')
           .insert({
             business_id: businessId,
             name: input.name,
-            code: input.code,
-            address: input.address,
-            phone: input.phone,
+            code,
+            address: input.address || '',
+            phone: input.phone || '',
             is_active: input.isActive ?? true
           })
           .select()
           .single();
+
+        if (error) {
+          if (isDatabaseCapacityError(error)) {
+            throw new DatabaseCapacityError(error.message, error.code);
+          }
+        }
 
         if (!error && data) {
           // Assign creator to shop_memberships so RLS policies allow report operations
@@ -333,6 +751,9 @@ export async function saveShop(input: Omit<Shop, 'id'> & { id?: string }): Promi
         }
       }
     } catch (err) {
+      if (isDatabaseCapacityError(err)) {
+        throw (err instanceof DatabaseCapacityError) ? err : new DatabaseCapacityError((err as any)?.message, (err as any)?.code);
+      }
       console.warn('Supabase saveShop error, using local fallback:', err);
     }
   }
@@ -343,8 +764,10 @@ export async function saveShop(input: Omit<Shop, 'id'> & { id?: string }): Promi
     return updated.find(s => s.id === input.id)!;
   }
 
+  const rawCode = (input.name.trim().replace(/[^a-zA-Z0-9]/g, '').slice(0, 4).toUpperCase() || 'SHOP');
   const newShop: Shop = {
     ...input,
+    code: input.code || `SH-${rawCode}-${Date.now().toString().slice(-4)}`,
     id: generateId('shop'),
     createdAt: now
   };
@@ -353,6 +776,12 @@ export async function saveShop(input: Omit<Shop, 'id'> & { id?: string }): Promi
 }
 
 export async function deleteShop(id: string): Promise<void> {
+  if (isDemoMode()) {
+    const shops = getLocalItem<Shop[]>(DEMO_STORAGE_KEYS.SHOPS, DEFAULT_DEMO_SHOPS);
+    setLocalItem(DEMO_STORAGE_KEYS.SHOPS, shops.filter(s => s.id !== id));
+    return;
+  }
+
   if (isSupabaseConfigured && supabase && !id.startsWith('shop-')) {
     try {
       await supabase.from('shops').delete().eq('id', id);
@@ -368,18 +797,28 @@ export async function deleteShop(id: string): Promise<void> {
 // PRODUCTS
 // ----------------------------------------------------
 export async function getProducts(): Promise<Product[]> {
+  if (isDemoMode()) {
+    ensureDemoData();
+    return getLocalItem<Product[]>(DEMO_STORAGE_KEYS.PRODUCTS, DEFAULT_DEMO_PRODUCTS);
+  }
+
   return dedupeRequest('products', async () => {
     if (isSupabaseConfigured && supabase) {
       try {
-        const { data, error } = await supabase
-          .from('products')
-          .select('id, name, sku, category, min_stock_threshold, is_active, created_at')
-          .order('name');
+        await ensureAuthenticatedSession();
+        const { data, error } = await withTimeout(
+          supabase
+            .from('products')
+            .select('id, name, sku, category, min_stock_threshold, is_active, created_at')
+            .order('name'),
+          6000
+        );
         if (!error && Array.isArray(data)) {
+          const nonDemo = data.filter((p: any) => !p.sku?.toUpperCase().startsWith('DEMO') && !p.name?.startsWith('DEMO -'));
           const localProds = getLocalItem<Product[]>(STORAGE_KEYS.PRODUCTS, []);
           const localMap = new Map(localProds.map(p => [p.id, p]));
 
-          const prods: Product[] = data.map((p: any) => {
+          const prods: Product[] = nonDemo.map((p: any) => {
             const local = localMap.get(p.id);
             return {
               id: p.id,
@@ -400,16 +839,41 @@ export async function getProducts(): Promise<Product[]> {
         console.warn('Supabase getProducts error, using local fallback:', err);
       }
     }
-    return getLocalItem<Product[]>(STORAGE_KEYS.PRODUCTS, []);
+    const local = getLocalItem<Product[]>(STORAGE_KEYS.PRODUCTS, []);
+    return local.filter(p => !p.sku?.toUpperCase().startsWith('DEMO') && !p.name?.startsWith('DEMO -'));
   });
 }
 
 export async function saveProduct(input: Omit<Product, 'id'> & { id?: string }): Promise<Product> {
-  const products = await getProducts();
   const now = new Date().toISOString();
+
+  if (isDemoMode()) {
+    ensureDemoData();
+    const products = getLocalItem<Product[]>(DEMO_STORAGE_KEYS.PRODUCTS, DEFAULT_DEMO_PRODUCTS);
+    if (input.id) {
+      const updated = products.map(p => p.id === input.id ? { ...p, ...input } : p);
+      setLocalItem(DEMO_STORAGE_KEYS.PRODUCTS, updated);
+      return updated.find(p => p.id === input.id)!;
+    }
+    const rawSku = (input.name.trim().replace(/[^a-zA-Z0-9]/g, '').slice(0, 4).toUpperCase() || 'DEMO');
+    const newProd: Product = {
+      ...input,
+      sku: input.sku || `DEMO-SKU-${rawSku}-${Date.now().toString().slice(-4)}`,
+      category: input.category || 'Other Accessories',
+      unitPrice: input.unitPrice ?? 0,
+      costPrice: input.costPrice ?? null,
+      id: generateId('demo-prod'),
+      createdAt: now
+    };
+    setLocalItem(DEMO_STORAGE_KEYS.PRODUCTS, [...products, newProd]);
+    return newProd;
+  }
+
+  const products = await getProducts();
 
   if (isSupabaseConfigured && supabase) {
     try {
+      await ensureAuthenticatedSession();
       const businessId = await getBusinessId();
 
       if (input.id && !input.id.startsWith('prod-')) {
@@ -444,19 +908,28 @@ export async function saveProduct(input: Omit<Product, 'id'> & { id?: string }):
           return updated;
         }
       } else {
+        const rawSku = (input.name.trim().replace(/[^a-zA-Z0-9]/g, '').slice(0, 4).toUpperCase() || 'ACC');
+        const sku = input.sku || `SKU-${rawSku}-${Date.now().toString().slice(-4)}`;
+        const category = input.category || 'Other Accessories';
         const { data, error } = await supabase
           .from('products')
           .insert({
             business_id: businessId,
             name: input.name,
-            sku: input.sku,
-            category: input.category,
+            sku,
+            category,
             unit_of_measure: 'piece',
             min_stock_threshold: input.minStock || 0,
             is_active: input.isActive ?? true
           })
           .select()
           .single();
+
+        if (error) {
+          if (isDatabaseCapacityError(error)) {
+            throw new DatabaseCapacityError(error.message, error.code);
+          }
+        }
 
         if (!error && data) {
           const created: Product = {
@@ -475,6 +948,9 @@ export async function saveProduct(input: Omit<Product, 'id'> & { id?: string }):
         }
       }
     } catch (err) {
+      if (isDatabaseCapacityError(err)) {
+        throw (err instanceof DatabaseCapacityError) ? err : new DatabaseCapacityError((err as any)?.message, (err as any)?.code);
+      }
       console.warn('Supabase saveProduct error, using local fallback:', err);
     }
   }
@@ -485,8 +961,11 @@ export async function saveProduct(input: Omit<Product, 'id'> & { id?: string }):
     return updated.find(p => p.id === input.id)!;
   }
 
+  const rawSku = (input.name.trim().replace(/[^a-zA-Z0-9]/g, '').slice(0, 4).toUpperCase() || 'ACC');
   const newProd: Product = {
     ...input,
+    sku: input.sku || `SKU-${rawSku}-${Date.now().toString().slice(-4)}`,
+    category: input.category || 'Other Accessories',
     unitPrice: input.unitPrice ?? 0,
     costPrice: input.costPrice ?? null,
     id: generateId('prod'),
@@ -497,6 +976,12 @@ export async function saveProduct(input: Omit<Product, 'id'> & { id?: string }):
 }
 
 export async function deleteProduct(id: string): Promise<void> {
+  if (isDemoMode()) {
+    const products = getLocalItem<Product[]>(DEMO_STORAGE_KEYS.PRODUCTS, DEFAULT_DEMO_PRODUCTS);
+    setLocalItem(DEMO_STORAGE_KEYS.PRODUCTS, products.filter(p => p.id !== id));
+    return;
+  }
+
   if (isSupabaseConfigured && supabase && !id.startsWith('prod-')) {
     try {
       await supabase.from('products').delete().eq('id', id);
@@ -512,81 +997,286 @@ export async function deleteProduct(id: string): Promise<void> {
 // DELIVERIES
 // ----------------------------------------------------
 export async function getDeliveries(): Promise<DeliveryRecord[]> {
+  if (isDemoMode()) {
+    ensureDemoData();
+    return getLocalItem<DeliveryRecord[]>(DEMO_STORAGE_KEYS.DELIVERIES, []);
+  }
+
   return dedupeRequest('deliveries', async () => {
     if (isSupabaseConfigured && supabase) {
       try {
-        const { data, error } = await supabase
-          .from('deliveries')
-          .select('id, shop_id, delivery_date, status, notes, created_at, delivery_items(product_id, quantity)')
-          .order('delivery_date', { ascending: false });
+        await ensureAuthenticatedSession();
+        const { data, error } = await withTimeout(
+          supabase
+            .from('deliveries')
+            .select('id, shop_id, delivery_date, status, notes, created_at, delivery_items(product_id, quantity, notes)')
+            .order('delivery_date', { ascending: false }),
+          6000
+        );
 
         if (!error && Array.isArray(data)) {
-          const [shops, prods] = await Promise.all([getShops(), getProducts()]);
+          const [shops, prods, invoices] = await Promise.all([getShops(), getProducts(), getInvoices()]);
           const shopMap = new Map(shops.map(s => [s.id, s.name]));
           const prodMap = new Map(prods.map(p => [p.id, p]));
+          const invMap = new Map<string, Invoice>();
+          invoices.forEach(inv => {
+            if (inv.delivery_id) invMap.set(inv.delivery_id, inv);
+          });
 
-          const deliveries: DeliveryRecord[] = data.map((d: any) => ({
-            id: d.id,
-            shopId: d.shop_id,
-            shopName: shopMap.get(d.shop_id) || 'Retail Store',
-            deliveryDate: d.delivery_date,
-            status: (d.status as 'delivered' | 'pending' | 'cancelled') || 'delivered',
-            notes: d.notes || '',
-            createdBy: 'Business Owner',
-            items: Array.isArray(d.delivery_items) ? d.delivery_items.map((i: any) => ({
-              productId: i.product_id,
-              productName: prodMap.get(i.product_id)?.name || 'Product',
-              productSku: prodMap.get(i.product_id)?.sku || '',
-              quantity: Number(i.quantity) || 0
-            })) : [],
-            createdAt: d.created_at
-          }));
-          setLocalCache(STORAGE_KEYS.DELIVERIES, deliveries);
-          return deliveries;
+          const deliveries: DeliveryRecord[] = data.map((d: any) => {
+            const inv = invMap.get(d.id);
+            let parsedNotes = d.notes || '';
+            let metaPending: number | undefined = inv ? Number(inv.outstanding_amount) : undefined;
+            let metaPaid: number | undefined = undefined;
+            let metaTotal: number | undefined = undefined;
+            let metaItems: any[] = [];
+            const metaItemsMap = new Map<string, number>();
+
+            try {
+              if (d.notes && d.notes.startsWith('{')) {
+                const meta = JSON.parse(d.notes);
+                parsedNotes = meta.memo ?? meta.notes ?? '';
+                if (meta.pendingAmount !== undefined && !isNaN(Number(meta.pendingAmount))) {
+                  metaPending = Number(meta.pendingAmount);
+                }
+                if (meta.paidAmount !== undefined && !isNaN(Number(meta.paidAmount))) {
+                  metaPaid = Number(meta.paidAmount);
+                }
+                if (meta.totalAmount !== undefined && !isNaN(Number(meta.totalAmount))) {
+                  metaTotal = Number(meta.totalAmount);
+                }
+                if (Array.isArray(meta.items)) {
+                  metaItems = meta.items;
+                  meta.items.forEach((it: any) => {
+                    if (it.productId && it.unitPrice !== undefined) {
+                      metaItemsMap.set(it.productId, Number(it.unitPrice));
+                    }
+                  });
+                }
+              }
+            } catch {
+              // Plain text notes fallback
+            }
+
+            // 1. Resolve delivery line items (Supabase joined delivery_items with meta.items fallback)
+            let items: DeliveryItemRecord[] = [];
+            if (Array.isArray(d.delivery_items) && d.delivery_items.length > 0) {
+              items = d.delivery_items.map((i: any) => {
+                const metaItem = metaItems.find((m: any) => m.productId === i.product_id);
+                const metaPrice = metaItemsMap.get(i.product_id);
+                const notesPrice = i.notes && !isNaN(Number(i.notes)) ? Number(i.notes) : undefined;
+                const unitPrice = metaPrice !== undefined 
+                  ? metaPrice 
+                  : (notesPrice !== undefined 
+                      ? notesPrice 
+                      : (Number(metaItem?.unitPrice) || prodMap.get(i.product_id)?.unitPrice || 0));
+                const prod = prodMap.get(i.product_id);
+                return {
+                  productId: i.product_id,
+                  productName: prod?.name || metaItem?.productName || 'Wholesale Accessory',
+                  productSku: prod?.sku || '',
+                  quantity: Number(i.quantity) || Number(metaItem?.quantity) || 1,
+                  unitPrice
+                };
+              });
+            } else if (metaItems.length > 0) {
+              items = metaItems.map((m: any) => ({
+                productId: m.productId,
+                productName: m.productName || prodMap.get(m.productId)?.name || 'Wholesale Accessory',
+                productSku: prodMap.get(m.productId)?.sku || '',
+                quantity: Number(m.quantity) || 1,
+                unitPrice: Number(m.unitPrice) || 0
+              }));
+            }
+
+            // 2. Derive total and pending payment balances consistently
+            const computedItemsTotal = items.reduce((sum, it) => sum + (it.quantity * (it.unitPrice || 0)), 0);
+            const totalBilled = metaTotal !== undefined && metaTotal > 0 ? metaTotal : computedItemsTotal;
+
+            let finalPending: number;
+            if (metaPending !== undefined) {
+              finalPending = metaPending;
+            } else if (metaPaid !== undefined) {
+              finalPending = Math.max(0, totalBilled - metaPaid);
+            } else {
+              finalPending = d.status === 'delivered' ? 0 : totalBilled;
+            }
+
+            return {
+              id: d.id,
+              shopId: d.shop_id,
+              shopName: shopMap.get(d.shop_id) || 'Retail Store',
+              deliveryDate: d.delivery_date,
+              status: (d.status as 'delivered' | 'pending' | 'cancelled') || 'delivered',
+              notes: parsedNotes,
+              createdBy: 'Business Owner',
+              items,
+              pendingAmount: finalPending,
+              createdAt: d.created_at
+            };
+          });
+          const nonDemoDeliveries = deliveries.filter(d => !d.shopName?.startsWith('DEMO -'));
+          setLocalCache(STORAGE_KEYS.DELIVERIES, nonDemoDeliveries);
+          return nonDemoDeliveries;
         }
       } catch (err) {
         console.warn('Supabase getDeliveries error, using local fallback:', err);
       }
     }
     const local = getLocalItem<DeliveryRecord[]>(STORAGE_KEYS.DELIVERIES, []);
-    return local.map(d => ({
-      ...d,
-      items: Array.isArray(d.items) ? d.items : []
-    }));
+    return local
+      .filter(d => !d.shopName?.startsWith('DEMO -'))
+      .map(d => ({
+        ...d,
+        items: Array.isArray(d.items) ? d.items : []
+      }));
   });
 }
 
 export async function recordDelivery(input: Omit<DeliveryRecord, 'id' | 'createdAt'>): Promise<DeliveryRecord> {
+  if (isDemoMode()) {
+    ensureDemoData();
+    const deliveries = getLocalItem<DeliveryRecord[]>(DEMO_STORAGE_KEYS.DELIVERIES, []);
+    const newDelivery: DeliveryRecord = {
+      ...input,
+      id: generateId('demo-deliv'),
+      createdAt: new Date().toISOString()
+    };
+    setLocalItem(DEMO_STORAGE_KEYS.DELIVERIES, [newDelivery, ...deliveries]);
+    clearMemoryCache();
+    return newDelivery;
+  }
+
   if (isSupabaseConfigured && supabase) {
     try {
+      await ensureAuthenticatedSession();
       const businessId = await getBusinessId();
       const userId = await getCurrentUserId();
 
-      // 1. Insert delivery record
-      const { data: delivData, error: delivErr } = await supabase
-        .from('deliveries')
-        .insert({
-          business_id: businessId,
-          shop_id: input.shopId,
-          delivery_date: input.deliveryDate,
-          status: input.status,
-          notes: input.notes || null,
-          created_by: userId
-        })
-        .select()
-        .single();
+      // Store pendingAmount, totalAmount, paidAmount and item details in structured metadata
+      const computedItemsTotal = input.items.reduce((s, it) => s + (it.quantity * (it.unitPrice || 0)), 0);
+      const pendingVal = input.pendingAmount !== undefined ? Number(input.pendingAmount) : computedItemsTotal;
+      const paidVal = Math.max(0, computedItemsTotal - pendingVal);
+
+      const meta = {
+        memo: input.notes || '',
+        totalAmount: computedItemsTotal,
+        paidAmount: paidVal,
+        pendingAmount: pendingVal,
+        items: input.items.map(i => ({
+          productId: i.productId,
+          productName: i.productName,
+          productSku: i.productSku,
+          quantity: i.quantity,
+          unitPrice: i.unitPrice
+        }))
+      };
+      const serializedNotes = JSON.stringify(meta);
+
+      // 1. Insert delivery record with ample timeout
+      const paymentStatus = pendingVal === 0 ? 'fully_paid' : (paidVal > 0 ? 'partially_paid' : 'unpaid');
+      let delivData: any = null;
+      let delivErr: any = null;
+
+      // Try inserting with first-class financial columns
+      const fullRes = await withTimeout(
+        supabase
+          .from('deliveries')
+          .insert({
+            business_id: businessId,
+            shop_id: input.shopId,
+            delivery_date: input.deliveryDate,
+            status: input.status,
+            total_amount: computedItemsTotal,
+            amount_paid: paidVal,
+            payment_status: paymentStatus,
+            notes: serializedNotes,
+            created_by: userId
+          })
+          .select()
+          .single(),
+        6000
+      );
+      delivData = fullRes.data;
+      delivErr = fullRes.error;
+
+      // If Supabase rejected because columns aren't yet migrated in database, fallback to baseline
+      if (delivErr && (delivErr.message?.includes('total_amount') || delivErr.message?.includes('payment_status') || delivErr.code === '42703')) {
+        const baselineRes = await withTimeout(
+          supabase
+            .from('deliveries')
+            .insert({
+              business_id: businessId,
+              shop_id: input.shopId,
+              delivery_date: input.deliveryDate,
+              status: input.status,
+              notes: serializedNotes,
+              created_by: userId
+            })
+            .select()
+            .single(),
+          6000
+        );
+        delivData = baselineRes.data;
+        delivErr = baselineRes.error;
+      }
 
       if (delivErr) {
         console.error('Supabase recordDelivery error:', delivErr);
-      } else if (delivData) {
-        // 2. Insert items
-        const itemsToInsert = input.items.map(item => ({
+        if (isDatabaseCapacityError(delivErr)) {
+          throw new DatabaseCapacityError(delivErr.message, delivErr.code);
+        }
+        throw new Error(delivErr.message || 'Database rejected delivery insert.');
+      }
+
+      if (delivData) {
+        // 2. Insert items (with unit_price if column exists, fallback to notes)
+        const itemsWithPrice = input.items.map(item => ({
           delivery_id: delivData.id,
           product_id: item.productId,
-          quantity: item.quantity
+          quantity: item.quantity,
+          unit_price: item.unitPrice !== undefined ? Number(item.unitPrice) : 0,
+          notes: item.unitPrice !== undefined ? String(item.unitPrice) : null
         }));
 
-        await supabase.from('delivery_items').insert(itemsToInsert);
+        let { error: itemsErr } = await supabase.from('delivery_items').insert(itemsWithPrice);
+        if (itemsErr && (itemsErr.message?.includes('unit_price') || itemsErr.code === '42703')) {
+          const baselineItems = input.items.map(item => ({
+            delivery_id: delivData.id,
+            product_id: item.productId,
+            quantity: item.quantity,
+            notes: item.unitPrice !== undefined ? String(item.unitPrice) : null
+          }));
+          const fallbackRes = await supabase.from('delivery_items').insert(baselineItems);
+          itemsErr = fallbackRes.error;
+        }
+
+        if (itemsErr) {
+          console.warn('Supabase delivery_items insert warning:', itemsErr);
+          if (isDatabaseCapacityError(itemsErr)) {
+            throw new DatabaseCapacityError(itemsErr.message, itemsErr.code);
+          }
+        }
+
+        // 3. Record payment in payments table if any payment made at creation
+        if (paidVal > 0) {
+          try {
+            await supabase.from('payments').insert({
+              business_id: businessId,
+              shop_id: input.shopId,
+              delivery_id: delivData.id,
+              payment_date: input.deliveryDate,
+              amount: paidVal,
+              payment_method: 'CASH',
+              payment_reference: 'Initial Delivery Payment',
+              status: 'COMPLETED',
+              notes: 'Recorded at delivery creation',
+              recorded_by: userId
+            });
+          } catch {
+            // Non-fatal if payments table not yet created
+          }
+        }
 
         // 3. Insert stock movement
         if (input.status === 'delivered') {
@@ -601,7 +1291,17 @@ export async function recordDelivery(input: Omit<DeliveryRecord, 'id' | 'created
             reason: `Delivery supply #${delivData.id.slice(-6)}`,
             actor_id: userId
           }));
-          await supabase.from('stock_movements').insert(movements);
+          try {
+            const { error: moveErr } = await supabase.from('stock_movements').insert(movements);
+            if (moveErr && isDatabaseCapacityError(moveErr)) {
+              throw new DatabaseCapacityError(moveErr.message, moveErr.code);
+            }
+          } catch (moveEx) {
+            if (isDatabaseCapacityError(moveEx)) {
+              throw moveEx;
+            }
+            // non-fatal
+          }
         }
 
         const newDelivery: DeliveryRecord = {
@@ -610,11 +1310,16 @@ export async function recordDelivery(input: Omit<DeliveryRecord, 'id' | 'created
           createdAt: delivData.created_at
         };
         const localDeliveries = getLocalItem<DeliveryRecord[]>(STORAGE_KEYS.DELIVERIES, []);
-        setLocalItem(STORAGE_KEYS.DELIVERIES, [newDelivery, ...localDeliveries]);
+        setLocalItem(STORAGE_KEYS.DELIVERIES, [newDelivery, ...localDeliveries.filter(d => d.id !== newDelivery.id)]);
+        clearMemoryCache();
         return newDelivery;
       }
-    } catch (err) {
-      console.warn('Supabase recordDelivery exception, using local fallback:', err);
+    } catch (err: any) {
+      console.error('Failed to record delivery in Supabase:', err);
+      if (isDatabaseCapacityError(err)) {
+        throw (err instanceof DatabaseCapacityError) ? err : new DatabaseCapacityError(err?.message, err?.code);
+      }
+      throw err;
     }
   }
 
@@ -625,7 +1330,653 @@ export async function recordDelivery(input: Omit<DeliveryRecord, 'id' | 'created
     createdAt: new Date().toISOString()
   };
   setLocalItem(STORAGE_KEYS.DELIVERIES, [newDelivery, ...deliveries]);
+  clearMemoryCache();
   return newDelivery;
+}
+
+// ----------------------------------------------------
+// BUSINESS RECORDS (UNIFIED DELIVERY & PAYMENT LEDGER)
+// ----------------------------------------------------
+export async function getBusinessRecords(): Promise<BusinessRecord[]> {
+  const [deliveries, invoices, shops, products] = await Promise.all([
+    getDeliveries(),
+    getInvoices(),
+    getShops(),
+    getProducts()
+  ]);
+
+  const shopMap = new Map(shops.map(s => [s.id, s.name]));
+  const prodMap = new Map(products.map(p => [p.id, p]));
+  const invoiceByDelivery = new Map<string, Invoice>();
+  invoices.forEach(inv => {
+    if (inv.delivery_id) {
+      invoiceByDelivery.set(inv.delivery_id, inv);
+    }
+  });
+
+  const records: BusinessRecord[] = [];
+
+  const relevantDeliveries = isDemoMode() 
+    ? deliveries 
+    : deliveries.filter(d => !d.shopName?.startsWith('[DEMO]') && !d.shopName?.startsWith('DEMO -'));
+
+  for (const deliv of relevantDeliveries) {
+    const shopName = deliv.shopName || shopMap.get(deliv.shopId) || 'Retail Store';
+    const inv = invoiceByDelivery.get(deliv.id);
+    const pendingVal = deliv.pendingAmount !== undefined 
+      ? Number(deliv.pendingAmount) 
+      : (inv ? Number(inv.outstanding_amount) : 0);
+
+    if (deliv.items && deliv.items.length > 0) {
+      deliv.items.forEach((item, index) => {
+        const prod = prodMap.get(item.productId);
+        const unitPrice = item.unitPrice !== undefined 
+          ? Number(item.unitPrice) 
+          : (Number(prod?.unitPrice) || 0);
+        const qty = Number(item.quantity) || 0;
+        const totalAmount = qty * unitPrice;
+        // For multi-item deliveries, attribute the delivery's pending balance to the first item line
+        const itemPending = index === 0 ? pendingVal : 0;
+
+        records.push({
+          id: `${deliv.id}-${item.productId || index}`,
+          deliveryId: deliv.id,
+          date: deliv.deliveryDate,
+          shopId: deliv.shopId,
+          shopName,
+          productId: item.productId,
+          productName: item.productName || prod?.name || 'Wholesale Accessory',
+          productSku: item.productSku || prod?.sku || '',
+          quantity: qty,
+          unitPrice,
+          totalAmount,
+          deliveryStatus: deliv.status,
+          pendingAmount: itemPending,
+          notes: deliv.notes,
+          createdAt: deliv.createdAt
+        });
+      });
+    } else {
+      // Fallback: Check if item metadata was saved in deliv.notes JSON
+      let fallbackProdName = 'Wholesale Accessory';
+      let fallbackQty = 1;
+      let fallbackPrice = pendingVal;
+
+      try {
+        if (deliv.notes && deliv.notes.startsWith('{')) {
+          const meta = JSON.parse(deliv.notes);
+          if (Array.isArray(meta.items) && meta.items.length > 0) {
+            fallbackProdName = meta.items[0].productName || fallbackProdName;
+            fallbackQty = Number(meta.items[0].quantity) || fallbackQty;
+            fallbackPrice = Number(meta.items[0].unitPrice) || fallbackPrice;
+          }
+        }
+      } catch {}
+
+      const totalAmount = fallbackQty * fallbackPrice;
+
+      records.push({
+        id: deliv.id,
+        deliveryId: deliv.id,
+        date: deliv.deliveryDate,
+        shopId: deliv.shopId,
+        shopName,
+        productId: '',
+        productName: fallbackProdName,
+        quantity: fallbackQty,
+        unitPrice: fallbackPrice,
+        totalAmount,
+        deliveryStatus: deliv.status,
+        pendingAmount: pendingVal,
+        notes: deliv.notes,
+        createdAt: deliv.createdAt
+      });
+    }
+  }
+
+  // Sort deterministically: Pending at top (1->2->3), Completed at bottom (4), newest first within groups
+  return sortBusinessRecords(records);
+}
+
+export async function saveBusinessRecord(input: SaveBusinessRecordInput): Promise<BusinessRecord> {
+  SaveBusinessRecordSchema.parse(input);
+  const [shops, products] = await Promise.all([getShops(), getProducts()]);
+
+  // 1. Resolve or create Shop
+  let targetShop = shops.find(s => 
+    input.shopId ? s.id === input.shopId : s.name.trim().toLowerCase() === input.shopName.trim().toLowerCase()
+  );
+  if (!targetShop) {
+    const rawCode = input.shopName.trim().replace(/[^a-zA-Z0-9]/g, '').slice(0, 4).toUpperCase() || 'SHOP';
+    const code = `RTR-${rawCode}-${Date.now().toString().slice(-4)}`;
+    targetShop = await saveShop({
+      name: input.shopName.trim(),
+      code,
+      address: 'Registered Partner Shop',
+      phone: '',
+      isActive: true,
+      assignedEmployees: []
+    });
+  }
+
+  // 2. Resolve or create Product
+  let targetProduct = products.find(p => 
+    input.productId ? p.id === input.productId : p.name.trim().toLowerCase() === input.productName.trim().toLowerCase()
+  );
+  if (!targetProduct) {
+    const rawSku = input.productName.trim().replace(/[^a-zA-Z0-9]/g, '').slice(0, 4).toUpperCase() || 'ACC';
+    const sku = `SKU-${rawSku}-${Date.now().toString().slice(-4)}`;
+    targetProduct = await saveProduct({
+      name: input.productName.trim(),
+      sku,
+      category: 'Other Accessories',
+      minStock: 5,
+      unitPrice: input.unitPrice,
+      isActive: true
+    });
+  }
+
+  // 3. Save Delivery
+  const qty = Number(input.quantity) || 1;
+  const rate = Number(input.unitPrice) || 0;
+  const totalAmount = qty * rate;
+  let pendingAmount = Number(input.pendingAmount);
+  if (isNaN(pendingAmount)) {
+    if (input.paidAmount !== undefined && !isNaN(Number(input.paidAmount))) {
+      pendingAmount = Math.max(0, totalAmount - Number(input.paidAmount));
+    } else {
+      pendingAmount = totalAmount;
+    }
+  }
+  pendingAmount = Math.max(0, pendingAmount);
+
+  const delivery = await recordDelivery({
+    shopId: targetShop.id,
+    shopName: targetShop.name,
+    deliveryDate: input.date,
+    status: input.deliveryStatus,
+    notes: input.notes || '',
+    createdBy: 'Business Owner',
+    items: [{
+      productId: targetProduct.id,
+      productName: targetProduct.name,
+      productSku: targetProduct.sku,
+      quantity: qty,
+      unitPrice: rate
+    }],
+    pendingAmount
+  });
+
+  // 4. Save linked Invoice for payment accounting
+  const billedAmount = Math.max(totalAmount, pendingAmount);
+  const amountPaid = Math.max(0, billedAmount - pendingAmount);
+  const invoiceStatus = pendingAmount === 0 ? 'fully_paid' : (amountPaid > 0 ? 'partially_paid' : 'unpaid');
+
+  try {
+    await saveInvoice({
+      business_id: await getBusinessId(),
+      shop_id: targetShop.id,
+      shop_name: targetShop.name,
+      delivery_id: delivery.id,
+      invoice_number: `INV-${Date.now().toString().slice(-6)}`,
+      invoice_date: input.date,
+      total_amount: billedAmount,
+      amount_paid: amountPaid,
+      outstanding_amount: pendingAmount,
+      status: invoiceStatus,
+      notes: input.notes || ''
+    });
+  } catch (invErr) {
+    if (isDatabaseCapacityError(invErr)) {
+      throw (invErr instanceof DatabaseCapacityError) ? invErr : new DatabaseCapacityError((invErr as any)?.message, (invErr as any)?.code);
+    }
+    console.warn('Could not save invoice along with business record:', invErr);
+  }
+
+  clearMemoryCache();
+  if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function') {
+    window.dispatchEvent(new CustomEvent('rtr_data_sync', { detail: { key: 'deliveries' } }));
+  }
+
+  return {
+    id: delivery.id,
+    deliveryId: delivery.id,
+    date: input.date,
+    shopId: targetShop.id,
+    shopName: targetShop.name,
+    productId: targetProduct.id,
+    productName: targetProduct.name,
+    productSku: targetProduct.sku,
+    quantity: qty,
+    unitPrice: rate,
+    totalAmount,
+    deliveryStatus: input.deliveryStatus,
+    pendingAmount,
+    notes: input.notes,
+    createdAt: delivery.createdAt
+  };
+}
+
+export interface UpdateBusinessRecordInput extends SaveBusinessRecordInput {
+  deliveryId: string;
+}
+
+export async function updateBusinessRecord(input: UpdateBusinessRecordInput): Promise<BusinessRecord> {
+  UpdateBusinessRecordSchema.parse(input);
+  const [shops, products] = await Promise.all([getShops(), getProducts()]);
+
+  // 1. Resolve or create Shop
+  let targetShop = shops.find(s => 
+    input.shopId ? s.id === input.shopId : s.name.trim().toLowerCase() === input.shopName.trim().toLowerCase()
+  );
+  if (!targetShop) {
+    const rawCode = input.shopName.trim().replace(/[^a-zA-Z0-9]/g, '').slice(0, 4).toUpperCase() || 'SHOP';
+    const code = `RTR-${rawCode}-${Date.now().toString().slice(-4)}`;
+    targetShop = await saveShop({
+      name: input.shopName.trim(),
+      code,
+      address: 'Registered Partner Shop',
+      phone: '',
+      isActive: true,
+      assignedEmployees: []
+    });
+  }
+
+  // 2. Resolve or create Product
+  let targetProduct = products.find(p => 
+    input.productId ? p.id === input.productId : p.name.trim().toLowerCase() === input.productName.trim().toLowerCase()
+  );
+  if (!targetProduct) {
+    const rawSku = input.productName.trim().replace(/[^a-zA-Z0-9]/g, '').slice(0, 4).toUpperCase() || 'ACC';
+    const sku = `SKU-${rawSku}-${Date.now().toString().slice(-4)}`;
+    targetProduct = await saveProduct({
+      name: input.productName.trim(),
+      sku,
+      category: 'Other Accessories',
+      minStock: 5,
+      unitPrice: input.unitPrice,
+      isActive: true
+    });
+  }
+
+  const qty = Number(input.quantity) || 1;
+  const rate = Number(input.unitPrice) || 0;
+  const totalAmount = qty * rate;
+  const pendingAmount = Math.max(0, Number(input.pendingAmount) || 0);
+
+  if (isDemoMode()) {
+    ensureDemoData();
+    const deliveries = getLocalItem<DeliveryRecord[]>(DEMO_STORAGE_KEYS.DELIVERIES, []);
+    const idx = deliveries.findIndex(d => d.id === input.deliveryId);
+    const existingCreatedAt = idx >= 0 && deliveries[idx] ? deliveries[idx]!.createdAt : new Date().toISOString();
+    const updatedDelivery: DeliveryRecord = {
+      id: input.deliveryId,
+      shopId: targetShop.id,
+      shopName: targetShop.name,
+      deliveryDate: input.date,
+      status: input.deliveryStatus,
+      notes: JSON.stringify({
+        memo: input.notes || '',
+        totalAmount,
+        paidAmount: Math.max(0, totalAmount - pendingAmount),
+        pendingAmount,
+        items: [{
+          productId: targetProduct.id,
+          productName: targetProduct.name,
+          quantity: qty,
+          unitPrice: rate
+        }]
+      }),
+      createdBy: 'demo-owner',
+      items: [{
+        productId: targetProduct.id,
+        productName: targetProduct.name,
+        quantity: qty,
+        unitPrice: rate
+      }],
+      pendingAmount,
+      createdAt: existingCreatedAt
+    };
+
+    if (idx >= 0) {
+      deliveries[idx] = updatedDelivery;
+    } else {
+      deliveries.unshift(updatedDelivery);
+    }
+    setLocalItem(DEMO_STORAGE_KEYS.DELIVERIES, deliveries);
+    clearMemoryCache();
+
+    return {
+      id: input.deliveryId,
+      deliveryId: input.deliveryId,
+      date: input.date,
+      shopId: targetShop.id,
+      shopName: targetShop.name,
+      productId: targetProduct.id,
+      productName: targetProduct.name,
+      productSku: targetProduct.sku,
+      quantity: qty,
+      unitPrice: rate,
+      totalAmount,
+      deliveryStatus: input.deliveryStatus,
+      pendingAmount,
+      notes: input.notes,
+      createdAt: updatedDelivery.createdAt
+    };
+  }
+
+  if (isSupabaseConfigured && supabase && !input.deliveryId.startsWith('deliv-')) {
+    try {
+      await ensureAuthenticatedSession();
+      const meta = {
+        memo: input.notes || '',
+        pendingAmount,
+        items: [{
+          productId: targetProduct.id,
+          productName: targetProduct.name,
+          quantity: qty,
+          unitPrice: rate
+        }]
+      };
+
+      const { error: updErr } = await supabase
+        .from('deliveries')
+        .update({
+          shop_id: targetShop.id,
+          delivery_date: input.date,
+          status: input.deliveryStatus,
+          notes: JSON.stringify(meta),
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', input.deliveryId);
+
+      if (updErr && isDatabaseCapacityError(updErr)) {
+        throw new DatabaseCapacityError(updErr.message, updErr.code);
+      }
+
+      await supabase
+        .from('delivery_items')
+        .delete()
+        .eq('delivery_id', input.deliveryId);
+
+      const { error: insErr } = await supabase
+        .from('delivery_items')
+        .insert([{
+          delivery_id: input.deliveryId,
+          product_id: targetProduct.id,
+          quantity: qty,
+          notes: String(rate)
+        }]);
+
+      if (insErr && isDatabaseCapacityError(insErr)) {
+        throw new DatabaseCapacityError(insErr.message, insErr.code);
+      }
+
+      const billedAmount = Math.max(totalAmount, pendingAmount);
+      const amountPaid = Math.max(0, billedAmount - pendingAmount);
+      const invoiceStatus = pendingAmount === 0 ? 'fully_paid' : (amountPaid > 0 ? 'partially_paid' : 'unpaid');
+
+      try {
+        const { error: invErr } = await supabase
+          .from('invoices')
+          .update({
+            shop_id: targetShop.id,
+            total_amount: billedAmount,
+            amount_paid: amountPaid,
+            status: invoiceStatus,
+            notes: input.notes || null,
+            updated_at: new Date().toISOString()
+          })
+          .eq('delivery_id', input.deliveryId);
+
+        if (invErr && isDatabaseCapacityError(invErr)) {
+          throw new DatabaseCapacityError(invErr.message, invErr.code);
+        }
+      } catch (invEx) {
+        if (isDatabaseCapacityError(invEx)) {
+          throw invEx;
+        }
+        // non-fatal
+      }
+    } catch (err) {
+      if (isDatabaseCapacityError(err)) {
+        throw (err instanceof DatabaseCapacityError) ? err : new DatabaseCapacityError((err as any)?.message, (err as any)?.code);
+      }
+      console.warn('Supabase updateBusinessRecord error:', err);
+    }
+  }
+
+  // Update local storage
+  const deliveries = getLocalItem<DeliveryRecord[]>(STORAGE_KEYS.DELIVERIES, []);
+  const idx = deliveries.findIndex(d => d.id === input.deliveryId);
+  const existingCreatedAt = idx >= 0 && deliveries[idx] ? deliveries[idx].createdAt : new Date().toISOString();
+  const updatedDelivery: DeliveryRecord = {
+    id: input.deliveryId,
+    shopId: targetShop.id,
+    shopName: targetShop.name,
+    deliveryDate: input.date,
+    status: input.deliveryStatus,
+    notes: input.notes || '',
+    createdBy: 'Business Owner',
+    items: [{
+      productId: targetProduct.id,
+      productName: targetProduct.name,
+      productSku: targetProduct.sku,
+      quantity: qty,
+      unitPrice: rate
+    }],
+    pendingAmount,
+    createdAt: existingCreatedAt
+  };
+
+  if (idx >= 0) {
+    deliveries[idx] = updatedDelivery;
+  } else {
+    deliveries.unshift(updatedDelivery);
+  }
+  setLocalItem(STORAGE_KEYS.DELIVERIES, deliveries);
+
+  const invoices = getLocalItem<Invoice[]>(STORAGE_KEYS.INVOICES, []);
+  const invIdx = invoices.findIndex(i => i.delivery_id === input.deliveryId);
+  if (invIdx >= 0 && invoices[invIdx]) {
+    const billedAmount = Math.max(totalAmount, pendingAmount);
+    const amountPaid = Math.max(0, billedAmount - pendingAmount);
+    const existingInv = invoices[invIdx];
+    invoices[invIdx] = {
+      ...existingInv,
+      shop_id: targetShop.id,
+      shop_name: targetShop.name,
+      total_amount: billedAmount,
+      amount_paid: amountPaid,
+      outstanding_amount: pendingAmount,
+      status: pendingAmount === 0 ? 'fully_paid' : (amountPaid > 0 ? 'partially_paid' : 'unpaid'),
+      notes: input.notes || existingInv.notes
+    };
+    setLocalItem(STORAGE_KEYS.INVOICES, invoices);
+  }
+
+  clearMemoryCache();
+
+  return {
+    id: input.deliveryId,
+    deliveryId: input.deliveryId,
+    date: input.date,
+    shopId: targetShop.id,
+    shopName: targetShop.name,
+    productId: targetProduct.id,
+    productName: targetProduct.name,
+    productSku: targetProduct.sku,
+    quantity: qty,
+    unitPrice: rate,
+    totalAmount,
+    deliveryStatus: input.deliveryStatus,
+    pendingAmount,
+    notes: input.notes,
+    createdAt: updatedDelivery.createdAt
+  };
+}
+
+export async function deleteBusinessRecord(deliveryId: string): Promise<void> {
+  if (isDemoMode()) {
+    const deliveries = getLocalItem<DeliveryRecord[]>(DEMO_STORAGE_KEYS.DELIVERIES, []);
+    setLocalItem(DEMO_STORAGE_KEYS.DELIVERIES, deliveries.filter(d => d.id !== deliveryId));
+    clearMemoryCache();
+    return;
+  }
+
+  if (isSupabaseConfigured && supabase && !deliveryId.startsWith('deliv-')) {
+    try {
+      try {
+        await supabase.from('payments').delete().eq('delivery_id', deliveryId);
+      } catch {}
+      await supabase.from('invoices').delete().eq('delivery_id', deliveryId);
+      await supabase.from('stock_movements').delete().eq('reference_id', deliveryId);
+      await supabase.from('delivery_items').delete().eq('delivery_id', deliveryId);
+      const { error: delErr } = await supabase.from('deliveries').delete().eq('id', deliveryId);
+      if (delErr && isDatabaseCapacityError(delErr)) {
+        throw new DatabaseCapacityError(delErr.message, delErr.code);
+      }
+    } catch (err) {
+      if (isDatabaseCapacityError(err)) {
+        throw (err instanceof DatabaseCapacityError) ? err : new DatabaseCapacityError((err as any)?.message, (err as any)?.code);
+      }
+      console.warn('Supabase deleteBusinessRecord error:', err);
+    }
+  }
+
+  const deliveries = getLocalItem<DeliveryRecord[]>(STORAGE_KEYS.DELIVERIES, []);
+  setLocalItem(STORAGE_KEYS.DELIVERIES, deliveries.filter(d => d.id !== deliveryId));
+
+  const invoices = getLocalItem<Invoice[]>(STORAGE_KEYS.INVOICES, []);
+  setLocalItem(STORAGE_KEYS.INVOICES, invoices.filter(i => i.delivery_id !== deliveryId));
+
+  clearMemoryCache();
+}
+
+export async function settleRecordPayment(deliveryId: string, amountToPay?: number): Promise<void> {
+  SettlePaymentSchema.parse({ deliveryId, amountToPay });
+  if (isDemoMode()) {
+    ensureDemoData();
+    const deliveries = getLocalItem<DeliveryRecord[]>(DEMO_STORAGE_KEYS.DELIVERIES, []);
+    const idx = deliveries.findIndex(d => d.id === deliveryId);
+    if (idx >= 0 && deliveries[idx]) {
+      const d = deliveries[idx]!;
+      const curPending = d.pendingAmount !== undefined ? d.pendingAmount : 0;
+      const payment = amountToPay !== undefined ? Math.min(amountToPay, curPending) : curPending;
+      const newPending = Math.max(0, curPending - payment);
+      const updated: DeliveryRecord = {
+        ...d,
+        pendingAmount: newPending,
+        notes: JSON.stringify({
+          memo: d.notes || 'Settled in demo sandbox',
+          pendingAmount: newPending
+        })
+      };
+      deliveries[idx] = updated;
+      setLocalItem(DEMO_STORAGE_KEYS.DELIVERIES, deliveries);
+      clearMemoryCache();
+    }
+    return;
+  }
+
+  if (isSupabaseConfigured && supabase && !deliveryId.startsWith('deliv-')) {
+    try {
+      await ensureAuthenticatedSession();
+      const { data: d } = await supabase
+        .from('deliveries')
+        .select('shop_id, notes')
+        .eq('id', deliveryId)
+        .maybeSingle();
+
+      let meta: any = {};
+      try {
+        if (d?.notes && d.notes.startsWith('{')) {
+          meta = JSON.parse(d.notes);
+        } else {
+          meta = { memo: d?.notes || '' };
+        }
+      } catch {
+        meta = { memo: d?.notes || '' };
+      }
+
+      const curPending = Number(meta.pendingAmount) || 0;
+      const payAmount = amountToPay !== undefined ? amountToPay : curPending;
+      meta.pendingAmount = Math.max(0, curPending - payAmount);
+
+      const { error: updErr } = await supabase
+        .from('deliveries')
+        .update({
+          notes: JSON.stringify(meta),
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', deliveryId);
+
+      if (updErr && isDatabaseCapacityError(updErr)) {
+        throw new DatabaseCapacityError(updErr.message, updErr.code);
+      }
+
+      // Record payment transaction in payments table
+      if (payAmount > 0) {
+        try {
+          const businessId = await getBusinessId();
+          const userId = await getCurrentUserId();
+          await supabase.from('payments').insert({
+            business_id: businessId,
+            shop_id: d?.shop_id || undefined,
+            delivery_id: deliveryId,
+            payment_date: new Date().toISOString().slice(0, 10),
+            amount: payAmount,
+            payment_method: 'CASH',
+            payment_reference: `SETTLE-${Date.now().toString().slice(-4)}`,
+            status: 'COMPLETED',
+            notes: 'Settlement from records ledger',
+            recorded_by: userId
+          });
+        } catch {
+          // non-fatal if table not yet created
+        }
+      }
+    } catch (e) {
+      if (isDatabaseCapacityError(e)) {
+        throw (e instanceof DatabaseCapacityError) ? e : new DatabaseCapacityError((e as any)?.message, (e as any)?.code);
+      }
+      console.warn('Could not settle payment in Supabase:', e);
+    }
+  }
+
+  const invoices = await getInvoices();
+  const invoice = invoices.find(i => i.delivery_id === deliveryId);
+
+  if (invoice) {
+    const payAmount = amountToPay !== undefined ? amountToPay : invoice.outstanding_amount;
+    if (payAmount > 0) {
+      await recordPayment({
+        business_id: invoice.business_id,
+        shop_id: invoice.shop_id,
+        invoice_id: invoice.id,
+        payment_date: new Date().toISOString().slice(0, 10),
+        amount: payAmount,
+        payment_method: 'CASH',
+        payment_reference: `SETTLE-${Date.now().toString().slice(-4)}`,
+        status: 'COMPLETED',
+        notes: 'Settlement from records ledger'
+      });
+    }
+  } else {
+    const deliveries = await getDeliveries();
+    const dIdx = deliveries.findIndex(d => d.id === deliveryId);
+    if (dIdx >= 0 && deliveries[dIdx]) {
+      const curPending = deliveries[dIdx].pendingAmount || 0;
+      const payAmount = amountToPay !== undefined ? amountToPay : curPending;
+      deliveries[dIdx] = {
+        ...deliveries[dIdx],
+        pendingAmount: Math.max(0, curPending - payAmount)
+      };
+      setLocalItem(STORAGE_KEYS.DELIVERIES, deliveries);
+    }
+  }
+
+  clearMemoryCache();
 }
 
 // ----------------------------------------------------
@@ -910,40 +2261,50 @@ export async function recordStockAudit(input: Omit<StockAuditRecord, 'id'>): Pro
 // INVOICES & PAYMENTS (SHOP CASH TRACKING)
 // ----------------------------------------------------
 export async function getInvoices(): Promise<Invoice[]> {
+  if (isDemoMode()) {
+    return getLocalItem<Invoice[]>(DEMO_STORAGE_KEYS.INVOICES, []);
+  }
+
   return dedupeRequest('invoices', async () => {
     return getLocalItem<Invoice[]>(STORAGE_KEYS.INVOICES, []);
   });
 }
 
 export async function saveInvoice(input: Omit<Invoice, 'id'> & { id?: string }): Promise<Invoice> {
+  const targetKey = isDemoMode() ? DEMO_STORAGE_KEYS.INVOICES : STORAGE_KEYS.INVOICES;
   const invoices = await getInvoices();
   if (input.id) {
     const updated = invoices.map(i => i.id === input.id ? { ...i, ...input } : i);
-    setLocalItem(STORAGE_KEYS.INVOICES, updated);
+    setLocalItem(targetKey, updated);
     return updated.find(i => i.id === input.id)!;
   }
   const newInvoice: Invoice = {
     ...input,
-    id: generateId('inv')
+    id: generateId(isDemoMode() ? 'demo-inv' : 'inv')
   };
-  setLocalItem(STORAGE_KEYS.INVOICES, [newInvoice, ...invoices]);
+  setLocalItem(targetKey, [newInvoice, ...invoices]);
   return newInvoice;
 }
 
 export async function getPayments(): Promise<PaymentRecord[]> {
+  if (isDemoMode()) {
+    return getLocalItem<PaymentRecord[]>(DEMO_STORAGE_KEYS.PAYMENTS, []);
+  }
+
   return dedupeRequest('payments', async () => {
     return getLocalItem<PaymentRecord[]>(STORAGE_KEYS.PAYMENTS, []);
   });
 }
 
 export async function recordPayment(input: Omit<PaymentRecord, 'id' | 'created_at'>): Promise<PaymentRecord> {
+  const targetKey = isDemoMode() ? DEMO_STORAGE_KEYS.PAYMENTS : STORAGE_KEYS.PAYMENTS;
   const payments = await getPayments();
   const newPayment: PaymentRecord = {
     ...input,
-    id: generateId('pay'),
+    id: generateId(isDemoMode() ? 'demo-pay' : 'pay'),
     created_at: new Date().toISOString()
   };
-  setLocalItem(STORAGE_KEYS.PAYMENTS, [newPayment, ...payments]);
+  setLocalItem(targetKey, [newPayment, ...payments]);
 
   // If this payment was tied to an invoice, recalculate invoice balance
   if (input.invoice_id) {

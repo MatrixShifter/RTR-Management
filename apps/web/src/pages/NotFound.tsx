@@ -1,16 +1,13 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
-import { AlertCircle, Home, Boxes, Truck, Banknote } from 'lucide-react';
+import { AlertCircle, Home } from 'lucide-react';
 import { Button } from '../components/ui/Button.js';
 
 interface NotFoundProps {
-  userRole?: 'owner' | 'employee';
+  userRole?: 'owner';
 }
 
-export const NotFound: React.FC<NotFoundProps> = ({ userRole = 'owner' }) => {
-  const homePath = userRole === 'owner' ? '/' : '/employee';
-  const homeLabel = userRole === 'owner' ? 'Back to Overview' : 'Back to Daily Report';
-
+export const NotFound: React.FC<NotFoundProps> = () => {
   return (
     <div className="min-h-[70vh] flex flex-col items-center justify-center py-12 px-4 sm:px-6 lg:px-8 text-center animate-fade-in">
       <div className="w-16 h-16 rounded-2xl bg-amber-50 text-amber-600 border border-amber-200 flex items-center justify-center mx-auto mb-4 shadow-xs">
@@ -28,34 +25,12 @@ export const NotFound: React.FC<NotFoundProps> = ({ userRole = 'owner' }) => {
       </p>
 
       <div className="mt-6 flex flex-wrap items-center justify-center gap-3">
-        <Link to={homePath}>
+        <Link to="/records">
           <Button variant="primary" size="sm" className="font-medium shadow-xs">
             <Home className="w-3.5 h-3.5 mr-1.5" />
-            <span>{homeLabel}</span>
+            <span>Back to Records</span>
           </Button>
         </Link>
-        <Link to="/stock-ledger">
-          <Button variant="outline" size="sm" className="font-medium">
-            <Boxes className="w-3.5 h-3.5 mr-1.5 text-slate-500" />
-            <span>Stock Ledger</span>
-          </Button>
-        </Link>
-        {userRole === 'owner' && (
-          <>
-            <Link to="/deliveries">
-              <Button variant="outline" size="sm" className="font-medium">
-                <Truck className="w-3.5 h-3.5 mr-1.5 text-slate-500" />
-                <span>Deliveries</span>
-              </Button>
-            </Link>
-            <Link to="/payments">
-              <Button variant="outline" size="sm" className="font-medium">
-                <Banknote className="w-3.5 h-3.5 mr-1.5 text-slate-500" />
-                <span>Payments</span>
-              </Button>
-            </Link>
-          </>
-        )}
       </div>
     </div>
   );

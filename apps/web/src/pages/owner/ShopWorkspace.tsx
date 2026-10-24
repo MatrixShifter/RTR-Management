@@ -6,7 +6,7 @@ import {
   Phone, 
   MapPin, 
   Truck, 
-  ShoppingBag, 
+  ClipboardList, 
   Banknote, 
   CheckCircle2, 
   ChevronRight
@@ -368,10 +368,10 @@ export const ShopWorkspace: React.FC = () => {
                           <span>Payment</span>
                         </Button>
                       </Link>
-                      <Link to="/employee">
+                      <Link to="/records">
                         <Button variant="outline" size="sm">
-                          <ShoppingBag className="w-3.5 h-3.5 mr-1 text-slate-500" />
-                          <span>Sales</span>
+                          <ClipboardList className="w-3.5 h-3.5 mr-1 text-slate-500" />
+                          <span>Records</span>
                         </Button>
                       </Link>
                     </div>
@@ -690,8 +690,8 @@ export const ShopWorkspace: React.FC = () => {
                       <div className="space-y-3">
                         <div className="flex items-center justify-between text-xs text-slate-500">
                           <span>Daily reports filed by retail shop staff.</span>
-                          <Link to="/employee" className="text-blue-600 hover:underline font-medium">
-                            Submit Sales Report →
+                          <Link to="/records" className="text-blue-600 hover:underline font-medium">
+                            View Records →
                           </Link>
                         </div>
                         {shopReports.length === 0 ? (
