@@ -38,10 +38,21 @@ const STORAGE_USER_KEY = 'rtr_current_user';
 const STORAGE_EXPIRY_KEY = 'rtr_session_expiry';
 const SESSION_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
 
+/**
+ * Enforces a timeout on any promise to prevent indefinite hanging during bootstrap.
+ */
+function withTimeout<T>(promise: Promise<T>, ms: number, timeoutMsg: string): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<T>((_, reject) => setTimeout(() => reject(new Error(timeoutMsg)), ms))
+  ]);
+}
+
 const AppContent: React.FC = () => {
   const { success, warning, info } = useToast();
   const [currentUser, setCurrentUser] = useState<UserState | null>(null);
   const [isBootstrapping, setIsBootstrapping] = useState(true);
+  const [bootstrapError, setBootstrapError] = useState<string | null>(null);
   const [isOnline, setIsOnline] = useState<boolean>(navigator.onLine);
 
   const isVerifyingRef = useRef(false);
@@ -50,101 +61,103 @@ const AppContent: React.FC = () => {
   warningRef.current = warning;
 
   // 1. Session verification & hydration
-  useEffect(() => {
-    let isMounted = true;
+  const runInitSession = useCallback(async () => {
+    if (isVerifyingRef.current) {
+      return;
+    }
+    isVerifyingRef.current = true;
 
-    async function initSession() {
-      // Prevent duplicate in-flight session verification calls
-      if (isVerifyingRef.current) {
-        return;
-      }
-      isVerifyingRef.current = true;
-
-      try {
-        if (isSupabaseConfigured && supabase) {
-          const { data: { session } } = await supabase.auth.getSession();
-          if (session?.user && session?.access_token) {
-            // If this token was already verified, skip duplicate network call
-            if (lastVerifiedTokenRef.current === session.access_token && currentUser) {
-              return;
-            }
-
-            const isDemoAccount = session.user.email === 'demo-owner@rtrmobiles.com' || 
-              session.user.user_metadata?.role === 'demo' || 
-              session.user.user_metadata?.username === 'demo-owner';
-
-            // Server-side token and membership verification
-            try {
-              const res = await fetch('/api/auth/verify-session', {
-                headers: { Authorization: `Bearer ${session.access_token}` }
-              });
-
-              if (res.ok) {
-                const data = await res.json();
-                if (data.user?.role !== 'owner' && data.user?.role !== 'demo') {
-                  throw new Error('Unauthorized account role');
-                }
-                const isDemo = data.user?.role === 'demo' || isDemoAccount;
-                setDemoMode(isDemo);
-                lastVerifiedTokenRef.current = session.access_token;
-                if (isMounted) {
-                  const userState: UserState = {
-                    id: session.user.id,
-                    email: session.user.email || '',
-                    name: data.user?.name || session.user.user_metadata?.full_name || (isDemo ? 'Demo Owner (Sandbox)' : 'Business Owner'),
-                    role: isDemo ? 'demo' : 'owner',
-                    isDemo
-                  };
-                  setCurrentUser(userState);
-                  localStorage.setItem(STORAGE_USER_KEY, JSON.stringify(userState));
-                  localStorage.setItem(STORAGE_EXPIRY_KEY, String(Date.now() + SESSION_TTL_MS));
-                  return;
-                }
-              } else if (res.status === 401 || res.status === 403) {
-                // Token revoked, expired, or non-owner access denied
-                lastVerifiedTokenRef.current = null;
-                await supabase.auth.signOut().catch(() => {});
-                localStorage.removeItem(STORAGE_USER_KEY);
-                localStorage.removeItem(STORAGE_EXPIRY_KEY);
-                if (isMounted) {
-                  setCurrentUser(null);
-                  setIsBootstrapping(false);
-                }
-                return;
-              } else {
-                // Backend outage (502 / 503 / 500)
-                lastVerifiedTokenRef.current = null;
-                if (isMounted) {
-                  warningRef.current('Backend authentication service is temporarily unavailable. Please verify API server is running on port 4000.');
-                  setCurrentUser(null);
-                  setIsBootstrapping(false);
-                }
-                return;
-              }
-            } catch {
-              // Network error reaching /api/auth/verify-session
-              lastVerifiedTokenRef.current = null;
-              if (isMounted) {
-                warningRef.current('Unable to connect to backend authentication server. Please check your connection.');
-                setCurrentUser(null);
-                setIsBootstrapping(false);
-              }
-              return;
-            }
-          }
+    try {
+      if (isSupabaseConfigured && supabase) {
+        // Enforce 2500ms timeout on Supabase session lookup to avoid browser lock freezes
+        let session = null;
+        try {
+          const sessionPromise = supabase.auth.getSession().catch(() => ({ data: { session: null } }));
+          const res = await withTimeout(sessionPromise, 2500, 'Supabase session lookup timed out');
+          session = res?.data?.session;
+        } catch {
+          session = null;
         }
 
-        // Stored local session fallback if token exists and is valid
-        const storedUser = localStorage.getItem(STORAGE_USER_KEY);
-        const storedExpiry = localStorage.getItem(STORAGE_EXPIRY_KEY);
+        if (session?.user && session?.access_token) {
+          // If this token was already verified, skip duplicate network call
+          if (lastVerifiedTokenRef.current === session.access_token && currentUser) {
+            return;
+          }
 
-        if (storedUser) {
-          const expiryTime = storedExpiry ? parseInt(storedExpiry, 10) : 0;
-          if (expiryTime && Date.now() > expiryTime) {
-            localStorage.removeItem(STORAGE_USER_KEY);
-            localStorage.removeItem(STORAGE_EXPIRY_KEY);
-            warningRef.current('Your session has expired. Please sign in again.');
-          } else {
+          const isDemoAccount = session.user.email === 'demo-owner@rtrmobiles.com' || 
+            session.user.user_metadata?.role === 'demo' || 
+            session.user.user_metadata?.username === 'demo-owner';
+
+          // Server-side token and membership verification with 3500ms request timeout
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 3500);
+
+          try {
+            const res = await fetch('/api/auth/verify-session', {
+              headers: { Authorization: `Bearer ${session.access_token}` },
+              signal: controller.signal
+            });
+            clearTimeout(timeoutId);
+
+            if (res.ok) {
+              const data = await res.json();
+              if (data.user?.role !== 'owner' && data.user?.role !== 'demo') {
+                throw new Error('Unauthorized account role');
+              }
+              const isDemo = data.user?.role === 'demo' || isDemoAccount;
+              setDemoMode(isDemo);
+              lastVerifiedTokenRef.current = session.access_token;
+              const userState: UserState = {
+                id: session.user.id,
+                email: session.user.email || '',
+                name: data.user?.name || session.user.user_metadata?.full_name || (isDemo ? 'Demo Owner (Sandbox)' : 'Business Owner'),
+                role: isDemo ? 'demo' : 'owner',
+                isDemo
+              };
+              setCurrentUser(userState);
+              setBootstrapError(null);
+              localStorage.setItem(STORAGE_USER_KEY, JSON.stringify(userState));
+              localStorage.setItem(STORAGE_EXPIRY_KEY, String(Date.now() + SESSION_TTL_MS));
+              return;
+            } else if (res.status === 401 || res.status === 403) {
+              // Token revoked, expired, or non-owner access denied
+              lastVerifiedTokenRef.current = null;
+              await supabase.auth.signOut().catch(() => {});
+              localStorage.removeItem(STORAGE_USER_KEY);
+              localStorage.removeItem(STORAGE_EXPIRY_KEY);
+              setCurrentUser(null);
+              setBootstrapError(null);
+              return;
+            } else {
+              // Backend outage (502 / 503 / 500)
+              lastVerifiedTokenRef.current = null;
+              setBootstrapError('Backend authentication service is temporarily unreachable on port 4000. Please verify the API server is running.');
+              setCurrentUser(null);
+              return;
+            }
+          } catch {
+            clearTimeout(timeoutId);
+            lastVerifiedTokenRef.current = null;
+            setBootstrapError('Unable to connect to backend authentication server. Please check your network or server status.');
+            setCurrentUser(null);
+            return;
+          }
+        }
+      }
+
+      // Stored local session fallback if token exists and is valid
+      const storedUser = localStorage.getItem(STORAGE_USER_KEY);
+      const storedExpiry = localStorage.getItem(STORAGE_EXPIRY_KEY);
+
+      if (storedUser) {
+        const expiryTime = storedExpiry ? parseInt(storedExpiry, 10) : 0;
+        if (expiryTime && Date.now() > expiryTime) {
+          localStorage.removeItem(STORAGE_USER_KEY);
+          localStorage.removeItem(STORAGE_EXPIRY_KEY);
+          warningRef.current('Your session has expired. Please sign in again.');
+        } else {
+          try {
             const parsed = JSON.parse(storedUser);
             if (parsed && (parsed.role === 'owner' || parsed.role === 'demo' || parsed.isDemo)) {
               if (parsed.role === 'demo' || parsed.isDemo) {
@@ -152,57 +165,68 @@ const AppContent: React.FC = () => {
               } else {
                 setDemoMode(false);
               }
-              if (isMounted) {
-                setCurrentUser(parsed);
-              }
+              setCurrentUser(parsed);
+              setBootstrapError(null);
             } else {
               localStorage.removeItem(STORAGE_USER_KEY);
             }
+          } catch {
+            localStorage.removeItem(STORAGE_USER_KEY);
           }
         }
-      } catch (err) {
-        console.warn('Could not restore stored session:', err);
-      } finally {
-        isVerifyingRef.current = false;
-        if (isMounted) {
-          setIsBootstrapping(false);
-        }
       }
+    } catch (err) {
+      console.warn('Could not restore stored session:', err);
+    } finally {
+      isVerifyingRef.current = false;
+      setIsBootstrapping(false);
     }
+  }, [currentUser]);
 
-    initSession();
+  useEffect(() => {
+    let isMounted = true;
+
+    // Fail-safe watchdog timer: guarantees loading screen settles within 3.5s under all circumstances
+    const watchdogTimer = setTimeout(() => {
+      if (isMounted) {
+        setIsBootstrapping(false);
+      }
+    }, 3500);
+
+    runInitSession();
 
     // Listen to Supabase auth events (sign in, sign out, token refresh)
     if (isSupabaseConfigured && supabase) {
       const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+        if (!isMounted) return;
         if (event === 'SIGNED_OUT') {
           lastVerifiedTokenRef.current = null;
-          if (isMounted) {
-            setCurrentUser(null);
-            localStorage.removeItem(STORAGE_USER_KEY);
-            localStorage.removeItem(STORAGE_EXPIRY_KEY);
-          }
+          setCurrentUser(null);
+          localStorage.removeItem(STORAGE_USER_KEY);
+          localStorage.removeItem(STORAGE_EXPIRY_KEY);
         } else if (event === 'SIGNED_IN' && session?.user && session?.access_token) {
           if (lastVerifiedTokenRef.current !== session.access_token) {
-            initSession();
+            runInitSession();
           }
         } else if (event === 'TOKEN_REFRESHED' && session?.access_token) {
           if (lastVerifiedTokenRef.current !== session.access_token) {
-            initSession();
+            runInitSession();
           }
         }
       });
 
       return () => {
         isMounted = false;
+        clearTimeout(watchdogTimer);
         subscription.unsubscribe();
       };
     }
 
     return () => {
       isMounted = false;
+      clearTimeout(watchdogTimer);
     };
-  }, []);
+  }, [runInitSession]);
 
   // 2. Network connectivity listeners
   useEffect(() => {
@@ -243,6 +267,7 @@ const AppContent: React.FC = () => {
 
   const handleSignIn = (user: UserState) => {
     setCurrentUser(user);
+    setBootstrapError(null);
     if (user.role === 'demo' || user.isDemo) {
       setDemoMode(true);
     } else {
@@ -280,6 +305,25 @@ const AppContent: React.FC = () => {
   // Prevent flashing of protected content before authentication is verified
   if (isBootstrapping) {
     return <AppLoadingScreen message="Initializing RTR Wholesale Management..." />;
+  }
+
+  // Display actionable error screen if backend outage occurred during startup
+  if (bootstrapError && !currentUser) {
+    return (
+      <AppLoadingScreen 
+        error={bootstrapError} 
+        onRetry={() => {
+          setBootstrapError(null);
+          setIsBootstrapping(true);
+          runInitSession();
+        }}
+        onProceedToLogin={() => {
+          setBootstrapError(null);
+          setIsBootstrapping(false);
+          setCurrentUser(null);
+        }}
+      />
+    );
   }
 
   return (
