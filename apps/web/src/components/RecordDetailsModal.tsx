@@ -65,7 +65,7 @@ export const RecordDetailsModal: React.FC<RecordDetailsModalProps> = ({
 
   return (
     <div 
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs animate-fade-in"
+      className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-900/60 backdrop-blur-xs animate-fade-in"
       onClick={onClose}
       role="dialog"
       aria-modal="true"
@@ -76,10 +76,10 @@ export const RecordDetailsModal: React.FC<RecordDetailsModalProps> = ({
         onClick={e => e.stopPropagation()}
       >
         {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4.5 border-b border-slate-100 bg-[#F8FAFC]">
-          <div>
-            <div className="flex items-center gap-2">
-              <h2 id="record-details-title" className="text-base sm:text-lg font-bold text-slate-900">
+        <div className="flex items-center justify-between px-4 sm:px-6 py-3.5 sm:py-4 border-b border-slate-100 bg-[#F8FAFC]">
+          <div className="min-w-0 pr-2">
+            <div className="flex items-center gap-2 flex-wrap">
+              <h2 id="record-details-title" className="text-base sm:text-lg font-bold text-slate-900 truncate">
                 Record Details
               </h2>
               {isDelivered ? (
@@ -94,14 +94,14 @@ export const RecordDetailsModal: React.FC<RecordDetailsModalProps> = ({
                 </span>
               )}
             </div>
-            <p className="text-xs text-slate-500 mt-0.5">
+            <p className="text-xs text-slate-500 mt-0.5 truncate">
               Wholesale ledger delivery &amp; settlement overview
             </p>
           </div>
           <button
             type="button"
             onClick={onClose}
-            className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-200/60 transition-colors cursor-pointer"
+            className="min-h-[44px] min-w-[44px] flex items-center justify-center p-1.5 rounded-xl text-slate-400 hover:text-slate-600 hover:bg-slate-200/60 transition-colors cursor-pointer flex-shrink-0"
             aria-label="Close dialog"
           >
             <X className="w-4 h-4" />
@@ -109,7 +109,7 @@ export const RecordDetailsModal: React.FC<RecordDetailsModalProps> = ({
         </div>
 
         {/* Content Body */}
-        <div className="p-6 space-y-4 max-h-[75vh] overflow-y-auto text-xs">
+        <div className="p-4 sm:p-6 space-y-3.5 sm:space-y-4 max-h-[75vh] overflow-y-auto text-xs">
           {/* Shop & Date Grid */}
           <div className="grid grid-cols-2 gap-3 p-3.5 bg-slate-50/80 rounded-xl border border-slate-100">
             <div>
@@ -213,16 +213,16 @@ export const RecordDetailsModal: React.FC<RecordDetailsModalProps> = ({
         </div>
 
         {/* Footer Actions */}
-        <div className="flex items-center justify-between px-6 py-4 bg-slate-50 border-t border-slate-100">
+        <div className="flex items-center justify-between px-4 sm:px-6 py-3.5 sm:py-4 bg-slate-50 border-t border-slate-100 flex-wrap sm:flex-nowrap gap-2">
           <button
             type="button"
             onClick={onClose}
-            className="px-4 py-2 text-xs font-semibold text-slate-700 bg-white border border-slate-200 rounded-xl hover:bg-slate-100 transition-colors cursor-pointer"
+            className="min-h-[44px] px-4 py-2 text-xs font-semibold text-slate-700 bg-white border border-slate-200 rounded-xl hover:bg-slate-100 transition-colors cursor-pointer flex items-center justify-center flex-1 sm:flex-initial"
           >
             Close
           </button>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-1 sm:flex-initial justify-end">
             {pendingAmt > 0 && handleRecordPayment && (
               <button
                 type="button"
@@ -230,7 +230,7 @@ export const RecordDetailsModal: React.FC<RecordDetailsModalProps> = ({
                   onClose();
                   handleRecordPayment(record);
                 }}
-                className="bg-emerald-600 hover:bg-emerald-700 text-white px-3.5 py-2 rounded-xl text-xs font-semibold flex items-center gap-1.5 shadow-xs transition-colors cursor-pointer"
+                className="min-h-[44px] bg-emerald-600 hover:bg-emerald-700 text-white px-3.5 py-2 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 shadow-xs transition-colors cursor-pointer flex-1 sm:flex-initial"
               >
                 <CreditCard className="w-3.5 h-3.5" />
                 <span>Record Payment</span>
@@ -244,7 +244,7 @@ export const RecordDetailsModal: React.FC<RecordDetailsModalProps> = ({
                   onClose();
                   onEdit(record);
                 }}
-                className="bg-[#168BFF] hover:bg-[#0876E8] text-white px-3.5 py-2 rounded-xl text-xs font-semibold flex items-center gap-1.5 shadow-xs transition-colors cursor-pointer"
+                className="min-h-[44px] bg-[#168BFF] hover:bg-[#0876E8] text-white px-3.5 py-2 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 shadow-xs transition-colors cursor-pointer flex-1 sm:flex-initial"
               >
                 <Edit2 className="w-3.5 h-3.5" />
                 <span>Edit Record</span>

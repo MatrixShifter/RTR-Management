@@ -428,12 +428,12 @@ export const RecordEntryDrawer: React.FC<RecordEntryDrawerProps> = ({
         <div className="w-screen max-w-lg bg-white shadow-2xl flex flex-col h-full transform transition-transform duration-200 ease-out">
           
           {/* 1. FIXED HEADER */}
-          <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 bg-white flex-shrink-0">
-            <div>
-              <h2 id="record-modal-title" className="text-lg font-bold text-slate-900 tracking-tight">
+          <div className="flex items-center justify-between px-4 sm:px-6 py-3.5 sm:py-4 border-b border-slate-200 bg-white flex-shrink-0 pt-[max(0.875rem,env(safe-area-inset-top))]">
+            <div className="min-w-0 pr-2">
+              <h2 id="record-modal-title" className="text-base sm:text-lg font-bold text-slate-900 tracking-tight truncate">
                 {editingRecord ? 'Edit Record' : 'Add Record'}
               </h2>
-              <p className="text-xs text-slate-500 mt-0.5">
+              <p className="text-xs text-slate-500 mt-0.5 truncate">
                 {editingRecord ? 'Update delivery & payment details' : 'Enter wholesale delivery for a partner shop'}
               </p>
             </div>
@@ -441,7 +441,7 @@ export const RecordEntryDrawer: React.FC<RecordEntryDrawerProps> = ({
               type="button"
               onClick={handleAttemptClose}
               disabled={isSubmitting}
-              className="p-2 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-100 transition-colors cursor-pointer"
+              className="min-h-[44px] min-w-[44px] flex items-center justify-center p-2 text-slate-400 hover:text-slate-600 rounded-xl hover:bg-slate-100 transition-colors cursor-pointer flex-shrink-0"
               aria-label="Close modal"
             >
               <X className="w-5 h-5" />
@@ -449,7 +449,7 @@ export const RecordEntryDrawer: React.FC<RecordEntryDrawerProps> = ({
           </div>
 
           {/* 2. SCROLLABLE FORM BODY */}
-          <div className="flex-1 overflow-y-auto px-6 py-5">
+          <div className="flex-1 overflow-y-auto px-4 sm:px-6 py-4 sm:py-5">
             <form id="record-entry-form" onSubmit={handleSubmit} className="space-y-4">
               {/* Database Storage Capacity Alert */}
               {capacityError && (
@@ -803,12 +803,12 @@ export const RecordEntryDrawer: React.FC<RecordEntryDrawerProps> = ({
           </div>
 
           {/* 3. FIXED FOOTER */}
-          <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-slate-200 bg-slate-50/90 flex-shrink-0">
+          <div className="flex items-center justify-end gap-2.5 px-4 sm:px-6 py-3.5 sm:py-4 border-t border-slate-200 bg-slate-50/95 flex-shrink-0 pb-[max(1rem,env(safe-area-inset-bottom))]">
             <button
               type="button"
               onClick={handleAttemptClose}
               disabled={isSubmitting}
-              className="px-4 py-2.5 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-xs sm:text-sm font-semibold transition-colors cursor-pointer disabled:opacity-50"
+              className="min-h-[44px] flex-1 sm:flex-initial px-4 py-2.5 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 text-xs sm:text-sm font-semibold transition-colors cursor-pointer disabled:opacity-50 flex items-center justify-center"
             >
               Cancel
             </button>
@@ -816,7 +816,7 @@ export const RecordEntryDrawer: React.FC<RecordEntryDrawerProps> = ({
               type="submit"
               form="record-entry-form"
               disabled={isSubmitting}
-              className="bg-[#168BFF] hover:bg-[#0876E8] active:bg-[#065EC2] text-white font-medium px-5 py-2.5 rounded-xl flex items-center gap-2 text-xs sm:text-sm shadow-xs transition-colors cursor-pointer disabled:opacity-50"
+              className="min-h-[44px] flex-1 sm:flex-initial bg-[#168BFF] hover:bg-[#0876E8] active:bg-[#065EC2] text-white font-medium px-5 py-2.5 rounded-xl flex items-center justify-center gap-2 text-xs sm:text-sm shadow-xs transition-colors cursor-pointer disabled:opacity-50"
             >
               {isSubmitting ? (
                 <>

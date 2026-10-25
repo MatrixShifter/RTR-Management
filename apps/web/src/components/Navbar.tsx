@@ -186,46 +186,52 @@ export const Navbar: React.FC<NavbarProps> = ({
           2. TOP HEADER (Responsive: Mobile only)
          ======================================================== */}
       <header 
-        className="sticky top-0 z-20 w-full lg:hidden bg-slate-900 text-white border-b border-slate-800 select-none print:hidden"
+        className="sticky top-0 z-20 w-full lg:hidden bg-[#0C1E38] text-white border-b border-[#152744] select-none print:hidden"
       >
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 h-14 flex items-center justify-between gap-4">
+        <div className="max-w-7xl mx-auto px-3 sm:px-6 h-14 flex items-center justify-between gap-3">
           <span className="sr-only">{activeTitle}</span>
           
           {/* Mobile hamburger & brand */}
-          <div className="lg:hidden flex items-center space-x-2.5">
+          <div className="lg:hidden flex items-center space-x-2">
             <button
               onClick={() => setMobileMenuOpen(true)}
-              className="p-1.5 text-slate-300 hover:text-white hover:bg-slate-800/80 rounded-lg transition-colors focus:outline-none"
+              className="min-h-[44px] min-w-[44px] flex items-center justify-center p-2 text-slate-300 hover:text-white hover:bg-slate-800/80 rounded-xl transition-colors focus:outline-none cursor-pointer"
               aria-label="Open navigation menu"
               aria-expanded={mobileMenuOpen ? "true" : "false"}
               aria-controls="mobile-navigation-drawer"
             >
               <Menu className="w-5 h-5" />
             </button>
-            <Link to="/" className="flex items-center space-x-2">
-              <div className="w-7 h-7 rounded-lg bg-blue-600 flex items-center justify-center font-black text-white text-xs tracking-wider">
+            <Link to="/" className="flex items-center space-x-2.5 py-1">
+              <div className="w-8 h-8 rounded-lg bg-blue-600 bg-[#168BFF] flex items-center justify-center font-black text-white text-xs tracking-wider shadow-sm flex-shrink-0">
                 RTR
               </div>
-              <span className="font-bold text-sm tracking-tight text-white">
-                RTR Management
-              </span>
+              <div className="flex flex-col">
+                <span className="font-extrabold text-sm tracking-tight text-white leading-tight">
+                  RTR
+                </span>
+                <span className="text-[10px] text-[#8FA2BA] font-medium leading-tight">
+                  Wholesale Management
+                </span>
+              </div>
+              <span className="sr-only">RTR Management</span>
             </Link>
           </div>
 
-          {/* Connectivity Status Pill */}
+          {/* Connectivity Status Pill & Logout */}
           <div className="flex items-center space-x-2">
             <div 
-              className="flex items-center space-x-1.5 px-2 py-0.5 rounded-full bg-slate-800/80 text-[10px] sm:text-[11px] border border-slate-700/60"
+              className="flex items-center space-x-1.5 px-2.5 py-1 rounded-full bg-[#152744]/80 text-[11px] border border-[#233B60]"
               title={isOnline ? "System connected and live" : "Working in offline mode"}
             >
               {isOnline ? (
                 <>
-                  <Wifi className="w-3 h-3 text-emerald-400" />
-                  <span className="text-slate-300">Live</span>
+                  <Wifi className="w-3 h-3 text-emerald-400 flex-shrink-0" />
+                  <span className="text-slate-200 font-medium">Live</span>
                 </>
               ) : (
                 <>
-                  <WifiOff className="w-3 h-3 text-amber-400" />
+                  <WifiOff className="w-3 h-3 text-amber-400 flex-shrink-0" />
                   <span className="text-amber-300 font-semibold">Offline</span>
                 </>
               )}
@@ -235,8 +241,9 @@ export const Navbar: React.FC<NavbarProps> = ({
             <div className="lg:hidden">
               <button
                 onClick={onSignOut}
-                className="p-1 text-slate-400 hover:text-rose-400"
+                className="min-h-[44px] min-w-[44px] flex items-center justify-center p-2 text-slate-300 hover:text-rose-400 hover:bg-slate-800/60 rounded-xl transition-colors cursor-pointer"
                 title="Sign Out"
+                aria-label="Sign Out"
               >
                 <LogOut className="w-4 h-4" />
               </button>
@@ -256,32 +263,57 @@ export const Navbar: React.FC<NavbarProps> = ({
           aria-modal="true"
         >
           <div 
-            className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs transition-opacity"
+            className="fixed inset-0 bg-slate-950/70 backdrop-blur-xs transition-opacity animate-fade-in"
             onClick={() => setMobileMenuOpen(false)}
+            aria-hidden="true"
           />
 
-          <div className="fixed inset-y-0 left-0 max-w-xs w-full bg-slate-900 text-white shadow-2xl flex flex-col z-10">
+          <div className="fixed inset-y-0 left-0 max-w-xs w-[280px] bg-[#0C1E38] text-white shadow-2xl flex flex-col z-10 border-r border-[#152744] transform transition-transform duration-200">
             {/* Mobile Drawer Header */}
-            <div className="p-5 flex items-center justify-between border-b border-slate-800">
+            <div className="p-4 pt-[max(1rem,env(safe-area-inset-top))] flex items-center justify-between border-b border-[#152744] bg-[#0A192F]">
               <div className="flex items-center space-x-2.5">
-                <div className="w-8 h-8 rounded-lg bg-blue-600 flex items-center justify-center font-black text-white text-xs">
+                <div className="w-8 h-8 rounded-lg bg-[#168BFF] flex items-center justify-center font-black text-white text-xs tracking-wider shadow-sm flex-shrink-0">
                   RTR
                 </div>
                 <div>
-                  <div className="font-bold text-sm text-white">RTR Management</div>
-                  <div className="text-[10px] text-slate-400">Wholesale Portal</div>
+                  <div className="font-extrabold text-sm text-white leading-tight">RTR Management</div>
+                  <div className="text-[10px] text-[#8FA2BA] font-medium">Wholesale Portal</div>
                 </div>
               </div>
               <button
                 onClick={() => setMobileMenuOpen(false)}
-                className="p-1 text-slate-400 hover:text-white rounded-lg"
+                className="min-h-[44px] min-w-[44px] flex items-center justify-center p-2 text-slate-400 hover:text-white rounded-xl hover:bg-slate-800/80 transition-colors cursor-pointer"
+                aria-label="Close navigation menu"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
+            {/* Mobile Drawer Profile & Status Summary */}
+            {userName && (
+              <div className="px-4 py-3 border-b border-[#152744] bg-[#081529]/60 flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-full bg-[#168BFF] text-white flex items-center justify-center font-bold text-xs flex-shrink-0 shadow-xs">
+                  {userName.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase() || 'DO'}
+                </div>
+                <div className="flex flex-col min-w-0 flex-1">
+                  <div className="flex items-center justify-between gap-1">
+                    <span className="truncate font-semibold text-xs text-white max-w-[120px]">{userName}</span>
+                    <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded uppercase tracking-wider ${
+                      userRole === 'demo' ? 'bg-amber-400/20 text-amber-300' : 'bg-blue-400/20 text-blue-300'
+                    }`}>
+                      {userRole.toUpperCase()}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-1.5 text-[10px] text-slate-400 mt-0.5">
+                    <span className={`w-1.5 h-1.5 rounded-full ${isOnline ? 'bg-emerald-400' : 'bg-amber-400'}`} />
+                    <span>{isOnline ? 'System Online' : 'Offline Mode'}</span>
+                  </div>
+                </div>
+              </div>
+            )}
+
             {/* Mobile Drawer Links */}
-            <div className="flex-1 overflow-y-auto p-4 space-y-4">
+            <div className="flex-1 overflow-y-auto p-3 space-y-2">
               <div className="space-y-1">
                 {primaryOwnerLinks.map(link => {
                   const Icon = link.icon;
@@ -290,13 +322,13 @@ export const Navbar: React.FC<NavbarProps> = ({
                     <Link
                       key={link.to}
                       to={link.to}
-                      className={`flex items-center space-x-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-colors ${
+                      className={`min-h-[44px] flex items-center space-x-3 px-3.5 py-2.5 rounded-xl text-sm font-medium transition-colors ${
                         isActive
-                          ? 'bg-blue-600 text-white font-bold'
-                          : 'text-slate-300 hover:bg-slate-800'
+                          ? 'bg-[#168BFF] text-white font-bold shadow-xs'
+                          : 'text-slate-300 hover:text-white hover:bg-slate-800/80'
                       }`}
                     >
-                      <Icon className="w-4 h-4" />
+                      <Icon className="w-4 h-4 flex-shrink-0" />
                       <span>{link.label}</span>
                     </Link>
                   );
@@ -305,19 +337,19 @@ export const Navbar: React.FC<NavbarProps> = ({
             </div>
 
             {/* Mobile Drawer Footer */}
-            <div className="p-4 border-t border-slate-800 space-y-1">
+            <div className="p-3 pb-[max(1.25rem,env(safe-area-inset-bottom))] border-t border-[#152744] bg-[#0A192F] space-y-1">
               <Link
                 to="/settings"
-                className="flex items-center space-x-3 px-3 py-2 rounded-xl text-xs font-medium text-slate-300 hover:bg-slate-800"
+                className="min-h-[44px] flex items-center space-x-3 px-3.5 py-2.5 rounded-xl text-xs font-semibold text-slate-300 hover:text-white hover:bg-slate-800/80 transition-colors"
               >
-                <Settings className="w-4 h-4 text-slate-400" />
-                <span>Settings</span>
+                <Settings className="w-4 h-4 text-slate-400 flex-shrink-0" />
+                <span>Settings &amp; Preferences</span>
               </Link>
               <button
                 onClick={onSignOut}
-                className="w-full flex items-center space-x-3 px-3 py-2 rounded-xl text-xs font-medium text-rose-400 hover:bg-slate-800 text-left"
+                className="w-full min-h-[44px] flex items-center space-x-3 px-3.5 py-2.5 rounded-xl text-xs font-semibold text-rose-400 hover:bg-rose-500/10 hover:text-rose-300 transition-colors text-left cursor-pointer"
               >
-                <LogOut className="w-4 h-4 text-rose-400" />
+                <LogOut className="w-4 h-4 text-rose-400 flex-shrink-0" />
                 <span>Logout</span>
               </button>
             </div>

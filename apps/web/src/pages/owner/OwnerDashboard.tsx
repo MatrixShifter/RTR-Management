@@ -567,40 +567,38 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
       {/* ========================================================
           0. TOP BAR (Search field, Notifications, Account Profile)
          ======================================================== */}
-      <div className="flex items-center justify-between gap-4 pb-2">
+      <div className="flex flex-col-reverse sm:flex-row sm:items-center sm:justify-between gap-3 pb-2">
         {/* Left / Center: Search bar */}
-        <div className="flex items-center gap-3 flex-1 max-w-xl">
-          <div className="relative w-full">
-            <Search className="w-4 h-4 text-[#637A98] absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
-            <input
-              type="text"
-              placeholder="Search shop name, product, or anything..."
-              value={searchQuery}
-              onChange={e => setSearchQuery(e.target.value)}
-              className="w-full bg-[#EAF2FA] border border-[#D8E7F7] rounded-xl pl-10 pr-8 py-2 text-xs text-[#102A4C] placeholder:text-[#637A98] focus:outline-none focus:ring-1 focus:ring-[#168BFF] focus:border-[#168BFF] focus:bg-white shadow-2xs transition-all"
-            />
-            {searchQuery && (
-              <button
-                type="button"
-                onClick={() => setSearchQuery('')}
-                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 p-0.5 text-xs font-bold cursor-pointer"
-                aria-label="Clear search"
-              >
-                ✕
-              </button>
-            )}
-          </div>
+        <div className="relative w-full sm:max-w-md lg:max-w-xl">
+          <Search className="w-4 h-4 text-[#637A98] absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+          <input
+            type="text"
+            placeholder="Search shop name, product, or anything..."
+            value={searchQuery}
+            onChange={e => setSearchQuery(e.target.value)}
+            className="w-full bg-[#EAF2FA] border border-[#D8E7F7] rounded-xl pl-10 pr-8 py-2 text-xs text-[#102A4C] placeholder:text-[#637A98] focus:outline-none focus:ring-1 focus:ring-[#168BFF] focus:border-[#168BFF] focus:bg-white shadow-2xs transition-all min-h-[40px]"
+          />
+          {searchQuery && (
+            <button
+              type="button"
+              onClick={() => setSearchQuery('')}
+              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 p-1 text-xs font-bold cursor-pointer"
+              aria-label="Clear search"
+            >
+              ✕
+            </button>
+          )}
         </div>
 
         {/* Right: Notifications & User Avatar */}
-        <div className="flex items-center gap-3">
+        <div className="flex items-center justify-between sm:justify-end gap-3 self-end sm:self-auto w-full sm:w-auto">
           <button
             type="button"
-            className="relative p-2 text-[#637A98] hover:text-[#102A4C] rounded-xl hover:bg-white/70 transition-colors"
+            className="relative p-2 text-[#637A98] hover:text-[#102A4C] rounded-xl hover:bg-white/70 transition-colors min-h-[44px] min-w-[44px] flex items-center justify-center"
             aria-label="View notifications"
           >
             <Bell className="w-5 h-5" />
-            <span className="absolute top-2 right-2 w-2 h-2 rounded-full bg-rose-500 ring-2 ring-white" />
+            <span className="absolute top-2.5 right-2.5 w-2 h-2 rounded-full bg-rose-500 ring-2 ring-white" />
           </button>
 
           {/* Account Pill Dropdown */}
@@ -608,12 +606,12 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
             <button
               type="button"
               onClick={() => setIsProfileDropdownOpen(!isProfileDropdownOpen)}
-              className="flex items-center gap-2.5 p-1 pl-1 pr-2 rounded-full hover:bg-white/80 transition-colors focus:outline-none cursor-pointer"
+              className="flex items-center gap-2.5 p-1 pl-1 pr-2 rounded-full hover:bg-white/80 transition-colors focus:outline-none cursor-pointer min-h-[44px]"
             >
-              <div className="w-8 h-8 rounded-full bg-[#168BFF] text-white flex items-center justify-center font-bold text-xs tracking-tight shadow-xs">
+              <div className="w-8 h-8 rounded-full bg-[#168BFF] text-white flex items-center justify-center font-bold text-xs tracking-tight shadow-xs flex-shrink-0">
                 {userInitials}
               </div>
-              <span className="text-xs font-semibold text-[#102A4C] hidden sm:inline max-w-[150px] truncate">
+              <span className="text-xs font-semibold text-[#102A4C] max-w-[130px] sm:max-w-[150px] truncate">
                 {isDemoMode() ? 'Demo Owner (Sandbox)' : userName}
               </span>
               <ChevronDown className="w-3.5 h-3.5 text-[#637A98]" />
@@ -686,27 +684,27 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
         <div 
           role="region"
           aria-label="Demo Sandbox Notification"
-          className="px-4 py-2.5 rounded-xl bg-[#EAF4FF] border border-[#CDE3FE] shadow-2xs flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs animate-fade-in"
+          className="px-3.5 sm:px-4 py-2.5 rounded-xl bg-[#EAF4FF] border border-[#CDE3FE] shadow-2xs flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs animate-fade-in"
         >
           <div className="flex items-center gap-2.5 text-[#102A4C] min-w-0">
             <div className="w-4 h-4 rounded-full bg-[#168BFF] text-white flex items-center justify-center font-bold text-[10px] flex-shrink-0">
               i
             </div>
-            <span className="font-bold text-[#102A4C]">Demo Mode</span>
+            <span className="font-bold text-[#102A4C] flex-shrink-0">Demo Mode</span>
             <span className="text-slate-300">|</span>
             <span className="text-[#637A98] truncate">
               You are viewing sample data only. Real customer databases, shops, and payments are protected and isolated.
             </span>
             <span className="sr-only">Interactive Demo Sandbox Isolated Mode</span>
           </div>
-          <div className="flex items-center gap-2 flex-shrink-0 self-end sm:self-auto">
+          <div className="flex items-center gap-2 flex-shrink-0 self-end sm:self-auto w-full sm:w-auto">
             <button
               type="button"
               onClick={async () => {
                 resetDemoData();
                 await loadData();
               }}
-              className="px-3 py-1.5 bg-white hover:bg-slate-50 border border-[#D8E7F7] text-[#102A4C] rounded-lg text-xs font-semibold flex items-center gap-1.5 shadow-2xs transition-colors cursor-pointer"
+              className="w-full sm:w-auto justify-center px-3 py-2 bg-white hover:bg-slate-50 border border-[#D8E7F7] text-[#102A4C] rounded-lg text-xs font-semibold flex items-center gap-1.5 shadow-2xs transition-colors cursor-pointer min-h-[38px]"
               title="Reset sample demo data back to pristine default state"
             >
               <RotateCcw className="w-3.5 h-3.5 text-[#168BFF]" />
@@ -719,7 +717,7 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
       {/* ========================================================
           3. SUMMARY METRICS (4 Horizontal Sky-Blue Metric Cards)
          ======================================================== */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
         {/* Card 1: Total Deliveries */}
         <div 
           onClick={() => setFilterMode(filterMode === 'delivery' ? 'all' : 'delivery')}
@@ -740,7 +738,7 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
               </span>
               <span className="sr-only">Delivery Records</span>
             </div>
-            <div className="text-3xl font-bold text-[#102A4C] mt-1 tabular-nums tracking-tight">
+            <div className="text-2xl sm:text-3xl font-bold text-[#102A4C] mt-1 tabular-nums tracking-tight">
               {deliveryRecordsCount}
             </div>
             <div className="text-xs text-[#637A98] mt-1">
@@ -765,7 +763,7 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
             <span className="text-xs font-semibold text-[#102A4C]">
               Total Products
             </span>
-            <div className="text-3xl font-bold text-[#102A4C] mt-1 tabular-nums tracking-tight">
+            <div className="text-2xl sm:text-3xl font-bold text-[#102A4C] mt-1 tabular-nums tracking-tight">
               {totalUniqueProducts}
             </div>
             <div className="text-xs text-[#637A98] mt-1">
@@ -791,7 +789,7 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
             <span className="text-xs font-semibold text-[#102A4C]">
               Shops
             </span>
-            <div className="text-3xl font-bold text-[#102A4C] mt-1 tabular-nums tracking-tight">
+            <div className="text-2xl sm:text-3xl font-bold text-[#102A4C] mt-1 tabular-nums tracking-tight">
               {activeShopsCount}
             </div>
             <div className="text-xs text-[#637A98] mt-1">
@@ -816,10 +814,10 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
             <span className="text-xs font-semibold text-[#102A4C]">
               Pending Payments
             </span>
-            <div className="text-3xl font-bold text-[#102A4C] mt-1 tabular-nums tracking-tight">
+            <div className="text-2xl sm:text-3xl font-bold text-[#102A4C] mt-1 tabular-nums tracking-tight break-words">
               {`₹${totalPendingMoney.toLocaleString('en-IN')}`}
             </div>
-            <div className="text-xs text-[#637A98] mt-1">
+            <div className="text-xs text-[#637A98] mt-1 truncate">
               {totalPendingMoney > 0 ? (
                 `${pendingRecordsCount} records with balance`
               ) : (
@@ -838,18 +836,18 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
          ======================================================== */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 pt-1">
         {/* Left: Clean Segmented View Tabs */}
-        <div className="inline-flex items-center gap-1.5 text-xs select-none">
+        <div className="grid grid-cols-3 sm:flex sm:items-center gap-1.5 text-xs select-none w-full sm:w-auto">
           <button
             type="button"
             onClick={() => setFilterMode('all')}
-            className={`px-4 py-2 rounded-xl font-medium flex items-center gap-2 transition-all cursor-pointer ${
+            className={`px-2 sm:px-4 py-2 rounded-xl font-medium flex items-center justify-center gap-1.5 sm:gap-2 transition-all cursor-pointer min-h-[40px] text-[11px] sm:text-xs ${
               filterMode === 'all'
                 ? 'bg-[#168BFF] text-white shadow-xs font-semibold'
                 : 'bg-white border border-[#D8E7F7] text-[#637A98] hover:text-[#102A4C]'
             }`}
           >
             <span>All Records</span>
-            <span className={`px-2 py-0.5 rounded-full text-[11px] font-mono ${
+            <span className={`px-1.5 sm:px-2 py-0.5 rounded-full text-[10px] sm:text-[11px] font-mono ${
               filterMode === 'all' ? 'bg-white/25 text-white' : 'bg-slate-100 text-[#637A98]'
             }`}>
               {allRecordsCount}
@@ -859,14 +857,14 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
           <button
             type="button"
             onClick={() => setFilterMode('delivery')}
-            className={`px-4 py-2 rounded-xl font-medium flex items-center gap-2 transition-all cursor-pointer ${
+            className={`px-2 sm:px-4 py-2 rounded-xl font-medium flex items-center justify-center gap-1.5 sm:gap-2 transition-all cursor-pointer min-h-[40px] text-[11px] sm:text-xs ${
               filterMode === 'delivery'
                 ? 'bg-[#168BFF] text-white shadow-xs font-semibold'
                 : 'bg-white border border-[#D8E7F7] text-[#637A98] hover:text-[#102A4C]'
             }`}
           >
             <span>Deliveries</span>
-            <span className={`px-2 py-0.5 rounded-full text-[11px] font-mono ${
+            <span className={`px-1.5 sm:px-2 py-0.5 rounded-full text-[10px] sm:text-[11px] font-mono ${
               filterMode === 'delivery' ? 'bg-white/25 text-white' : 'bg-slate-100 text-[#637A98]'
             }`}>
               {deliveryRecordsCount}
@@ -876,14 +874,14 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
           <button
             type="button"
             onClick={() => setFilterMode('pending')}
-            className={`px-4 py-2 rounded-xl font-medium flex items-center gap-2 transition-all cursor-pointer ${
+            className={`px-2 sm:px-4 py-2 rounded-xl font-medium flex items-center justify-center gap-1.5 sm:gap-2 transition-all cursor-pointer min-h-[40px] text-[11px] sm:text-xs ${
               filterMode === 'pending'
                 ? 'bg-[#168BFF] text-white shadow-xs font-semibold'
                 : 'bg-white border border-[#D8E7F7] text-[#637A98] hover:text-[#102A4C]'
             }`}
           >
             <span>Pending</span>
-            <span className={`px-2 py-0.5 rounded-full text-[11px] font-mono ${
+            <span className={`px-1.5 sm:px-2 py-0.5 rounded-full text-[10px] sm:text-[11px] font-mono ${
               filterMode === 'pending' ? 'bg-white/25 text-white' : 'bg-slate-100 text-[#637A98]'
             }`}>
               {pendingRecordsCount}
@@ -892,25 +890,27 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
         </div>
 
         {/* Right: Shop Filter, Dates, Filters & Add Record Action */}
-        <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap">
+        <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap w-full sm:w-auto">
           {/* Shop Filter Button */}
-          <div className="relative filter-dropdown-container">
+          <div className="relative filter-dropdown-container flex-1 sm:flex-initial">
             <button
               type="button"
               onClick={() => setIsFilterDropdownOpen(!isFilterDropdownOpen)}
-              className={`border px-3.5 py-2 rounded-xl text-xs font-medium flex items-center gap-1.5 shadow-2xs transition-colors cursor-pointer ${
+              className={`w-full sm:w-auto border px-3 sm:px-3.5 py-2 rounded-xl text-xs font-medium flex items-center justify-between sm:justify-start gap-1.5 shadow-2xs transition-colors cursor-pointer min-h-[40px] ${
                 selectedShopFilter !== 'all' || isFilterDropdownOpen
                   ? 'bg-[#EAF4FF] border-[#168BFF] text-[#168BFF] font-semibold'
                   : 'bg-white border-[#D8E7F7] hover:bg-slate-50 text-[#102A4C]'
               }`}
             >
-              <Store className="w-3.5 h-3.5 text-[#637A98]" />
-              <span>
-                {selectedShopFilter === 'all' 
-                  ? 'All Shops' 
-                  : (shops.find(s => s.id === selectedShopFilter)?.name || 'Filtered Shop')}
-              </span>
-              <ChevronDown className="w-3 h-3 text-[#637A98]" />
+              <div className="flex items-center gap-1.5 truncate">
+                <Store className="w-3.5 h-3.5 text-[#637A98] flex-shrink-0" />
+                <span className="truncate">
+                  {selectedShopFilter === 'all' 
+                    ? 'All Shops' 
+                    : (shops.find(s => s.id === selectedShopFilter)?.name || 'Filtered Shop')}
+                </span>
+              </div>
+              <ChevronDown className="w-3 h-3 text-[#637A98] flex-shrink-0" />
             </button>
 
             {isFilterDropdownOpen && (
@@ -967,7 +967,7 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
             <button
               type="button"
               onClick={() => setIsDateDropdownOpen(!isDateDropdownOpen)}
-              className="bg-white border border-[#D8E7F7] hover:bg-slate-50 text-[#102A4C] px-3.5 py-2 rounded-xl text-xs font-medium flex items-center gap-1.5 shadow-2xs transition-colors cursor-pointer"
+              className="bg-white border border-[#D8E7F7] hover:bg-slate-50 text-[#102A4C] px-3 sm:px-3.5 py-2 rounded-xl text-xs font-medium flex items-center gap-1.5 shadow-2xs transition-colors cursor-pointer min-h-[40px]"
             >
               <Calendar className="w-3.5 h-3.5 text-[#637A98]" />
               <span>{selectedDateFilter === 'today' ? 'Today' : 'All Dates'}</span>
@@ -1008,7 +1008,7 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
           <button
             type="button"
             onClick={handleResetFilters}
-            className="bg-white border border-[#D8E7F7] hover:bg-slate-50 text-[#102A4C] px-3.5 py-2 rounded-xl text-xs font-medium flex items-center gap-1.5 shadow-2xs transition-colors cursor-pointer"
+            className="bg-white border border-[#D8E7F7] hover:bg-slate-50 text-[#102A4C] px-3 sm:px-3.5 py-2 rounded-xl text-xs font-medium flex items-center gap-1.5 shadow-2xs transition-colors cursor-pointer min-h-[40px]"
             title="Reset active filters"
           >
             <Filter className="w-3.5 h-3.5 text-[#637A98]" />
@@ -1022,7 +1022,7 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
               setEditingRecord(null);
               setIsDrawerOpen(true);
             }}
-            className="bg-[#168BFF] hover:bg-[#0876E8] active:bg-[#065EC2] text-white px-4 py-2 rounded-xl text-xs font-semibold flex items-center gap-1.5 shadow-xs transition-colors cursor-pointer"
+            className="w-full sm:w-auto justify-center bg-[#168BFF] hover:bg-[#0876E8] active:bg-[#065EC2] text-white px-4 py-2.5 rounded-xl text-xs font-semibold flex items-center gap-1.5 shadow-xs transition-colors cursor-pointer min-h-[44px]"
           >
             <Plus className="w-4 h-4 text-white stroke-[2.5]" aria-hidden="true" />
             <span aria-hidden="true">Add Record</span>
@@ -1054,7 +1054,8 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
           </div>
         ) : (
           <div className="bg-white rounded-2xl border border-[#D8E7F7] shadow-2xs overflow-hidden">
-            <div className="overflow-x-auto">
+            {/* Desktop Table View (Hidden on mobile / visible on tablet & desktop) */}
+            <div className="hidden md:block overflow-x-auto">
               <table className="w-full text-left border-collapse text-xs">
                 <thead className="bg-[#F4F9FF] text-[#637A98] font-semibold text-[11px] uppercase tracking-wider border-b border-[#D8E7F7] select-none">
                   <tr>
@@ -1276,17 +1277,152 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
               </table>
             </div>
 
+            {/* Mobile Record Cards View (Shown on screens < 768px) */}
+            <div className="md:hidden divide-y divide-[#EAF2FA]">
+              {paginatedRecords.length === 0 ? (
+                <div className="p-8 text-center text-[#637A98] text-xs">
+                  No matching records found.
+                </div>
+              ) : (
+                paginatedRecords.map(rec => {
+                  const isDelivered = rec.deliveryStatus === 'delivered';
+                  const pendingAmt = Number(rec.pendingAmount) || 0;
+                  const isSelected = selectedRecordIds.has(rec.id);
+                  const totalBilled = Number(rec.totalAmount) || (Number(rec.quantity || 0) * Number(rec.unitPrice || 0));
+
+                  return (
+                    <div
+                      key={rec.id}
+                      className={`p-3.5 space-y-2.5 transition-colors ${
+                        isSelected ? 'bg-[#EAF4FF]/60' : 'bg-white hover:bg-[#F4F9FF]/50'
+                      }`}
+                    >
+                      {/* Top Row: Checkbox, Shop Name, Date, 3-dot action button */}
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="flex items-start gap-2.5 min-w-0 flex-1">
+                          <input
+                            type="checkbox"
+                            checked={isSelected}
+                            onChange={() => toggleSelectRecord(rec.id)}
+                            className="mt-1 rounded border-[#D8E7F7] text-[#168BFF] focus:ring-[#168BFF] cursor-pointer"
+                            aria-label={`Select record for ${rec.shopName}`}
+                          />
+                          <div 
+                            className="min-w-0 flex-1 cursor-pointer"
+                            onClick={() => setViewingRecord(rec)}
+                          >
+                            <div className="font-bold text-[#102A4C] text-sm tracking-tight truncate leading-tight">
+                              {rec.shopName}
+                            </div>
+                            <div className="flex items-center gap-2 mt-0.5 text-[11px] text-[#637A98]">
+                              <span className="font-mono">{formatDateDisplay(rec.date)}</span>
+                              {rec.shopName.includes(' - ') && (
+                                <>
+                                  <span>•</span>
+                                  <span className="truncate">{rec.shopName.split(' - ')[1]}</span>
+                                </>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Actions button */}
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            const rect = e.currentTarget.getBoundingClientRect();
+                            if (activeMenu?.record.id === rec.id) {
+                              setActiveMenu(null);
+                            } else {
+                              setActiveMenu({ record: rec, rect });
+                            }
+                          }}
+                          className="min-h-[44px] min-w-[44px] flex items-center justify-center p-2 rounded-xl text-[#637A98] hover:text-[#102A4C] hover:bg-slate-100 transition-colors cursor-pointer flex-shrink-0"
+                          aria-label="Record actions"
+                        >
+                          <MoreHorizontal className="w-4 h-4" />
+                        </button>
+                      </div>
+
+                      {/* Product & Quantity Row */}
+                      <div 
+                        className="flex items-center justify-between text-xs py-2 px-3 bg-[#F4F9FF] rounded-xl border border-[#E1EAF4] cursor-pointer"
+                        onClick={() => setViewingRecord(rec)}
+                      >
+                        <div className="min-w-0 flex-1 pr-2">
+                          <div className="font-semibold text-[#102A4C] truncate">
+                            {rec.productName}
+                          </div>
+                          <div className="text-[11px] text-[#637A98] font-mono mt-0.5">
+                            {`${rec.quantity} pcs × ₹${Number(rec.unitPrice || 0).toLocaleString('en-IN')}`}
+                          </div>
+                        </div>
+                        <div className="text-right flex-shrink-0">
+                          <span className="text-[10px] text-[#637A98] block">Total</span>
+                          <span className="font-bold text-[#102A4C] text-xs">
+                            {`₹${totalBilled.toLocaleString('en-IN')}`}
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Bottom Row: Status Badge & Pending / Payment */}
+                      <div className="flex items-center justify-between gap-2 pt-0.5">
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          {isDelivered ? (
+                            <span className="bg-[#E8F8EE] text-[#0E8345] border border-[#BDEBD0] px-2.5 py-0.5 rounded-full text-[11px] font-semibold inline-flex items-center gap-1">
+                              <CheckCircle2 className="w-3 h-3 text-[#0E8345] flex-shrink-0" />
+                              <span>Delivered</span>
+                            </span>
+                          ) : (
+                            <span className="bg-[#FFF6E5] text-[#B56704] border border-[#FFE4B5] px-2.5 py-0.5 rounded-full text-[11px] font-semibold inline-flex items-center gap-1">
+                              <Clock className="w-3 h-3 text-[#B56704] flex-shrink-0" />
+                              <span>Pending</span>
+                            </span>
+                          )}
+
+                          {pendingAmt > 0 ? (
+                            <span className="bg-rose-50 text-[#D9381E] border border-rose-200 px-2.5 py-0.5 rounded-full text-[11px] font-bold">
+                              {`₹${pendingAmt.toLocaleString('en-IN')} Due`}
+                            </span>
+                          ) : (
+                            <span className="bg-slate-50 text-slate-500 border border-slate-200 px-2.5 py-0.5 rounded-full text-[11px] font-medium">
+                              Settled
+                            </span>
+                          )}
+                        </div>
+
+                        {/* Quick Record Payment CTA if pending balance > 0 */}
+                        {pendingAmt > 0 && (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setSettlingRecord(rec);
+                            }}
+                            className="min-h-[36px] px-3 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-semibold flex items-center gap-1 shadow-2xs transition-colors cursor-pointer"
+                          >
+                            <span>Pay</span>
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+
             {/* Pagination Footer */}
             {filteredAndSortedRecords.length > 0 && (
-              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 px-4 py-3 border-t border-[#D8E7F7] bg-white text-xs text-[#637A98]">
-                <div className="flex items-center gap-2">
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 px-3.5 sm:px-4 py-3 border-t border-[#D8E7F7] bg-white text-xs text-[#637A98]">
+                <div className="flex items-center justify-between sm:justify-start gap-2 flex-wrap">
                   <span>
                     Showing <span className="font-semibold text-[#102A4C]">{Math.min((currentPage - 1) * rowsPerPage + 1, filteredAndSortedRecords.length)}</span> to{' '}
                     <span className="font-semibold text-[#102A4C]">{Math.min(currentPage * rowsPerPage, filteredAndSortedRecords.length)}</span> of{' '}
                     <span className="font-semibold text-[#102A4C]">{filteredAndSortedRecords.length}</span> records
                   </span>
-                  <div className="flex items-center gap-1.5 ml-3">
-                    <label htmlFor="rows-per-page" className="text-[#637A98] hidden sm:inline text-xs">Rows per page:</label>
+                  <div className="flex items-center gap-1.5 ml-0 sm:ml-3">
+                    <label htmlFor="rows-per-page" className="text-[#637A98] text-xs">Rows per page:</label>
                     <select
                       id="rows-per-page"
                       value={rowsPerPage}
@@ -1294,7 +1430,7 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
                         setRowsPerPage(Number(e.target.value));
                         setCurrentPage(1);
                       }}
-                      className="border border-[#D8E7F7] rounded-lg px-2 py-1 bg-white text-[#102A4C] text-xs focus:ring-1 focus:ring-[#168BFF] focus:outline-none cursor-pointer"
+                      className="border border-[#D8E7F7] rounded-lg px-2 py-1 bg-white text-[#102A4C] text-xs focus:ring-1 focus:ring-[#168BFF] focus:outline-none cursor-pointer min-h-[36px]"
                     >
                       <option value={10}>10</option>
                       <option value={25}>25</option>
@@ -1305,15 +1441,15 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
                 </div>
 
                 {totalPages > 1 && (
-                  <div className="flex items-center gap-1 self-end sm:self-auto">
+                  <div className="flex items-center gap-1 self-center sm:self-auto">
                     <button
                       type="button"
                       disabled={currentPage === 1}
                       onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
-                      className="p-1.5 rounded-lg border border-[#D8E7F7] bg-white text-[#637A98] hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer"
+                      className="min-h-[36px] min-w-[36px] p-1.5 rounded-lg border border-[#D8E7F7] bg-white text-[#637A98] hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer flex items-center justify-center"
                       aria-label="Previous page"
                     >
-                      <ChevronLeft className="w-3.5 h-3.5" />
+                      <ChevronLeft className="w-4 h-4" />
                     </button>
                     {Array.from({ length: totalPages }, (_, i) => i + 1)
                       .filter(p => p === 1 || p === totalPages || Math.abs(p - currentPage) <= 1)
@@ -1332,7 +1468,7 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
                             key={item}
                             type="button"
                             onClick={() => setCurrentPage(item)}
-                            className={`min-w-[28px] h-7 rounded-lg text-xs font-semibold flex items-center justify-center transition-colors cursor-pointer ${
+                            className={`min-w-[36px] min-h-[36px] sm:min-w-[28px] sm:h-7 rounded-lg text-xs font-semibold flex items-center justify-center transition-colors cursor-pointer ${
                               currentPage === item
                                 ? 'bg-[#168BFF] text-white shadow-2xs'
                                 : 'bg-white border border-[#D8E7F7] text-[#102A4C] hover:bg-slate-50'
@@ -1346,10 +1482,10 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
                       type="button"
                       disabled={currentPage === totalPages}
                       onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
-                      className="p-1.5 rounded-lg border border-[#D8E7F7] bg-white text-[#637A98] hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer"
+                      className="min-h-[36px] min-w-[36px] p-1.5 rounded-lg border border-[#D8E7F7] bg-white text-[#637A98] hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer flex items-center justify-center"
                       aria-label="Next page"
                     >
-                      <ChevronRight className="w-3.5 h-3.5" />
+                      <ChevronRight className="w-4 h-4" />
                     </button>
                   </div>
                 )}

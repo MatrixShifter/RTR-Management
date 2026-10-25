@@ -117,13 +117,13 @@ export const SettlePaymentModal: React.FC<SettlePaymentModalProps> = ({
         onClick={e => e.stopPropagation()}
       >
         {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4.5 border-b border-slate-100 bg-[#F8FAFC]">
-          <div>
+        <div className="flex items-center justify-between px-4 sm:px-6 py-3.5 sm:py-4 border-b border-slate-100 bg-[#F8FAFC]">
+          <div className="min-w-0 pr-2">
             <h2 id="settle-payment-title" className="text-base sm:text-lg font-bold text-slate-900 flex items-center gap-2">
-              <CreditCard className="w-5 h-5 text-emerald-600" />
-              <span>Record Payment</span>
+              <CreditCard className="w-5 h-5 text-emerald-600 flex-shrink-0" />
+              <span className="truncate">Record Payment</span>
             </h2>
-            <p className="text-xs text-slate-500 mt-0.5 truncate max-w-[300px]">
+            <p className="text-xs text-slate-500 mt-0.5 truncate max-w-[280px] sm:max-w-[340px]">
               {record.shopName} • {record.productName}
             </p>
           </div>
@@ -131,7 +131,7 @@ export const SettlePaymentModal: React.FC<SettlePaymentModalProps> = ({
             type="button"
             onClick={onClose}
             disabled={isSubmitting}
-            className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-200/60 transition-colors cursor-pointer disabled:opacity-50"
+            className="min-h-[44px] min-w-[44px] flex items-center justify-center p-1.5 rounded-xl text-slate-400 hover:text-slate-600 hover:bg-slate-200/60 transition-colors cursor-pointer disabled:opacity-50 flex-shrink-0"
             aria-label="Close dialog"
           >
             <X className="w-4 h-4" />
@@ -139,7 +139,7 @@ export const SettlePaymentModal: React.FC<SettlePaymentModalProps> = ({
         </div>
 
         {/* Form Body */}
-        <form onSubmit={handleSubmit} className="p-6 space-y-4 text-xs">
+        <form onSubmit={handleSubmit} className="p-4 sm:p-6 space-y-4 text-xs max-h-[calc(90vh-120px)] overflow-y-auto">
           {error && (
             <div className="p-3 bg-red-50 border border-red-200 rounded-xl text-red-700 flex items-start gap-2">
               <AlertCircle className="w-4 h-4 text-red-600 flex-shrink-0 mt-0.5" />
@@ -283,14 +283,14 @@ export const SettlePaymentModal: React.FC<SettlePaymentModalProps> = ({
               type="button"
               onClick={onClose}
               disabled={isSubmitting}
-              className="px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-xl transition-colors cursor-pointer disabled:opacity-50"
+              className="min-h-[44px] flex-1 sm:flex-initial px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-xl transition-colors cursor-pointer disabled:opacity-50 flex items-center justify-center"
             >
               Cancel
             </button>
             <button
               type="submit"
               disabled={isSubmitting || enteredVal <= 0}
-              className="bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-300 text-white px-5 py-2 rounded-xl text-xs font-semibold flex items-center gap-1.5 shadow-xs transition-colors cursor-pointer disabled:cursor-not-allowed"
+              className="min-h-[44px] flex-1 sm:flex-initial bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-300 text-white px-5 py-2 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 shadow-xs transition-colors cursor-pointer disabled:cursor-not-allowed"
             >
               {isSubmitting ? (
                 <>
