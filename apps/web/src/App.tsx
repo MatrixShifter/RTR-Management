@@ -348,7 +348,7 @@ const AppContent: React.FC = () => {
             onSignOut={handleSignOut}
           />
           <main className="flex-1 w-full lg:pl-[205px] print:pl-0 animate-fade-in overflow-x-hidden">
-            <div className="w-full max-w-[1600px] mx-auto px-3 sm:px-6 lg:px-8 py-4 sm:py-6">
+            <div className="w-full max-w-[1600px] mx-auto px-3.5 sm:px-6 lg:px-8 py-4 sm:py-6">
               <Suspense fallback={<div className="py-6"><TableSkeleton rows={5} /></div>}>
                 <Routes>
                   <Route path="/" element={<OwnerDashboard />} />

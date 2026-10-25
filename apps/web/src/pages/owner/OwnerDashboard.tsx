@@ -890,130 +890,133 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
         </div>
 
         {/* Right: Shop Filter, Dates, Filters & Add Record Action */}
-        <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap w-full sm:w-auto">
-          {/* Shop Filter Button */}
-          <div className="relative filter-dropdown-container flex-1 sm:flex-initial">
-            <button
-              type="button"
-              onClick={() => setIsFilterDropdownOpen(!isFilterDropdownOpen)}
-              className={`w-full sm:w-auto border px-3 sm:px-3.5 py-2 rounded-xl text-xs font-medium flex items-center justify-between sm:justify-start gap-1.5 shadow-2xs transition-colors cursor-pointer min-h-[40px] ${
-                selectedShopFilter !== 'all' || isFilterDropdownOpen
-                  ? 'bg-[#EAF4FF] border-[#168BFF] text-[#168BFF] font-semibold'
-                  : 'bg-white border-[#D8E7F7] hover:bg-slate-50 text-[#102A4C]'
-              }`}
-            >
-              <div className="flex items-center gap-1.5 truncate">
-                <Store className="w-3.5 h-3.5 text-[#637A98] flex-shrink-0" />
-                <span className="truncate">
-                  {selectedShopFilter === 'all' 
-                    ? 'All Shops' 
-                    : (shops.find(s => s.id === selectedShopFilter)?.name || 'Filtered Shop')}
-                </span>
-              </div>
-              <ChevronDown className="w-3 h-3 text-[#637A98] flex-shrink-0" />
-            </button>
-
-            {isFilterDropdownOpen && (
-              <div className="absolute right-0 mt-1.5 w-60 bg-white rounded-xl shadow-lg border border-[#D8E7F7] p-2.5 z-50 animate-fade-in text-xs">
-                <div className="flex items-center justify-between pb-1.5 mb-1.5 border-b border-slate-100">
-                  <span className="font-semibold text-[#637A98] text-[10px] uppercase tracking-wider">
-                    Filter by Shop
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5 w-full sm:w-auto">
+          {/* Filter Pills container - horizontally scrollable on mobile without wrapping */}
+          <div className="flex items-center gap-2 overflow-x-auto no-scrollbar py-0.5 w-full sm:w-auto flex-nowrap">
+            {/* Shop Filter Button */}
+            <div className="relative filter-dropdown-container flex-shrink-0">
+              <button
+                type="button"
+                onClick={() => setIsFilterDropdownOpen(!isFilterDropdownOpen)}
+                className={`border px-3 sm:px-3.5 py-2 rounded-xl text-xs font-medium flex items-center justify-between gap-1.5 shadow-2xs transition-colors cursor-pointer min-h-[40px] whitespace-nowrap ${
+                  selectedShopFilter !== 'all' || isFilterDropdownOpen
+                    ? 'bg-[#EAF4FF] border-[#168BFF] text-[#168BFF] font-semibold'
+                    : 'bg-white border-[#D8E7F7] hover:bg-slate-50 text-[#102A4C]'
+                }`}
+              >
+                <div className="flex items-center gap-1.5 truncate max-w-[140px] sm:max-w-[160px]">
+                  <Store className="w-3.5 h-3.5 text-[#637A98] flex-shrink-0" />
+                  <span className="truncate">
+                    {selectedShopFilter === 'all' 
+                      ? 'All Shops' 
+                      : (shops.find(s => s.id === selectedShopFilter)?.name || 'Filtered Shop')}
                   </span>
-                  {(selectedShopFilter !== 'all' || filterMode !== 'all' || searchQuery) && (
+                </div>
+                <ChevronDown className="w-3 h-3 text-[#637A98] flex-shrink-0" />
+              </button>
+
+              {isFilterDropdownOpen && (
+                <div className="absolute left-0 sm:left-auto sm:right-0 mt-1.5 w-60 bg-white rounded-xl shadow-lg border border-[#D8E7F7] p-2.5 z-50 animate-fade-in text-xs">
+                  <div className="flex items-center justify-between pb-1.5 mb-1.5 border-b border-slate-100">
+                    <span className="font-semibold text-[#637A98] text-[10px] uppercase tracking-wider">
+                      Filter by Shop
+                    </span>
+                    {(selectedShopFilter !== 'all' || filterMode !== 'all' || searchQuery) && (
+                      <button
+                        type="button"
+                        onClick={handleResetFilters}
+                        className="text-[#168BFF] text-[11px] font-medium hover:underline cursor-pointer"
+                      >
+                        Reset All
+                      </button>
+                    )}
+                  </div>
+                  <div className="space-y-0.5 max-h-48 overflow-y-auto">
                     <button
                       type="button"
-                      onClick={handleResetFilters}
-                      className="text-[#168BFF] text-[11px] font-medium hover:underline cursor-pointer"
+                      onClick={() => {
+                        setSelectedShopFilter('all');
+                        setIsFilterDropdownOpen(false);
+                      }}
+                      className={`w-full text-left px-2.5 py-1.5 rounded-md font-medium transition-colors ${
+                        selectedShopFilter === 'all' ? 'bg-[#EAF4FF] text-[#168BFF] font-semibold' : 'hover:bg-slate-50 text-slate-700'
+                      }`}
                     >
-                      Reset All
+                      All Shops ({records.length})
                     </button>
-                  )}
+                    {shops.map(s => (
+                      <button
+                        key={s.id}
+                        type="button"
+                        onClick={() => {
+                          setSelectedShopFilter(s.id);
+                          setIsFilterDropdownOpen(false);
+                        }}
+                        className={`w-full text-left px-2.5 py-1.5 rounded-md font-medium transition-colors truncate ${
+                          selectedShopFilter === s.id ? 'bg-[#EAF4FF] text-[#168BFF] font-semibold' : 'hover:bg-slate-50 text-slate-700'
+                        }`}
+                      >
+                        {s.name}
+                      </button>
+                    ))}
+                  </div>
                 </div>
-                <div className="space-y-0.5 max-h-48 overflow-y-auto">
+              )}
+            </div>
+
+            {/* Dates Filter Button */}
+            <div className="relative date-dropdown-container flex-shrink-0">
+              <button
+                type="button"
+                onClick={() => setIsDateDropdownOpen(!isDateDropdownOpen)}
+                className="bg-white border border-[#D8E7F7] hover:bg-slate-50 text-[#102A4C] px-3 sm:px-3.5 py-2 rounded-xl text-xs font-medium flex items-center gap-1.5 shadow-2xs transition-colors cursor-pointer min-h-[40px] whitespace-nowrap"
+              >
+                <Calendar className="w-3.5 h-3.5 text-[#637A98] flex-shrink-0" />
+                <span>{selectedDateFilter === 'today' ? 'Today' : 'All Dates'}</span>
+                <ChevronDown className="w-3 h-3 text-[#637A98] flex-shrink-0" />
+              </button>
+
+              {isDateDropdownOpen && (
+                <div className="absolute left-0 sm:left-auto sm:right-0 mt-1.5 w-40 bg-white rounded-xl shadow-lg border border-[#D8E7F7] p-1.5 z-50 animate-fade-in text-xs">
                   <button
                     type="button"
                     onClick={() => {
-                      setSelectedShopFilter('all');
-                      setIsFilterDropdownOpen(false);
+                      setSelectedDateFilter('all');
+                      setIsDateDropdownOpen(false);
                     }}
                     className={`w-full text-left px-2.5 py-1.5 rounded-md font-medium transition-colors ${
-                      selectedShopFilter === 'all' ? 'bg-[#EAF4FF] text-[#168BFF] font-semibold' : 'hover:bg-slate-50 text-slate-700'
+                      selectedDateFilter === 'all' ? 'bg-[#EAF4FF] text-[#168BFF] font-semibold' : 'hover:bg-slate-50 text-slate-700'
                     }`}
                   >
-                    All Shops ({records.length})
+                    All Dates
                   </button>
-                  {shops.map(s => (
-                    <button
-                      key={s.id}
-                      type="button"
-                      onClick={() => {
-                        setSelectedShopFilter(s.id);
-                        setIsFilterDropdownOpen(false);
-                      }}
-                      className={`w-full text-left px-2.5 py-1.5 rounded-md font-medium transition-colors truncate ${
-                        selectedShopFilter === s.id ? 'bg-[#EAF4FF] text-[#168BFF] font-semibold' : 'hover:bg-slate-50 text-slate-700'
-                      }`}
-                    >
-                      {s.name}
-                    </button>
-                  ))}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelectedDateFilter('today');
+                      setIsDateDropdownOpen(false);
+                    }}
+                    className={`w-full text-left px-2.5 py-1.5 rounded-md font-medium transition-colors ${
+                      selectedDateFilter === 'today' ? 'bg-[#EAF4FF] text-[#168BFF] font-semibold' : 'hover:bg-slate-50 text-slate-700'
+                    }`}
+                  >
+                    Today Only
+                  </button>
                 </div>
-              </div>
-            )}
-          </div>
+              )}
+            </div>
 
-          {/* Dates Filter Button */}
-          <div className="relative date-dropdown-container">
+            {/* Filters Toggle Button */}
             <button
               type="button"
-              onClick={() => setIsDateDropdownOpen(!isDateDropdownOpen)}
-              className="bg-white border border-[#D8E7F7] hover:bg-slate-50 text-[#102A4C] px-3 sm:px-3.5 py-2 rounded-xl text-xs font-medium flex items-center gap-1.5 shadow-2xs transition-colors cursor-pointer min-h-[40px]"
+              onClick={handleResetFilters}
+              className="bg-white border border-[#D8E7F7] hover:bg-slate-50 text-[#102A4C] px-3 sm:px-3.5 py-2 rounded-xl text-xs font-medium flex items-center gap-1.5 shadow-2xs transition-colors cursor-pointer min-h-[40px] whitespace-nowrap flex-shrink-0"
+              title="Reset active filters"
             >
-              <Calendar className="w-3.5 h-3.5 text-[#637A98]" />
-              <span>{selectedDateFilter === 'today' ? 'Today' : 'All Dates'}</span>
-              <ChevronDown className="w-3 h-3 text-[#637A98]" />
+              <Filter className="w-3.5 h-3.5 text-[#637A98] flex-shrink-0" />
+              <span>Filters</span>
             </button>
-
-            {isDateDropdownOpen && (
-              <div className="absolute right-0 mt-1.5 w-40 bg-white rounded-xl shadow-lg border border-[#D8E7F7] p-1.5 z-50 animate-fade-in text-xs">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setSelectedDateFilter('all');
-                    setIsDateDropdownOpen(false);
-                  }}
-                  className={`w-full text-left px-2.5 py-1.5 rounded-md font-medium transition-colors ${
-                    selectedDateFilter === 'all' ? 'bg-[#EAF4FF] text-[#168BFF] font-semibold' : 'hover:bg-slate-50 text-slate-700'
-                  }`}
-                >
-                  All Dates
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setSelectedDateFilter('today');
-                    setIsDateDropdownOpen(false);
-                  }}
-                  className={`w-full text-left px-2.5 py-1.5 rounded-md font-medium transition-colors ${
-                    selectedDateFilter === 'today' ? 'bg-[#EAF4FF] text-[#168BFF] font-semibold' : 'hover:bg-slate-50 text-slate-700'
-                  }`}
-                >
-                  Today Only
-                </button>
-              </div>
-            )}
           </div>
-
-          {/* Filters Toggle Button */}
-          <button
-            type="button"
-            onClick={handleResetFilters}
-            className="bg-white border border-[#D8E7F7] hover:bg-slate-50 text-[#102A4C] px-3 sm:px-3.5 py-2 rounded-xl text-xs font-medium flex items-center gap-1.5 shadow-2xs transition-colors cursor-pointer min-h-[40px]"
-            title="Reset active filters"
-          >
-            <Filter className="w-3.5 h-3.5 text-[#637A98]" />
-            <span>Filters</span>
-          </button>
 
           {/* Primary CTA: + Add Record */}
           <button
@@ -1022,7 +1025,7 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
               setEditingRecord(null);
               setIsDrawerOpen(true);
             }}
-            className="w-full sm:w-auto justify-center bg-[#168BFF] hover:bg-[#0876E8] active:bg-[#065EC2] text-white px-4 py-2.5 rounded-xl text-xs font-semibold flex items-center gap-1.5 shadow-xs transition-colors cursor-pointer min-h-[44px]"
+            className="w-full sm:w-auto justify-center bg-[#168BFF] hover:bg-[#0876E8] active:bg-[#065EC2] text-white px-4 py-2.5 rounded-xl text-xs font-semibold flex items-center gap-1.5 shadow-xs transition-colors cursor-pointer min-h-[46px] h-[46px] flex-shrink-0 whitespace-nowrap"
           >
             <Plus className="w-4 h-4 text-white stroke-[2.5]" aria-hidden="true" />
             <span aria-hidden="true">Add Record</span>
@@ -1053,7 +1056,7 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
             />
           </div>
         ) : (
-          <div className="bg-white rounded-2xl border border-[#D8E7F7] shadow-2xs overflow-hidden">
+          <div className="bg-transparent md:bg-white rounded-2xl md:border md:border-[#D8E7F7] md:shadow-2xs overflow-visible md:overflow-hidden space-y-3.5 md:space-y-0">
             {/* Desktop Table View (Hidden on mobile / visible on tablet & desktop) */}
             <div className="hidden md:block overflow-x-auto">
               <table className="w-full text-left border-collapse text-xs">
@@ -1278,9 +1281,9 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
             </div>
 
             {/* Mobile Record Cards View (Shown on screens < 768px) */}
-            <div className="md:hidden divide-y divide-[#EAF2FA]">
+            <div className="md:hidden space-y-3.5">
               {paginatedRecords.length === 0 ? (
-                <div className="p-8 text-center text-[#637A98] text-xs">
+                <div className="bg-white rounded-2xl border border-[#DCE8F6] p-8 text-center text-[#637A98] text-xs shadow-2xs">
                   No matching records found.
                 </div>
               ) : (
@@ -1293,40 +1296,40 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
                   return (
                     <div
                       key={rec.id}
-                      className={`p-3.5 space-y-2.5 transition-colors ${
-                        isSelected ? 'bg-[#EAF4FF]/60' : 'bg-white hover:bg-[#F4F9FF]/50'
+                      className={`bg-white rounded-2xl border border-[#DCE8F6] p-3.5 sm:p-4 space-y-3 shadow-2xs transition-all ${
+                        isSelected ? 'ring-2 ring-[#168BFF] bg-[#F4F9FF]' : 'hover:border-[#B8D7F9]'
                       }`}
                     >
-                      {/* Top Row: Checkbox, Shop Name, Date, 3-dot action button */}
-                      <div className="flex items-start justify-between gap-2">
+                      {/* Row 1: Checkbox, Shop Name, Date/Location & 3-Dot Action Menu */}
+                      <div className="flex items-start justify-between gap-2.5">
                         <div className="flex items-start gap-2.5 min-w-0 flex-1">
                           <input
                             type="checkbox"
                             checked={isSelected}
                             onChange={() => toggleSelectRecord(rec.id)}
-                            className="mt-1 rounded border-[#D8E7F7] text-[#168BFF] focus:ring-[#168BFF] cursor-pointer"
+                            className="w-4 h-4 mt-0.5 rounded border-[#D8E7F7] text-[#168BFF] focus:ring-[#168BFF] cursor-pointer flex-shrink-0"
                             aria-label={`Select record for ${rec.shopName}`}
                           />
                           <div 
                             className="min-w-0 flex-1 cursor-pointer"
                             onClick={() => setViewingRecord(rec)}
                           >
-                            <div className="font-bold text-[#102A4C] text-sm tracking-tight truncate leading-tight">
+                            <div className="font-bold text-[#102A4C] text-[15px] leading-snug line-clamp-2">
                               {rec.shopName}
                             </div>
-                            <div className="flex items-center gap-2 mt-0.5 text-[11px] text-[#637A98]">
-                              <span className="font-mono">{formatDateDisplay(rec.date)}</span>
+                            <div className="flex items-center gap-1.5 mt-1 text-xs text-[#637A98]">
+                              <span className="font-mono text-xs">{formatDateDisplay(rec.date)}</span>
                               {rec.shopName.includes(' - ') && (
                                 <>
-                                  <span>•</span>
-                                  <span className="truncate">{rec.shopName.split(' - ')[1]}</span>
+                                  <span className="text-slate-300">•</span>
+                                  <span className="truncate text-xs">{rec.shopName.split(' - ')[1]}</span>
                                 </>
                               )}
                             </div>
                           </div>
                         </div>
 
-                        {/* Actions button */}
+                        {/* Three-dot Action Menu (min 40px touch target) */}
                         <button
                           type="button"
                           onClick={(e) => {
@@ -1338,61 +1341,61 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
                               setActiveMenu({ record: rec, rect });
                             }
                           }}
-                          className="min-h-[44px] min-w-[44px] flex items-center justify-center p-2 rounded-xl text-[#637A98] hover:text-[#102A4C] hover:bg-slate-100 transition-colors cursor-pointer flex-shrink-0"
+                          className="w-10 h-10 min-w-[40px] min-h-[40px] flex items-center justify-center p-2 rounded-xl text-[#637A98] hover:text-[#102A4C] hover:bg-slate-100 transition-colors cursor-pointer flex-shrink-0 -mr-1 -mt-1"
                           aria-label="Record actions"
                         >
-                          <MoreHorizontal className="w-4 h-4" />
+                          <MoreHorizontal className="w-5 h-5" />
                         </button>
                       </div>
 
-                      {/* Product & Quantity Row */}
+                      {/* Row 2: Subtle Light-Blue Product Panel */}
                       <div 
-                        className="flex items-center justify-between text-xs py-2 px-3 bg-[#F4F9FF] rounded-xl border border-[#E1EAF4] cursor-pointer"
+                        className="bg-[#F0F7FF] border border-[#D5E7FA] rounded-xl p-3 flex items-start justify-between gap-3 cursor-pointer hover:bg-[#E9F3FE] transition-colors"
                         onClick={() => setViewingRecord(rec)}
                       >
-                        <div className="min-w-0 flex-1 pr-2">
-                          <div className="font-semibold text-[#102A4C] truncate">
+                        <div className="min-w-0 flex-1">
+                          <div className="font-semibold text-[#102A4C] text-[13px] sm:text-sm truncate">
                             {rec.productName}
                           </div>
-                          <div className="text-[11px] text-[#637A98] font-mono mt-0.5">
+                          <div className="text-xs text-[#637A98] font-mono mt-0.5">
                             {`${rec.quantity} pcs × ₹${Number(rec.unitPrice || 0).toLocaleString('en-IN')}`}
                           </div>
                         </div>
                         <div className="text-right flex-shrink-0">
-                          <span className="text-[10px] text-[#637A98] block">Total</span>
-                          <span className="font-bold text-[#102A4C] text-xs">
+                          <span className="text-[10px] uppercase font-bold tracking-wider text-[#637A98] block">Total</span>
+                          <span className="font-bold text-[#102A4C] text-sm tabular-nums whitespace-nowrap">
                             {`₹${totalBilled.toLocaleString('en-IN')}`}
                           </span>
                         </div>
                       </div>
 
-                      {/* Bottom Row: Status Badge & Pending / Payment */}
+                      {/* Row 3: Status Badges & Pay Button */}
                       <div className="flex items-center justify-between gap-2 pt-0.5">
-                        <div className="flex items-center gap-1.5 flex-wrap">
+                        <div className="flex items-center gap-1.5 flex-wrap min-w-0">
                           {isDelivered ? (
-                            <span className="bg-[#E8F8EE] text-[#0E8345] border border-[#BDEBD0] px-2.5 py-0.5 rounded-full text-[11px] font-semibold inline-flex items-center gap-1">
+                            <span className="bg-[#E8F8EE] text-[#0E8345] border border-[#BDEBD0] px-2.5 py-1 rounded-full text-xs font-semibold inline-flex items-center gap-1 flex-shrink-0">
                               <CheckCircle2 className="w-3 h-3 text-[#0E8345] flex-shrink-0" />
                               <span>Delivered</span>
                             </span>
                           ) : (
-                            <span className="bg-[#FFF6E5] text-[#B56704] border border-[#FFE4B5] px-2.5 py-0.5 rounded-full text-[11px] font-semibold inline-flex items-center gap-1">
+                            <span className="bg-[#FFF6E5] text-[#B56704] border border-[#FFE4B5] px-2.5 py-1 rounded-full text-xs font-semibold inline-flex items-center gap-1 flex-shrink-0">
                               <Clock className="w-3 h-3 text-[#B56704] flex-shrink-0" />
                               <span>Pending</span>
                             </span>
                           )}
 
                           {pendingAmt > 0 ? (
-                            <span className="bg-rose-50 text-[#D9381E] border border-rose-200 px-2.5 py-0.5 rounded-full text-[11px] font-bold">
+                            <span className="bg-rose-50 text-[#D9381E] border border-rose-200 px-2.5 py-1 rounded-full text-xs font-bold whitespace-nowrap flex-shrink-0">
                               {`₹${pendingAmt.toLocaleString('en-IN')} Due`}
                             </span>
                           ) : (
-                            <span className="bg-slate-50 text-slate-500 border border-slate-200 px-2.5 py-0.5 rounded-full text-[11px] font-medium">
+                            <span className="bg-slate-50 text-slate-600 border border-slate-200 px-2.5 py-1 rounded-full text-xs font-medium whitespace-nowrap flex-shrink-0">
                               Settled
                             </span>
                           )}
                         </div>
 
-                        {/* Quick Record Payment CTA if pending balance > 0 */}
+                        {/* Pay Button (Single line, min-w 68px, h 40px, emerald green) */}
                         {pendingAmt > 0 && (
                           <button
                             type="button"
@@ -1400,7 +1403,7 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
                               e.stopPropagation();
                               setSettlingRecord(rec);
                             }}
-                            className="min-h-[36px] px-3 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-semibold flex items-center gap-1 shadow-2xs transition-colors cursor-pointer"
+                            className="h-[40px] min-h-[40px] min-w-[68px] px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white rounded-lg text-xs font-semibold whitespace-nowrap flex items-center justify-center gap-1 shadow-2xs transition-colors cursor-pointer flex-shrink-0"
                           >
                             <span>Pay</span>
                           </button>
@@ -1414,14 +1417,17 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
 
             {/* Pagination Footer */}
             {filteredAndSortedRecords.length > 0 && (
-              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 px-3.5 sm:px-4 py-3 border-t border-[#D8E7F7] bg-white text-xs text-[#637A98]">
+              <div className="bg-white rounded-2xl md:rounded-none border border-[#D8E7F7] md:border-0 md:border-t md:border-[#D8E7F7] shadow-2xs md:shadow-none flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 px-3.5 sm:px-4 py-3 text-xs text-[#637A98]">
+                {/* Mobile Row 1 / Desktop Left: Showing X to Y of Z records */}
                 <div className="flex items-center justify-between sm:justify-start gap-2 flex-wrap">
-                  <span>
+                  <span className="text-xs">
                     Showing <span className="font-semibold text-[#102A4C]">{Math.min((currentPage - 1) * rowsPerPage + 1, filteredAndSortedRecords.length)}</span> to{' '}
                     <span className="font-semibold text-[#102A4C]">{Math.min(currentPage * rowsPerPage, filteredAndSortedRecords.length)}</span> of{' '}
                     <span className="font-semibold text-[#102A4C]">{filteredAndSortedRecords.length}</span> records
                   </span>
-                  <div className="flex items-center gap-1.5 ml-0 sm:ml-3">
+                  
+                  {/* Desktop inline rows per page */}
+                  <div className="hidden sm:flex items-center gap-1.5 ml-3">
                     <label htmlFor="rows-per-page" className="text-[#637A98] text-xs">Rows per page:</label>
                     <select
                       id="rows-per-page"
@@ -1440,55 +1446,77 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
                   </div>
                 </div>
 
-                {totalPages > 1 && (
-                  <div className="flex items-center gap-1 self-center sm:self-auto">
-                    <button
-                      type="button"
-                      disabled={currentPage === 1}
-                      onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
-                      className="min-h-[36px] min-w-[36px] p-1.5 rounded-lg border border-[#D8E7F7] bg-white text-[#637A98] hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer flex items-center justify-center"
-                      aria-label="Previous page"
+                {/* Mobile Row 2: Rows per page selector + pagination buttons */}
+                <div className="flex items-center justify-between sm:justify-end gap-2 w-full sm:w-auto">
+                  {/* Mobile visible rows per page */}
+                  <div className="flex sm:hidden items-center gap-1.5">
+                    <label htmlFor="rows-per-page-mobile" className="text-[#637A98] text-xs">Rows:</label>
+                    <select
+                      id="rows-per-page-mobile"
+                      value={rowsPerPage}
+                      onChange={(e) => {
+                        setRowsPerPage(Number(e.target.value));
+                        setCurrentPage(1);
+                      }}
+                      className="border border-[#D8E7F7] rounded-lg px-2 py-1 bg-white text-[#102A4C] text-xs focus:ring-1 focus:ring-[#168BFF] focus:outline-none cursor-pointer min-h-[36px]"
                     >
-                      <ChevronLeft className="w-4 h-4" />
-                    </button>
-                    {Array.from({ length: totalPages }, (_, i) => i + 1)
-                      .filter(p => p === 1 || p === totalPages || Math.abs(p - currentPage) <= 1)
-                      .reduce<(number | string)[]>((acc, p, idx, arr) => {
-                        if (idx > 0 && p - (arr[idx - 1] as number) > 1) {
-                          acc.push('...');
-                        }
-                        acc.push(p);
-                        return acc;
-                      }, [])
-                      .map((item, idx) => (
-                        typeof item === 'string' ? (
-                          <span key={`ellipsis-${idx}`} className="px-1 text-[#637A98] text-xs">...</span>
-                        ) : (
-                          <button
-                            key={item}
-                            type="button"
-                            onClick={() => setCurrentPage(item)}
-                            className={`min-w-[36px] min-h-[36px] sm:min-w-[28px] sm:h-7 rounded-lg text-xs font-semibold flex items-center justify-center transition-colors cursor-pointer ${
-                              currentPage === item
-                                ? 'bg-[#168BFF] text-white shadow-2xs'
-                                : 'bg-white border border-[#D8E7F7] text-[#102A4C] hover:bg-slate-50'
-                            }`}
-                          >
-                            {item}
-                          </button>
-                        )
-                      ))}
-                    <button
-                      type="button"
-                      disabled={currentPage === totalPages}
-                      onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
-                      className="min-h-[36px] min-w-[36px] p-1.5 rounded-lg border border-[#D8E7F7] bg-white text-[#637A98] hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer flex items-center justify-center"
-                      aria-label="Next page"
-                    >
-                      <ChevronRight className="w-4 h-4" />
-                    </button>
+                      <option value={10}>10</option>
+                      <option value={25}>25</option>
+                      <option value={50}>50</option>
+                      <option value={100}>100</option>
+                    </select>
                   </div>
-                )}
+
+                  {totalPages > 1 && (
+                    <div className="flex items-center gap-1 self-center sm:self-auto ml-auto sm:ml-0">
+                      <button
+                        type="button"
+                        disabled={currentPage === 1}
+                        onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                        className="min-h-[36px] min-w-[36px] p-1.5 rounded-lg border border-[#D8E7F7] bg-white text-[#637A98] hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer flex items-center justify-center"
+                        aria-label="Previous page"
+                      >
+                        <ChevronLeft className="w-4 h-4" />
+                      </button>
+                      {Array.from({ length: totalPages }, (_, i) => i + 1)
+                        .filter(p => p === 1 || p === totalPages || Math.abs(p - currentPage) <= 1)
+                        .reduce<(number | string)[]>((acc, p, idx, arr) => {
+                          if (idx > 0 && p - (arr[idx - 1] as number) > 1) {
+                            acc.push('...');
+                          }
+                          acc.push(p);
+                          return acc;
+                        }, [])
+                        .map((item, idx) => (
+                          typeof item === 'string' ? (
+                            <span key={`ellipsis-${idx}`} className="px-1 text-[#637A98] text-xs">...</span>
+                          ) : (
+                            <button
+                              key={item}
+                              type="button"
+                              onClick={() => setCurrentPage(item)}
+                              className={`min-w-[36px] min-h-[36px] sm:min-w-[28px] sm:h-7 rounded-lg text-xs font-semibold flex items-center justify-center transition-colors cursor-pointer ${
+                                currentPage === item
+                                  ? 'bg-[#168BFF] text-white shadow-2xs'
+                                  : 'bg-white border border-[#D8E7F7] text-[#102A4C] hover:bg-slate-50'
+                              }`}
+                            >
+                              {item}
+                            </button>
+                          )
+                        ))}
+                      <button
+                        type="button"
+                        disabled={currentPage === totalPages}
+                        onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                        className="min-h-[36px] min-w-[36px] p-1.5 rounded-lg border border-[#D8E7F7] bg-white text-[#637A98] hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer flex items-center justify-center"
+                        aria-label="Next page"
+                      >
+                        <ChevronRight className="w-4 h-4" />
+                      </button>
+                    </div>
+                  )}
+                </div>
               </div>
             )}
           </div>
