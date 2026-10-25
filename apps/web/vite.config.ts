@@ -39,8 +39,21 @@ export default defineConfig({
     port: 5173,
     proxy: {
       '/api': {
-        target: 'http://localhost:4000',
-        changeOrigin: true
+        target: process.env.API_TARGET_URL || 'http://127.0.0.1:4000',
+        changeOrigin: true,
+        secure: false,
+        configure: (proxy) => {
+          proxy.on('error', (_err, _req, res) => {
+            if (res && !res.headersSent && typeof (res as any).writeHead === 'function') {
+              (res as any).writeHead(503, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({
+                valid: false,
+                error: 'Backend API Service Unavailable',
+                message: 'The RTR Wholesale backend service is currently unreachable on port 4000.'
+              }));
+            }
+          });
+        }
       }
     }
   }

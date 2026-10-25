@@ -3,7 +3,7 @@ import { createClient } from '@supabase/supabase-js';
 import crypto from 'crypto';
 import { config } from '../config.js';
 import { authRateLimiter, passwordRecoveryRateLimiter } from '../middleware/rateLimiter.js';
-import { logSecurityEvent } from '../logger.js';
+import { logger, logSecurityEvent } from '../logger.js';
 import { DEMO_USERNAME, DEMO_PASSWORD_PLACEHOLDER } from '@crimpston/shared';
 
 export const authRouter = Router();
@@ -372,9 +372,12 @@ authRouter.get('/verify-session', async (req: Request, res: Response) => {
   }
 
   const token = authHeader.split(' ')[1];
+  if (!token || token.trim() === '') {
+    return res.status(401).json({ valid: false, message: 'Missing authorization token.' });
+  }
 
   // Isolated demo token validation
-  if (token && token.startsWith('demo-session-')) {
+  if (token.startsWith('demo-session-')) {
     return res.status(200).json({
       valid: true,
       user: {
@@ -413,13 +416,13 @@ authRouter.get('/verify-session', async (req: Request, res: Response) => {
       });
     }
 
-    const { data: membership } = await supabaseAdmin
+    const { data: membership, error: memberErr } = await supabaseAdmin
       .from('business_memberships')
       .select('role, is_active')
       .eq('user_id', user.id)
       .maybeSingle();
 
-    if (!membership || membership.role !== 'owner' || !membership.is_active) {
+    if (memberErr || !membership || membership.role !== 'owner' || !membership.is_active) {
       return res.status(403).json({ valid: false, message: OWNER_ONLY_ACCESS_MSG });
     }
 
@@ -432,7 +435,8 @@ authRouter.get('/verify-session', async (req: Request, res: Response) => {
         role: 'owner'
       }
     });
-  } catch {
+  } catch (err: any) {
+    logger.warn('Session verification caught exception', { message: err?.message });
     return res.status(401).json({ valid: false, message: 'Session verification failed.' });
   }
 });

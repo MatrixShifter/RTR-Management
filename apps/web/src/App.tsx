@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, lazy, Suspense } from 'react';
+import React, { useState, useEffect, useCallback, useRef, lazy, Suspense } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Navbar } from './components/Navbar.js';
@@ -44,15 +44,31 @@ const AppContent: React.FC = () => {
   const [isBootstrapping, setIsBootstrapping] = useState(true);
   const [isOnline, setIsOnline] = useState<boolean>(navigator.onLine);
 
+  const isVerifyingRef = useRef(false);
+  const lastVerifiedTokenRef = useRef<string | null>(null);
+  const warningRef = useRef(warning);
+  warningRef.current = warning;
+
   // 1. Session verification & hydration
   useEffect(() => {
     let isMounted = true;
 
     async function initSession() {
+      // Prevent duplicate in-flight session verification calls
+      if (isVerifyingRef.current) {
+        return;
+      }
+      isVerifyingRef.current = true;
+
       try {
         if (isSupabaseConfigured && supabase) {
           const { data: { session } } = await supabase.auth.getSession();
           if (session?.user && session?.access_token) {
+            // If this token was already verified, skip duplicate network call
+            if (lastVerifiedTokenRef.current === session.access_token && currentUser) {
+              return;
+            }
+
             const isDemoAccount = session.user.email === 'demo-owner@rtrmobiles.com' || 
               session.user.user_metadata?.role === 'demo' || 
               session.user.user_metadata?.username === 'demo-owner';
@@ -62,6 +78,7 @@ const AppContent: React.FC = () => {
               const res = await fetch('/api/auth/verify-session', {
                 headers: { Authorization: `Bearer ${session.access_token}` }
               });
+
               if (res.ok) {
                 const data = await res.json();
                 if (data.user?.role !== 'owner' && data.user?.role !== 'demo') {
@@ -69,6 +86,7 @@ const AppContent: React.FC = () => {
                 }
                 const isDemo = data.user?.role === 'demo' || isDemoAccount;
                 setDemoMode(isDemo);
+                lastVerifiedTokenRef.current = session.access_token;
                 if (isMounted) {
                   const userState: UserState = {
                     id: session.user.id,
@@ -84,6 +102,7 @@ const AppContent: React.FC = () => {
                 }
               } else if (res.status === 401 || res.status === 403) {
                 // Token revoked, expired, or non-owner access denied
+                lastVerifiedTokenRef.current = null;
                 await supabase.auth.signOut().catch(() => {});
                 localStorage.removeItem(STORAGE_USER_KEY);
                 localStorage.removeItem(STORAGE_EXPIRY_KEY);
@@ -93,58 +112,24 @@ const AppContent: React.FC = () => {
                 }
                 return;
               } else {
-                throw new Error(`API server returned ${res.status}`);
+                // Backend outage (502 / 503 / 500)
+                lastVerifiedTokenRef.current = null;
+                if (isMounted) {
+                  warningRef.current('Backend authentication service is temporarily unavailable. Please verify API server is running on port 4000.');
+                  setCurrentUser(null);
+                  setIsBootstrapping(false);
+                }
+                return;
               }
             } catch {
-              // Direct Supabase fallback if backend API is offline
-              if (isDemoAccount) {
-                setDemoMode(true);
-                if (isMounted) {
-                  const userState: UserState = {
-                    id: session.user.id,
-                    email: session.user.email || 'demo-owner@rtrmobiles.com',
-                    name: session.user.user_metadata?.full_name || 'Demo Owner (Sandbox)',
-                    role: 'demo',
-                    isDemo: true
-                  };
-                  setCurrentUser(userState);
-                  localStorage.setItem(STORAGE_USER_KEY, JSON.stringify(userState));
-                  localStorage.setItem(STORAGE_EXPIRY_KEY, String(Date.now() + SESSION_TTL_MS));
-                  return;
-                }
-              } else {
-                const { data: membership } = await supabase
-                  .from('business_memberships')
-                  .select('role, is_active')
-                  .eq('user_id', session.user.id)
-                  .maybeSingle();
-
-                if (!membership || membership.role !== 'owner' || !membership.is_active) {
-                  await supabase.auth.signOut().catch(() => {});
-                  localStorage.removeItem(STORAGE_USER_KEY);
-                  localStorage.removeItem(STORAGE_EXPIRY_KEY);
-                  if (isMounted) {
-                    setCurrentUser(null);
-                    setIsBootstrapping(false);
-                  }
-                  return;
-                }
-
-                setDemoMode(false);
-                if (isMounted) {
-                  const userState: UserState = {
-                    id: session.user.id,
-                    email: session.user.email || '',
-                    name: session.user.user_metadata?.full_name || 'Business Owner',
-                    role: 'owner',
-                    isDemo: false
-                  };
-                  setCurrentUser(userState);
-                  localStorage.setItem(STORAGE_USER_KEY, JSON.stringify(userState));
-                  localStorage.setItem(STORAGE_EXPIRY_KEY, String(Date.now() + SESSION_TTL_MS));
-                  return;
-                }
+              // Network error reaching /api/auth/verify-session
+              lastVerifiedTokenRef.current = null;
+              if (isMounted) {
+                warningRef.current('Unable to connect to backend authentication server. Please check your connection.');
+                setCurrentUser(null);
+                setIsBootstrapping(false);
               }
+              return;
             }
           }
         }
@@ -158,7 +143,7 @@ const AppContent: React.FC = () => {
           if (expiryTime && Date.now() > expiryTime) {
             localStorage.removeItem(STORAGE_USER_KEY);
             localStorage.removeItem(STORAGE_EXPIRY_KEY);
-            warning('Your session has expired. Please sign in again.');
+            warningRef.current('Your session has expired. Please sign in again.');
           } else {
             const parsed = JSON.parse(storedUser);
             if (parsed && (parsed.role === 'owner' || parsed.role === 'demo' || parsed.isDemo)) {
@@ -167,7 +152,9 @@ const AppContent: React.FC = () => {
               } else {
                 setDemoMode(false);
               }
-              setCurrentUser(parsed);
+              if (isMounted) {
+                setCurrentUser(parsed);
+              }
             } else {
               localStorage.removeItem(STORAGE_USER_KEY);
             }
@@ -176,6 +163,7 @@ const AppContent: React.FC = () => {
       } catch (err) {
         console.warn('Could not restore stored session:', err);
       } finally {
+        isVerifyingRef.current = false;
         if (isMounted) {
           setIsBootstrapping(false);
         }
@@ -188,13 +176,20 @@ const AppContent: React.FC = () => {
     if (isSupabaseConfigured && supabase) {
       const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
         if (event === 'SIGNED_OUT') {
+          lastVerifiedTokenRef.current = null;
           if (isMounted) {
             setCurrentUser(null);
             localStorage.removeItem(STORAGE_USER_KEY);
             localStorage.removeItem(STORAGE_EXPIRY_KEY);
           }
-        } else if (event === 'SIGNED_IN' && session?.user) {
-          initSession();
+        } else if (event === 'SIGNED_IN' && session?.user && session?.access_token) {
+          if (lastVerifiedTokenRef.current !== session.access_token) {
+            initSession();
+          }
+        } else if (event === 'TOKEN_REFRESHED' && session?.access_token) {
+          if (lastVerifiedTokenRef.current !== session.access_token) {
+            initSession();
+          }
         }
       });
 
@@ -207,7 +202,7 @@ const AppContent: React.FC = () => {
     return () => {
       isMounted = false;
     };
-  }, [warning]);
+  }, []);
 
   // 2. Network connectivity listeners
   useEffect(() => {
