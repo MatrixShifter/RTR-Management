@@ -32,38 +32,27 @@ export const RecordEntryDrawer: React.FC<RecordEntryDrawerProps> = ({
 }) => {
   const todayStr = new Date().toISOString().split('T')[0] || '';
 
-  // Form State
-  const [date, setDate] = useState<string>(todayStr);
+  // Form State: strictly Date, Shop, Product, Unit Price
+  const [date, setDate] = useState<string>(editingRecord?.date || todayStr);
 
   // Shop selection or inline creation
-  const [selectedShopId, setSelectedShopId] = useState<string>('');
-  const [isNewShop, setIsNewShop] = useState<boolean>(shops.length === 0);
-  const [customShopName, setCustomShopName] = useState<string>('');
+  const [selectedShopId, setSelectedShopId] = useState<string>(editingRecord?.shopId || '');
+  const [isNewShop, setIsNewShop] = useState<boolean>(!editingRecord?.shopId && shops.length === 0);
+  const [customShopName, setCustomShopName] = useState<string>(editingRecord?.shopName || '');
 
   // Product selection or inline creation
-  const [selectedProductId, setSelectedProductId] = useState<string>('');
-  const [isNewProduct, setIsNewProduct] = useState<boolean>(products.length === 0);
-  const [customProductName, setCustomProductName] = useState<string>('');
+  const [selectedProductId, setSelectedProductId] = useState<string>(editingRecord?.productId || '');
+  const [isNewProduct, setIsNewProduct] = useState<boolean>(!editingRecord?.productId && products.length === 0);
+  const [customProductName, setCustomProductName] = useState<string>(editingRecord?.productName || '');
 
-  // Core metrics
-  const [quantity, setQuantity] = useState<number | ''>('');
-  const [unitPrice, setUnitPrice] = useState<number | ''>('');
-  const [deliveryStatus, setDeliveryStatus] = useState<'delivered' | 'pending'>('delivered');
-
-  // Payment Status & Accounting
-  const [paymentMode, setPaymentMode] = useState<'unpaid' | 'paid' | 'custom'>('unpaid');
-  const [amountPaid, setAmountPaid] = useState<number | ''>('');
-  const [pendingAmount, setPendingAmount] = useState<number | ''>('');
-  const [notes, setNotes] = useState<string>('');
+  // Unit Price (₹)
+  const [unitPrice, setUnitPrice] = useState<number | ''>(editingRecord?.unitPrice ?? '');
 
   // UI / Error state
   const [validationErrors, setValidationErrors] = useState<Record<string, string>>({});
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [capacityError, setCapacityError] = useState<{ title: string; message: string } | null>(null);
-
-  // Derived Total Billed Value
-  const calculatedTotal = (Number(quantity) || 0) * (Number(unitPrice) || 0);
 
   // Reset form to pristine defaults
   const resetForm = () => {
@@ -76,13 +65,7 @@ export const RecordEntryDrawer: React.FC<RecordEntryDrawerProps> = ({
     setIsNewProduct(products.length === 0);
     setCustomProductName('');
 
-    setQuantity('');
     setUnitPrice('');
-    setDeliveryStatus('delivered');
-    setPaymentMode('unpaid');
-    setAmountPaid('');
-    setPendingAmount('');
-    setNotes('');
     setValidationErrors({});
     setSubmitError(null);
     setCapacityError(null);
@@ -104,16 +87,7 @@ export const RecordEntryDrawer: React.FC<RecordEntryDrawerProps> = ({
       setIsNewProduct(!editingRecord.productId);
       setCustomProductName(editingRecord.productName || '');
 
-      setQuantity(editingRecord.quantity || 1);
       setUnitPrice(editingRecord.unitPrice ?? 0);
-      setDeliveryStatus(editingRecord.deliveryStatus === 'pending' ? 'pending' : 'delivered');
-
-      const total = (Number(editingRecord.quantity) || 0) * (Number(editingRecord.unitPrice) || 0);
-      const pending = Number(editingRecord.pendingAmount) || 0;
-      setPendingAmount(pending);
-      setAmountPaid(Math.max(0, total - pending));
-      setPaymentMode(pending === 0 ? 'paid' : (pending === total ? 'unpaid' : 'custom'));
-      setNotes(editingRecord.notes || '');
     } else {
       resetForm();
     }
@@ -126,11 +100,7 @@ export const RecordEntryDrawer: React.FC<RecordEntryDrawerProps> = ({
         date !== (editingRecord.date || todayStr) ||
         (selectedShopId || customShopName) !== (editingRecord.shopId || editingRecord.shopName || '') ||
         (selectedProductId || customProductName) !== (editingRecord.productId || editingRecord.productName || '') ||
-        String(quantity) !== String(editingRecord.quantity || '') ||
-        String(unitPrice) !== String(editingRecord.unitPrice ?? '') ||
-        deliveryStatus !== (editingRecord.deliveryStatus || 'delivered') ||
-        String(pendingAmount) !== String(editingRecord.pendingAmount ?? '') ||
-        notes !== (editingRecord.notes || '')
+        String(unitPrice) !== String(editingRecord.unitPrice ?? '')
       );
     }
     return Boolean(
@@ -138,10 +108,7 @@ export const RecordEntryDrawer: React.FC<RecordEntryDrawerProps> = ({
       selectedShopId ||
       customProductName.trim() ||
       selectedProductId ||
-      quantity !== '' ||
-      unitPrice !== '' ||
-      amountPaid !== '' ||
-      notes.trim()
+      unitPrice !== ''
     );
   };
 
@@ -173,7 +140,7 @@ export const RecordEntryDrawer: React.FC<RecordEntryDrawerProps> = ({
       document.body.style.overflow = 'unset';
       window.removeEventListener('keydown', handleKeyDown);
     };
-  }, [isOpen, isSubmitting, customShopName, selectedShopId, customProductName, selectedProductId, quantity, unitPrice, amountPaid, notes]);
+  }, [isOpen, isSubmitting, customShopName, selectedShopId, customProductName, selectedProductId, unitPrice]);
 
   // Handle product selection & unit price autofill
   const handleProductChange = (prodId: string) => {
@@ -186,11 +153,6 @@ export const RecordEntryDrawer: React.FC<RecordEntryDrawerProps> = ({
       const prod = products.find(p => p.id === prodId);
       if (prod && prod.unitPrice !== undefined && prod.unitPrice > 0) {
         setUnitPrice(prod.unitPrice);
-        if (quantity !== '') {
-          const total = (Number(quantity) || 0) * prod.unitPrice;
-          if (paymentMode === 'unpaid') setPendingAmount(total);
-          else if (paymentMode === 'paid') setAmountPaid(total);
-        }
       }
     }
   };
@@ -206,35 +168,6 @@ export const RecordEntryDrawer: React.FC<RecordEntryDrawerProps> = ({
     }
   };
 
-  // Keep payment amounts synchronized whenever quantity, unitPrice, or paymentMode changes
-  useEffect(() => {
-    if (paymentMode === 'unpaid') {
-      setAmountPaid(0);
-      setPendingAmount(calculatedTotal);
-    } else if (paymentMode === 'paid') {
-      setAmountPaid(calculatedTotal);
-      setPendingAmount(0);
-    } else if (paymentMode === 'custom') {
-      if (amountPaid !== '') {
-        const paid = Math.min(calculatedTotal, Math.max(0, Number(amountPaid) || 0));
-        setPendingAmount(Math.max(0, calculatedTotal - paid));
-      } else if (pendingAmount !== '') {
-        const pend = Math.min(calculatedTotal, Math.max(0, Number(pendingAmount) || 0));
-        setAmountPaid(Math.max(0, calculatedTotal - pend));
-      }
-    }
-  }, [quantity, unitPrice, paymentMode, calculatedTotal]);
-
-  // Keep payment information synchronized when quantity/price change
-  const handleQuantityChange = (valStr: string) => {
-    if (valStr === '') {
-      setQuantity('');
-      return;
-    }
-    const val = parseInt(valStr, 10);
-    setQuantity(isNaN(val) ? '' : Math.max(1, val));
-  };
-
   const handleUnitPriceChange = (valStr: string) => {
     if (valStr === '') {
       setUnitPrice('');
@@ -244,43 +177,7 @@ export const RecordEntryDrawer: React.FC<RecordEntryDrawerProps> = ({
     setUnitPrice(isNaN(val) ? '' : Math.max(0, val));
   };
 
-  // Payment quick selection
-  const handleSetPaymentMode = (mode: 'unpaid' | 'paid' | 'custom') => {
-    setPaymentMode(mode);
-    if (mode === 'unpaid') {
-      setPendingAmount(calculatedTotal);
-      setAmountPaid(0);
-    } else if (mode === 'paid') {
-      setPendingAmount(0);
-      setAmountPaid(calculatedTotal);
-    }
-  };
-
-  const handleAmountPaidChange = (valStr: string) => {
-    setPaymentMode('custom');
-    if (valStr === '') {
-      setAmountPaid('');
-      setPendingAmount(calculatedTotal);
-      return;
-    }
-    const paid = Math.max(0, parseFloat(valStr) || 0);
-    setAmountPaid(paid);
-    setPendingAmount(Math.max(0, calculatedTotal - paid));
-  };
-
-  const handlePendingAmountChange = (valStr: string) => {
-    setPaymentMode('custom');
-    if (valStr === '') {
-      setPendingAmount('');
-      setAmountPaid(calculatedTotal);
-      return;
-    }
-    const pending = Math.max(0, parseFloat(valStr) || 0);
-    setPendingAmount(pending);
-    setAmountPaid(Math.max(0, calculatedTotal - pending));
-  };
-
-  // Comprehensive validation
+  // Validation strictly for Date, Shop Name, Product, Unit Price
   const validate = (): boolean => {
     const errors: Record<string, string> = {};
 
@@ -308,21 +205,8 @@ export const RecordEntryDrawer: React.FC<RecordEntryDrawerProps> = ({
       }
     }
 
-    if (quantity === '' || Number(quantity) <= 0 || !Number.isInteger(Number(quantity))) {
-      errors.quantity = 'Quantity must be a positive whole number (e.g. 10).';
-    }
-
     if (unitPrice === '' || Number(unitPrice) < 0 || isNaN(Number(unitPrice))) {
       errors.unitPrice = 'Unit price must be 0 or greater.';
-    }
-
-    const total = (Number(quantity) || 0) * (Number(unitPrice) || 0);
-    const pendingNum = pendingAmount === '' ? (paymentMode === 'paid' ? 0 : total) : Number(pendingAmount);
-
-    if (pendingNum < 0 || isNaN(pendingNum)) {
-      errors.pendingAmount = 'Pending amount cannot be negative.';
-    } else if (total > 0 && pendingNum > total) {
-      errors.pendingAmount = `Pending amount (₹${pendingNum}) cannot exceed total billed value (₹${total}).`;
     }
 
     setValidationErrors(errors);
@@ -343,21 +227,20 @@ export const RecordEntryDrawer: React.FC<RecordEntryDrawerProps> = ({
     const chosenProduct = isNewProduct ? undefined : products.find(p => p.id === selectedProductId);
     const productName = chosenProduct ? chosenProduct.name : customProductName.trim();
 
-    const total = (Number(quantity) || 0) * (Number(unitPrice) || 0);
-    let finalPaid = 0;
-    let finalPending = total;
+    const rate = Number(unitPrice) || 0;
+    // Single ledger item record: 1 unit where total amount = unit price
+    const qty = editingRecord?.quantity && editingRecord.quantity > 0 ? editingRecord.quantity : 1;
+    const total = qty * rate;
 
-    if (paymentMode === 'paid') {
-      finalPaid = total;
-      finalPending = 0;
-    } else if (paymentMode === 'custom') {
-      finalPaid = Math.min(total, Math.max(0, Number(amountPaid) || 0));
-      finalPending = Math.max(0, total - finalPaid);
-    } else {
-      // unpaid default: full amount pending
-      finalPaid = 0;
-      finalPending = total;
-    }
+    // Delivery workflow: initial state for new dispatches is pending (unchecked)
+    const status = editingRecord?.deliveryStatus || 'pending';
+
+    // Financial balance: pending amount reflects the total billed value of the item
+    const pending = editingRecord !== null && editingRecord !== undefined && editingRecord.pendingAmount !== undefined 
+      ? Math.min(total, editingRecord.pendingAmount) 
+      : total;
+    const paid = Math.max(0, total - pending);
+    const memo = editingRecord?.notes || '';
 
     setIsSubmitting(true);
     try {
@@ -369,11 +252,11 @@ export const RecordEntryDrawer: React.FC<RecordEntryDrawerProps> = ({
           shopName,
           productId: chosenProduct?.id,
           productName,
-          quantity: Number(quantity),
-          unitPrice: Number(unitPrice),
-          deliveryStatus,
-          pendingAmount: finalPending,
-          notes: notes.trim()
+          quantity: qty,
+          unitPrice: rate,
+          deliveryStatus: status,
+          pendingAmount: pending,
+          notes: memo
         });
         onSuccess(updated);
         resetForm();
@@ -384,12 +267,12 @@ export const RecordEntryDrawer: React.FC<RecordEntryDrawerProps> = ({
           shopName,
           productId: chosenProduct?.id,
           productName,
-          quantity: Number(quantity),
-          unitPrice: Number(unitPrice),
-          deliveryStatus,
-          pendingAmount: finalPending,
-          paidAmount: finalPaid,
-          notes: notes.trim()
+          quantity: qty,
+          unitPrice: rate,
+          deliveryStatus: status,
+          pendingAmount: pending,
+          paidAmount: paid,
+          notes: memo
         });
         onSuccess(saved);
         resetForm();
@@ -434,7 +317,7 @@ export const RecordEntryDrawer: React.FC<RecordEntryDrawerProps> = ({
                 {editingRecord ? 'Edit Record' : 'Add Record'}
               </h2>
               <p className="text-xs text-slate-500 mt-0.5 truncate">
-                {editingRecord ? 'Update delivery & payment details' : 'Enter wholesale delivery for a partner shop'}
+                {editingRecord ? 'Update wholesale record details' : 'Enter wholesale delivery for a partner shop'}
               </p>
             </div>
             <button
@@ -521,7 +404,7 @@ export const RecordEntryDrawer: React.FC<RecordEntryDrawerProps> = ({
                 )}
               </div>
 
-              {/* 2. Shop Selection / Registration */}
+              {/* 2. Shop Name (Selector + "+ New Shop" toggle) */}
               <div>
                 <div className="flex items-center justify-between mb-1">
                   <div className="flex items-center gap-1.5">
@@ -585,7 +468,7 @@ export const RecordEntryDrawer: React.FC<RecordEntryDrawerProps> = ({
                 )}
               </div>
 
-              {/* 3. Product Selection / Creation */}
+              {/* 3. Product (Selector + "+ New Product" toggle) */}
               <div>
                 <div className="flex items-center justify-between mb-1">
                   <div className="flex items-center gap-1.5">
@@ -649,155 +532,26 @@ export const RecordEntryDrawer: React.FC<RecordEntryDrawerProps> = ({
                 )}
               </div>
 
-              {/* 4 & 5. Quantity & Unit Price */}
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-semibold text-slate-800 mb-1">
-                    Quantity
-                  </label>
-                  <input
-                    type="number"
-                    min={1}
-                    step={1}
-                    placeholder="e.g. 50"
-                    value={quantity}
-                    onChange={e => handleQuantityChange(e.target.value)}
-                    required
-                    className={`w-full rounded-xl border px-3.5 py-2 text-xs sm:text-sm text-slate-800 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 ${
-                      validationErrors.quantity ? 'border-rose-400 bg-rose-50/20' : 'border-slate-200'
-                    }`}
-                  />
-                  {validationErrors.quantity && (
-                    <p className="mt-1 text-xs text-rose-600 font-medium">{validationErrors.quantity}</p>
-                  )}
-                </div>
-
-                <div>
-                  <label className="block text-xs font-semibold text-slate-800 mb-1">
-                    Unit Price (₹)
-                  </label>
-                  <input
-                    type="number"
-                    min={0}
-                    step="any"
-                    placeholder="e.g. 25.00"
-                    value={unitPrice}
-                    onChange={e => handleUnitPriceChange(e.target.value)}
-                    required
-                    className={`w-full rounded-xl border px-3.5 py-2 text-xs sm:text-sm text-slate-800 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 ${
-                      validationErrors.unitPrice ? 'border-rose-400 bg-rose-50/20' : 'border-slate-200'
-                    }`}
-                  />
-                  {validationErrors.unitPrice && (
-                    <p className="mt-1 text-xs text-rose-600 font-medium">{validationErrors.unitPrice}</p>
-                  )}
-                </div>
-              </div>
-
-              {/* Total Billed Display */}
-              <div className="px-3.5 py-2 bg-slate-50 border border-slate-200/80 rounded-xl flex items-center justify-between text-xs">
-                <span className="font-semibold text-slate-600">Total Billed Value:</span>
-                <span className="text-sm sm:text-base font-extrabold text-slate-900">
-                  ₹{calculatedTotal.toLocaleString('en-IN')}
-                </span>
-              </div>
-
-              {/* 6. Delivery Status */}
+              {/* 4. Unit Price (₹) — only price input */}
               <div>
                 <label className="block text-xs font-semibold text-slate-800 mb-1">
-                  Delivery Status
-                </label>
-                <div className="relative">
-                  <select
-                    value={deliveryStatus}
-                    onChange={e => setDeliveryStatus(e.target.value as any)}
-                    className="w-full appearance-none rounded-xl border border-slate-200 px-3.5 py-2 text-xs sm:text-sm font-medium text-slate-800 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 pr-9 cursor-pointer"
-                  >
-                    <option value="delivered">Delivered</option>
-                    <option value="pending">Pending Delivery</option>
-                  </select>
-                  <ChevronDown className="w-4 h-4 text-slate-400 absolute right-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
-                </div>
-              </div>
-
-              {/* 7. Payment Accounting: Paid vs Outstanding */}
-              <div className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <label className="block text-xs font-semibold text-slate-800">
-                    Payment Status &amp; Outstanding
-                  </label>
-                  <div className="flex items-center gap-1.5">
-                    <button
-                      type="button"
-                      onClick={() => handleSetPaymentMode('unpaid')}
-                      className={`px-2 py-0.5 rounded text-[10px] font-semibold transition-colors cursor-pointer ${
-                        paymentMode === 'unpaid'
-                          ? 'bg-amber-100 text-amber-800 border border-amber-300'
-                          : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                      }`}
-                    >
-                      Unpaid
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleSetPaymentMode('paid')}
-                      className={`px-2 py-0.5 rounded text-[10px] font-semibold transition-colors cursor-pointer ${
-                        paymentMode === 'paid'
-                          ? 'bg-emerald-100 text-emerald-800 border border-emerald-300'
-                          : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                      }`}
-                    >
-                      Fully Paid
-                    </button>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <span className="block text-[11px] text-slate-500 mb-1">Amount Paid (₹)</span>
-                    <input
-                      type="number"
-                      min={0}
-                      step="any"
-                      placeholder="0.00"
-                      value={paymentMode === 'unpaid' ? 0 : (paymentMode === 'paid' ? calculatedTotal : amountPaid)}
-                      onChange={e => handleAmountPaidChange(e.target.value)}
-                      className="w-full rounded-xl border border-slate-200 px-3 py-1.5 text-xs text-slate-800 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    />
-                  </div>
-
-                  <div>
-                    <span className="block text-[11px] text-slate-500 mb-1">Pending Balance (₹)</span>
-                    <input
-                      type="number"
-                      min={0}
-                      step="any"
-                      placeholder="0.00"
-                      value={paymentMode === 'unpaid' ? calculatedTotal : (paymentMode === 'paid' ? 0 : pendingAmount)}
-                      onChange={e => handlePendingAmountChange(e.target.value)}
-                      className={`w-full rounded-xl border px-3 py-1.5 text-xs text-slate-800 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 ${
-                        validationErrors.pendingAmount ? 'border-rose-400 bg-rose-50/20' : 'border-slate-200'
-                      }`}
-                    />
-                  </div>
-                </div>
-                {validationErrors.pendingAmount && (
-                  <p className="text-xs text-rose-600 font-medium">{validationErrors.pendingAmount}</p>
-                )}
-              </div>
-
-              {/* 8. Notes / Memo */}
-              <div>
-                <label className="block text-xs font-semibold text-slate-800 mb-1">
-                  Notes / Memo (Optional)
+                  Unit Price (₹)
                 </label>
                 <input
-                  type="text"
-                  placeholder="e.g. Batch restock / payment terms"
-                  value={notes}
-                  onChange={e => setNotes(e.target.value)}
-                  className="w-full rounded-xl border border-slate-200 px-3.5 py-2 text-xs sm:text-sm text-slate-800 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  type="number"
+                  min={0}
+                  step="any"
+                  placeholder="e.g. 25.00"
+                  value={unitPrice}
+                  onChange={e => handleUnitPriceChange(e.target.value)}
+                  required
+                  className={`w-full rounded-xl border px-3.5 py-2 text-xs sm:text-sm text-slate-800 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+                    validationErrors.unitPrice ? 'border-rose-400 bg-rose-50/20' : 'border-slate-200'
+                  }`}
                 />
+                {validationErrors.unitPrice && (
+                  <p className="mt-1 text-xs text-rose-600 font-medium">{validationErrors.unitPrice}</p>
+                )}
               </div>
             </form>
           </div>

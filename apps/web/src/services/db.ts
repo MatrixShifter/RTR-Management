@@ -106,10 +106,10 @@ export interface SaveBusinessRecordInput {
   shopId?: string;
   productName: string;
   productId?: string;
-  quantity: number;
+  quantity?: number;
   unitPrice: number;
-  deliveryStatus: 'delivered' | 'pending' | 'cancelled';
-  pendingAmount: number;
+  deliveryStatus?: 'delivered' | 'pending' | 'cancelled';
+  pendingAmount?: number;
   paidAmount?: number;
   notes?: string;
 }
@@ -1494,7 +1494,7 @@ export async function saveBusinessRecord(input: SaveBusinessRecordInput): Promis
     shopId: targetShop.id,
     shopName: targetShop.name,
     deliveryDate: input.date,
-    status: input.deliveryStatus,
+    status: input.deliveryStatus || 'pending',
     notes: input.notes || '',
     createdBy: 'Business Owner',
     items: [{
@@ -1550,7 +1550,7 @@ export async function saveBusinessRecord(input: SaveBusinessRecordInput): Promis
     quantity: qty,
     unitPrice: rate,
     totalAmount,
-    deliveryStatus: input.deliveryStatus,
+    deliveryStatus: input.deliveryStatus || 'pending',
     pendingAmount,
     notes: input.notes,
     createdAt: delivery.createdAt
@@ -1614,7 +1614,7 @@ export async function updateBusinessRecord(input: UpdateBusinessRecordInput): Pr
       shopId: targetShop.id,
       shopName: targetShop.name,
       deliveryDate: input.date,
-      status: input.deliveryStatus,
+      status: input.deliveryStatus || 'pending',
       notes: JSON.stringify({
         memo: input.notes || '',
         totalAmount,
@@ -1658,7 +1658,7 @@ export async function updateBusinessRecord(input: UpdateBusinessRecordInput): Pr
       quantity: qty,
       unitPrice: rate,
       totalAmount,
-      deliveryStatus: input.deliveryStatus,
+      deliveryStatus: input.deliveryStatus || 'pending',
       pendingAmount,
       notes: input.notes,
       createdAt: updatedDelivery.createdAt
@@ -1684,7 +1684,7 @@ export async function updateBusinessRecord(input: UpdateBusinessRecordInput): Pr
         .update({
           shop_id: targetShop.id,
           delivery_date: input.date,
-          status: input.deliveryStatus,
+          status: input.deliveryStatus || 'pending',
           notes: JSON.stringify(meta),
           updated_at: new Date().toISOString()
         })
@@ -1755,7 +1755,7 @@ export async function updateBusinessRecord(input: UpdateBusinessRecordInput): Pr
     shopId: targetShop.id,
     shopName: targetShop.name,
     deliveryDate: input.date,
-    status: input.deliveryStatus,
+    status: input.deliveryStatus || 'pending',
     notes: input.notes || '',
     createdBy: 'Business Owner',
     items: [{
@@ -1809,7 +1809,7 @@ export async function updateBusinessRecord(input: UpdateBusinessRecordInput): Pr
     quantity: qty,
     unitPrice: rate,
     totalAmount,
-    deliveryStatus: input.deliveryStatus,
+    deliveryStatus: input.deliveryStatus || 'pending',
     pendingAmount,
     notes: input.notes,
     createdAt: updatedDelivery.createdAt

@@ -67,7 +67,15 @@ function validateSqlFile(filePath) {
 }
 
 try {
-  validateSqlFile(migrationPath);
+  const migrationsDir = path.resolve('supabase/migrations');
+  if (fs.existsSync(migrationsDir)) {
+    const migrationFiles = fs.readdirSync(migrationsDir).filter(f => f.endsWith('.sql'));
+    for (const f of migrationFiles) {
+      validateSqlFile(path.join(migrationsDir, f));
+    }
+  } else {
+    validateSqlFile(migrationPath);
+  }
   validateSqlFile(seedPath);
   if (fs.existsSync(canonicalSqlPath)) {
     validateSqlFile(canonicalSqlPath);
