@@ -39,6 +39,15 @@ export const Login: React.FC<LoginProps> = ({
   const [rememberMe, setRememberMe] = useState(() => Boolean(getRememberedUsername()));
   const [isLoading, setIsLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [successMsg, setSuccessMsg] = useState<string | null>(() => {
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      if (params.get('reset') === 'success') {
+        return 'Password reset successfully! Please sign in with your new password.';
+      }
+    }
+    return null;
+  });
 
   // Demo Sandbox Form State
   const [demoUsername, setDemoUsername] = useState(DEMO_USERNAME);
@@ -59,6 +68,7 @@ export const Login: React.FC<LoginProps> = ({
   const handleOwnerSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg(null);
+    setSuccessMsg(null);
     setIsLoading(true);
 
     try {
@@ -83,6 +93,7 @@ export const Login: React.FC<LoginProps> = ({
   const handleDemoSubmit = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     setErrorMsg(null);
+    setSuccessMsg(null);
     setIsLoading(true);
 
     try {
@@ -146,6 +157,17 @@ export const Login: React.FC<LoginProps> = ({
               </span>
             </button>
           </div>
+
+          {/* Success Banner */}
+          {successMsg && (
+            <div 
+              role="status" 
+              className="mb-4 p-3.5 bg-emerald-50 border border-emerald-200 rounded-xl flex items-start gap-2.5 text-emerald-800 text-xs animate-fade-in font-medium"
+            >
+              <Check className="w-4 h-4 text-emerald-600 flex-shrink-0 mt-0.5" />
+              <span className="leading-snug">{successMsg}</span>
+            </div>
+          )}
 
           {/* Error Banner */}
           {errorMsg && (

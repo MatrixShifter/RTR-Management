@@ -891,6 +891,169 @@ describe('OwnerDashboard Component — Modern UI & Simple Delivery/Pending Manag
       expect(newerPos).toBeLessThan(olderPos);
     });
   });
+
+  describe('Search Bar & Mobile Table Usability Suite', () => {
+    const shopSample: db.Shop = {
+      id: 'shop-search',
+      name: 'RTR Mobile Hub',
+      code: 'RTR-MH',
+      address: 'Hub St',
+      phone: '9876543210',
+      isActive: true,
+      assignedEmployees: []
+    };
+
+    const mockRecords: db.BusinessRecord[] = [
+      {
+        id: 'rec-cable',
+        deliveryId: 'deliv-cable',
+        date: '2026-10-24',
+        shopId: 'shop-search',
+        shopName: 'RTR Mobile Hub',
+        productId: 'prod-cable',
+        productName: 'Braided Lightning Cable 2m',
+        quantity: 10,
+        unitPrice: 200,
+        totalAmount: 2000,
+        deliveryStatus: 'pending',
+        pendingAmount: 2000,
+        createdAt: '2026-10-24T10:00:00Z'
+      },
+      {
+        id: 'rec-charger',
+        deliveryId: 'deliv-charger',
+        date: '2026-10-25',
+        shopId: 'shop-search',
+        shopName: 'RTR Mobile Hub',
+        productId: 'prod-charger',
+        productName: 'Fast GaN Charger 65W',
+        quantity: 5,
+        unitPrice: 3400,
+        totalAmount: 17000,
+        deliveryStatus: 'delivered',
+        pendingAmount: 0,
+        createdAt: '2026-10-25T10:00:00Z'
+      }
+    ];
+
+    it('renders full-width search input with placeholder "Search products..." below heading', () => {
+      const html = renderToString(
+        <MemoryRouter>
+          <OwnerDashboard
+            initialLoading={false}
+            initialShops={[shopSample]}
+            initialRecords={mockRecords}
+          />
+        </MemoryRouter>
+      );
+
+      expect(html).toContain('placeholder="Search products..."');
+      expect(html).toContain('aria-label="Search products"');
+      expect(html).toContain('Braided Lightning Cable 2m');
+      expect(html).toContain('Fast GaN Charger 65W');
+      expect(html).toContain('17,000');
+    });
+
+    it('displays compact mobile date format and full desktop date format', () => {
+      const html = renderToString(
+        <MemoryRouter>
+          <OwnerDashboard
+            initialLoading={false}
+            initialShops={[shopSample]}
+            initialRecords={mockRecords}
+          />
+        </MemoryRouter>
+      );
+
+      // Desktop: 24/10/2026, Mobile: 24/10
+      expect(html).toContain('24/10/2026');
+      expect(html).toContain('24/10');
+      // Desktop: 25/10/2026, Mobile: 25/10
+      expect(html).toContain('25/10/2026');
+      expect(html).toContain('25/10');
+    });
+
+    it('renders accessible delivery checkboxes with touch targets for pending and delivered items', () => {
+      const html = renderToString(
+        <MemoryRouter>
+          <OwnerDashboard
+            initialLoading={false}
+            initialShops={[shopSample]}
+            initialRecords={mockRecords}
+          />
+        </MemoryRouter>
+      );
+
+      // Pending row has aria-checked="false"
+      expect(html).toContain('aria-checked="false"');
+      expect(html).toContain('Mark delivery as completed for Braided Lightning Cable 2m');
+
+      // Delivered row has aria-checked="true"
+      expect(html).toContain('aria-checked="true"');
+      expect(html).toContain('Mark delivery as pending for Fast GaN Charger 65W');
+
+      // Delivered separator present between groups
+      expect(html).toContain('Delivered Items');
+    });
+
+    it('renders exactly five visible table columns in order: Date, Shop Name, Product, Amount, Delivery', () => {
+      const html = renderToString(
+        <MemoryRouter>
+          <OwnerDashboard
+            initialLoading={false}
+            initialShops={[shopSample]}
+            initialRecords={mockRecords}
+          />
+        </MemoryRouter>
+      );
+
+      const theadHtml = html.slice(html.indexOf('<thead'), html.indexOf('</thead>'));
+      const datePos = theadHtml.indexOf('<span>Date</span>');
+      const shopPos = theadHtml.indexOf('<span>Shop Name</span>');
+      const prodPos = theadHtml.indexOf('<span>Product</span>');
+      const amtPos = theadHtml.indexOf('<span>Amount (₹)</span>');
+      const delivPos = theadHtml.indexOf('<span>Delivery</span>');
+
+      expect(datePos).toBeGreaterThan(-1);
+      expect(shopPos).toBeGreaterThan(datePos);
+      expect(prodPos).toBeGreaterThan(shopPos);
+      expect(amtPos).toBeGreaterThan(prodPos);
+      expect(delivPos).toBeGreaterThan(amtPos);
+
+      // Verify actual shop name is rendered in the row
+      expect(html).toContain('RTR Mobile Hub');
+    });
+
+    it('gracefully renders fallback dash when a record has no shopName', () => {
+      const recWithoutShop: db.BusinessRecord = {
+        id: 'rec-no-shop',
+        deliveryId: 'deliv-no-shop',
+        date: '2026-10-24',
+        shopId: 'shop-search',
+        shopName: '',
+        productId: 'prod-cable',
+        productName: 'Braided Lightning Cable 2m',
+        quantity: 10,
+        unitPrice: 200,
+        totalAmount: 2000,
+        deliveryStatus: 'pending',
+        pendingAmount: 2000,
+        createdAt: '2026-10-24T10:00:00Z'
+      };
+
+      const html = renderToString(
+        <MemoryRouter>
+          <OwnerDashboard
+            initialLoading={false}
+            initialShops={[shopSample]}
+            initialRecords={[recWithoutShop]}
+          />
+        </MemoryRouter>
+      );
+
+      expect(html).toContain('—');
+    });
+  });
 });
 
 

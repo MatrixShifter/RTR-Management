@@ -7,7 +7,9 @@ import {
   ChevronRight, 
   Store, 
   AlertTriangle, 
-  CheckCircle2 
+  CheckCircle2,
+  Search,
+  X 
 } from 'lucide-react';
 import { TableSkeleton } from '../../components/ui/Skeleton.js';
 import { ErrorState } from '../../components/ui/StateViews.js';
@@ -127,6 +129,19 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
 
   // Sorting: Date descending by default matching reference UI
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
+
+  // Search Query State
+  const [searchQuery, setSearchQuery] = useState('');
+
+  const handleSearchChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setSearchQuery(e.target.value);
+    setCurrentPage(1);
+  };
+
+  const handleClearSearch = () => {
+    setSearchQuery('');
+    setCurrentPage(1);
+  };
 
   // Pagination States
   const [currentPage, setCurrentPage] = useState<number>(1);
@@ -252,6 +267,13 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
     }
   };
 
+  // Filter records case-insensitively by product name (including partial matches)
+  const filteredRecords = useMemo(() => {
+    const query = searchQuery.trim().toLowerCase();
+    if (!query) return records;
+    return records.filter(r => (r.productName || '').toLowerCase().includes(query));
+  }, [records, searchQuery]);
+
   // --------------------------------------------------------------------------
   // DELIVERY-BASED SORTING LOGIC:
   // - Unchecked (Pending) rows appear first.
@@ -262,7 +284,7 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
     const pendingList: BusinessRecord[] = [];
     const deliveredList: BusinessRecord[] = [];
 
-    records.forEach(rec => {
+    filteredRecords.forEach(rec => {
       if (rec.deliveryStatus === 'delivered') {
         deliveredList.push(rec);
       } else {
@@ -281,7 +303,7 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
       deliveredRows: deliveredList,
       orderedRecords: [...pendingList, ...deliveredList]
     };
-  }, [records, sortDirection]);
+  }, [filteredRecords, sortDirection]);
 
   // Pagination calculations
   const totalRecords = orderedRecords.length;
@@ -479,10 +501,10 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
       {/* ========================================================
           MAIN RECORDS WHITE PANEL (Matching Reference UI)
          ======================================================== */}
-      <div className="bg-white rounded-2xl border border-[#DCE4EC] shadow-xs p-4 sm:p-6 lg:p-7 space-y-4">
+      <div className="bg-white rounded-2xl border border-[#DCE4EC] shadow-xs p-3 sm:p-6 lg:p-7 space-y-3 sm:space-y-4">
         {/* Panel Header: Title + Subtitle on Left, Add Record Button on Right */}
-        <div className="flex items-center justify-between gap-3 pb-1">
-          <div>
+        <div className="flex flex-wrap items-center justify-between gap-2.5 sm:gap-3 pb-0.5">
+          <div className="min-w-[130px]">
             <h1 className="text-xl sm:text-2xl lg:text-3xl font-extrabold tracking-tight text-[#102A4C]">
               Records
             </h1>
@@ -498,12 +520,39 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
               setEditingRecord(null);
               setIsDrawerOpen(true);
             }}
-            className="bg-[#168BFF] hover:bg-[#0E7BE5] active:bg-[#0766C2] text-white px-3.5 sm:px-4 py-2 sm:py-2.5 rounded-xl text-xs sm:text-sm font-semibold flex items-center gap-1.5 sm:gap-2 shadow-xs transition-colors cursor-pointer flex-shrink-0"
+            className="bg-[#168BFF] hover:bg-[#0E7BE5] active:bg-[#0766C2] text-white px-3 sm:px-4 py-2 sm:py-2.5 rounded-xl text-xs sm:text-sm font-semibold flex items-center gap-1.5 sm:gap-2 shadow-xs transition-colors cursor-pointer flex-shrink-0"
           >
             <Plus className="w-4 h-4 text-white stroke-[2.5]" aria-hidden="true" />
             <span>Add Record</span>
             <span className="sr-only">+ Add Record</span>
           </button>
+        </div>
+
+        {/* Full-width Search Bar placed directly below Records heading and above the table */}
+        <div className="relative w-full">
+          <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-[#738499]">
+            <Search className="w-4 h-4" aria-hidden="true" />
+          </div>
+          <input
+            type="text"
+            value={searchQuery}
+            onChange={handleSearchChange}
+            placeholder="Search products..."
+            aria-label="Search products"
+            className="w-full bg-[#F8FAFC] focus:bg-white text-[#102A4C] placeholder-[#8A9BAE] text-xs sm:text-sm rounded-xl pl-9 pr-9 py-2 sm:py-2.5 border border-[#DCE4EC] focus:border-[#168BFF] focus:outline-none focus:ring-1 focus:ring-[#168BFF] transition-all shadow-2xs"
+          />
+          {searchQuery && (
+            <button
+              type="button"
+              onClick={handleClearSearch}
+              aria-label="Clear search"
+              className="absolute inset-y-0 right-0 pr-2.5 flex items-center text-[#8A9BAE] hover:text-[#102A4C] transition-colors cursor-pointer"
+            >
+              <div className="p-1 rounded-full hover:bg-slate-200/60 transition-colors">
+                <X className="w-3.5 h-3.5" />
+              </div>
+            </button>
+          )}
         </div>
 
         {records.length === 0 ? (
@@ -523,15 +572,36 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
               }}
             />
           </div>
+        ) : orderedRecords.length === 0 ? (
+          /* Empty state when search produces 0 matches */
+          <div className="py-10 px-4 text-center border rounded-xl border-[#E2E8F0] bg-[#F8FAFC]/50">
+            <div className="w-10 h-10 rounded-full bg-slate-100 flex items-center justify-center mx-auto text-slate-400 mb-2.5">
+              <Search className="w-5 h-5" />
+            </div>
+            <h3 className="text-sm font-semibold text-[#102A4C]">
+              No matching records found
+            </h3>
+            <p className="text-xs text-[#738499] mt-1 max-w-sm mx-auto">
+              No products match &ldquo;{searchQuery}&rdquo;. Try another search term or clear the filter.
+            </p>
+            <button
+              type="button"
+              onClick={handleClearSearch}
+              className="mt-3 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-[#168BFF] hover:bg-blue-50 border border-blue-200 transition-colors cursor-pointer"
+            >
+              <X className="w-3.5 h-3.5" />
+              <span>Clear search</span>
+            </button>
+          </div>
         ) : (
           <>
-            {/* Records Table: Exactly 4 Visible Columns */}
+            {/* Records Table: Exactly 5 Visible Columns */}
             <div className="overflow-x-auto rounded-xl border border-[#E2E8F0]">
               <table className="w-full text-left border-collapse">
                 <thead className="bg-[#EEF5FD] text-[#556982] text-xs sm:text-sm font-semibold border-b border-[#E2E8F0] select-none">
                   <tr>
                     {/* Column 1: Date */}
-                    <th className="py-3 px-3 sm:px-4 w-20 sm:w-36 text-left">
+                    <th className="py-3 px-2 sm:px-4 w-[58px] sm:w-32 text-left">
                       <button
                         type="button"
                         onClick={() => setSortDirection(prev => prev === 'asc' ? 'desc' : 'asc')}
@@ -543,18 +613,23 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
                       </button>
                     </th>
 
-                    {/* Column 2: Product */}
-                    <th className="py-3 px-3 sm:px-4 text-left font-semibold text-xs sm:text-sm text-[#556982]">
+                    {/* Column 2: Shop Name */}
+                    <th className="py-3 px-2 sm:px-4 text-left font-semibold text-xs sm:text-sm text-[#556982] min-w-[85px] sm:w-48">
+                      <span>Shop Name</span>
+                    </th>
+
+                    {/* Column 3: Product */}
+                    <th className="py-3 px-2 sm:px-4 text-left font-semibold text-xs sm:text-sm text-[#556982] min-w-[100px]">
                       <span>Product</span>
                     </th>
 
-                    {/* Column 3: Amount (₹) */}
-                    <th className="py-3 px-3 sm:px-4 w-24 sm:w-36 text-right font-semibold text-xs sm:text-sm text-[#556982]">
+                    {/* Column 4: Amount (₹) */}
+                    <th className="py-3 px-2 sm:px-4 w-[72px] sm:w-36 text-right font-semibold text-xs sm:text-sm text-[#556982]">
                       <span>Amount (₹)</span>
                     </th>
 
-                    {/* Column 4: Delivery */}
-                    <th className="py-3 px-3 sm:px-4 w-16 sm:w-24 text-center font-semibold text-xs sm:text-sm text-[#556982]">
+                    {/* Column 5: Delivery */}
+                    <th className="py-3 px-2 sm:px-4 w-[48px] sm:w-24 text-center font-semibold text-xs sm:text-sm text-[#556982]">
                       <span>Delivery</span>
                     </th>
                   </tr>
@@ -572,17 +647,22 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
                         className="bg-[#FFFDF6] hover:bg-[#FFF9EC] border-b border-[#EAF0F6] transition-colors"
                       >
                         {/* Date */}
-                        <td className="py-3.5 px-3 sm:px-4 text-[#102A4C] text-xs sm:text-sm whitespace-nowrap">
+                        <td className="py-3 px-2 sm:px-4 text-[#102A4C] text-xs sm:text-sm whitespace-nowrap">
                           <span className="hidden sm:inline">{formatDateDesktop(rec.date)}</span>
                           <span className="sm:hidden">{formatDateMobile(rec.date)}</span>
                         </td>
 
+                        {/* Shop Name */}
+                        <td className="py-3 px-2 sm:px-4 text-[#102A4C] text-xs sm:text-sm font-medium leading-snug break-words">
+                          <span>{rec.shopName || '—'}</span>
+                        </td>
+
                         {/* Product Name */}
-                        <td className="py-3.5 px-3 sm:px-4 text-[#102A4C] text-xs sm:text-sm font-medium leading-snug break-words">
+                        <td className="py-3 px-2 sm:px-4 text-[#102A4C] text-xs sm:text-sm font-medium leading-snug break-words">
                           <button
                             type="button"
                             onClick={() => handleViewRecord(rec)}
-                            className="text-left text-[#102A4C] hover:text-[#168BFF] font-medium transition-colors cursor-pointer"
+                            className="text-left text-[#102A4C] hover:text-[#168BFF] font-medium transition-colors cursor-pointer w-full"
                           >
                             {rec.productName}
                           </button>
@@ -593,14 +673,14 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
                         </td>
 
                         {/* Amount (₹) */}
-                        <td className="py-3.5 px-3 sm:px-4 text-right text-[#102A4C] text-xs sm:text-sm font-medium tabular-nums whitespace-nowrap">
+                        <td className="py-3 px-2 sm:px-4 text-right text-[#102A4C] text-xs sm:text-sm font-medium tabular-nums whitespace-nowrap">
                           {totalAmt.toLocaleString('en-IN')}
                           <span className="sr-only">{`₹${totalAmt.toLocaleString('en-IN')}`}</span>
                           <span className="sr-only">{`₹${pendingAmt.toLocaleString('en-IN')}`}</span>
                         </td>
 
                         {/* Delivery Checkbox */}
-                        <td className="py-3.5 px-3 sm:px-4 text-center">
+                        <td className="py-3 px-2 sm:px-4 text-center">
                           <button
                             type="button"
                             role="checkbox"
@@ -608,10 +688,12 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
                             aria-label={`Mark delivery as completed for ${rec.productName}`}
                             disabled={updatingDeliveryIds.has(rec.id)}
                             onClick={() => handleToggleDelivery(rec)}
-                            className={`w-5 h-5 rounded flex items-center justify-center transition-all cursor-pointer mx-auto border bg-white border-[#8FA2BA] hover:border-[#168BFF] ${
+                            className={`w-5 h-5 rounded flex items-center justify-center transition-all cursor-pointer mx-auto border bg-white border-[#8FA2BA] hover:border-[#168BFF] relative ${
                               updatingDeliveryIds.has(rec.id) ? 'opacity-50 cursor-wait' : ''
                             }`}
-                          />
+                          >
+                            <span className="absolute -inset-2.5 sm:-inset-1" aria-hidden="true" />
+                          </button>
                         </td>
                       </tr>
                     );
@@ -620,12 +702,12 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
                   {/* 2. Delivered Items Separator (Shown only when delivered records exist) */}
                   {paginatedDelivered.length > 0 && (
                     <tr key="delivered-separator">
-                      <td colSpan={4} className="py-2.5 px-3 bg-white border-y border-[#E2E8F0]">
-                        <div className="flex items-center gap-3 justify-center text-xs text-[#8A9BAE] font-medium select-none">
-                          <div className="h-px bg-[#E2E8F0] flex-1 max-w-[120px] sm:max-w-[200px]" />
+                      <td colSpan={5} className="py-2.5 px-2 sm:px-3 bg-white border-y border-[#E2E8F0]">
+                        <div className="flex items-center gap-2 sm:gap-3 justify-center text-xs text-[#8A9BAE] font-medium select-none">
+                          <div className="h-px bg-[#E2E8F0] flex-1 max-w-[80px] sm:max-w-[200px]" />
                           <span className="hidden sm:inline">Delivered Items (moved to bottom)</span>
                           <span className="sm:hidden">Delivered Items</span>
-                          <div className="h-px bg-[#E2E8F0] flex-1 max-w-[120px] sm:max-w-[200px]" />
+                          <div className="h-px bg-[#E2E8F0] flex-1 max-w-[80px] sm:max-w-[200px]" />
                         </div>
                       </td>
                     </tr>
@@ -642,17 +724,22 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
                         className="bg-[#F0F6FC] hover:bg-[#E8F1FA] border-b border-[#E4EDF5] transition-colors"
                       >
                         {/* Date */}
-                        <td className="py-3.5 px-3 sm:px-4 text-[#102A4C] text-xs sm:text-sm whitespace-nowrap">
+                        <td className="py-3 px-2 sm:px-4 text-[#102A4C] text-xs sm:text-sm whitespace-nowrap">
                           <span className="hidden sm:inline">{formatDateDesktop(rec.date)}</span>
                           <span className="sm:hidden">{formatDateMobile(rec.date)}</span>
                         </td>
 
+                        {/* Shop Name */}
+                        <td className="py-3 px-2 sm:px-4 text-[#102A4C] text-xs sm:text-sm font-medium leading-snug break-words">
+                          <span>{rec.shopName || '—'}</span>
+                        </td>
+
                         {/* Product Name */}
-                        <td className="py-3.5 px-3 sm:px-4 text-[#102A4C] text-xs sm:text-sm font-medium leading-snug break-words">
+                        <td className="py-3 px-2 sm:px-4 text-[#102A4C] text-xs sm:text-sm font-medium leading-snug break-words">
                           <button
                             type="button"
                             onClick={() => handleViewRecord(rec)}
-                            className="text-left text-[#102A4C] hover:text-[#168BFF] font-medium transition-colors cursor-pointer"
+                            className="text-left text-[#102A4C] hover:text-[#168BFF] font-medium transition-colors cursor-pointer w-full"
                           >
                             {rec.productName}
                           </button>
@@ -663,14 +750,14 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
                         </td>
 
                         {/* Amount (₹) */}
-                        <td className="py-3.5 px-3 sm:px-4 text-right text-[#102A4C] text-xs sm:text-sm font-medium tabular-nums whitespace-nowrap">
+                        <td className="py-3 px-2 sm:px-4 text-right text-[#102A4C] text-xs sm:text-sm font-medium tabular-nums whitespace-nowrap">
                           {totalAmt.toLocaleString('en-IN')}
                           <span className="sr-only">{`₹${totalAmt.toLocaleString('en-IN')}`}</span>
                           <span className="sr-only">{`₹${pendingAmt.toLocaleString('en-IN')}`}</span>
                         </td>
 
                         {/* Delivery Checkbox */}
-                        <td className="py-3.5 px-3 sm:px-4 text-center">
+                        <td className="py-3 px-2 sm:px-4 text-center">
                           <button
                             type="button"
                             role="checkbox"
@@ -678,10 +765,11 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
                             aria-label={`Mark delivery as pending for ${rec.productName}`}
                             disabled={updatingDeliveryIds.has(rec.id)}
                             onClick={() => handleToggleDelivery(rec)}
-                            className={`w-5 h-5 rounded flex items-center justify-center transition-all cursor-pointer mx-auto border bg-[#168BFF] border-[#168BFF] text-white shadow-2xs ${
+                            className={`w-5 h-5 rounded flex items-center justify-center transition-all cursor-pointer mx-auto border bg-[#168BFF] border-[#168BFF] text-white shadow-2xs relative ${
                               updatingDeliveryIds.has(rec.id) ? 'opacity-50 cursor-wait' : ''
                             }`}
                           >
+                            <span className="absolute -inset-2.5 sm:-inset-1" aria-hidden="true" />
                             <svg className="w-3.5 h-3.5 stroke-[3] text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor">
                               <polyline points="20 6 9 17 4 12" />
                             </svg>
@@ -695,9 +783,9 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
             </div>
 
             {/* Panel Footer: Record Count & Rows Per Page Selector */}
-            <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-3 select-none text-xs sm:text-sm text-[#738499]">
+            <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-2 select-none text-xs sm:text-sm text-[#738499]">
               {/* Record count display */}
-              <div>
+              <div className="text-center sm:text-left">
                 <span className="hidden sm:inline">
                   Showing {totalRecords === 0 ? 0 : (currentPage - 1) * rowsPerPage + 1} to {Math.min(currentPage * rowsPerPage, totalRecords)} of {totalRecords} records
                 </span>
@@ -707,7 +795,7 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
               </div>
 
               {/* Pagination Controls & Rows Per Page */}
-              <div className="flex items-center gap-4">
+              <div className="flex flex-wrap items-center justify-center gap-3 sm:gap-4">
                 {totalPages > 1 && (
                   <div className="flex items-center gap-1">
                     <button
@@ -734,8 +822,8 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
                   </div>
                 )}
 
-                <div className="flex items-center gap-2">
-                  <span>Rows per page:</span>
+                <div className="flex items-center gap-1.5 sm:gap-2">
+                  <span className="text-xs sm:text-sm">Rows per page:</span>
                   <div className="relative">
                     <select
                       value={rowsPerPage}
@@ -743,7 +831,7 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
                         setRowsPerPage(Number(e.target.value));
                         setCurrentPage(1);
                       }}
-                      className="appearance-none bg-white border border-[#D8E2ED] text-[#102A4C] font-medium text-xs sm:text-sm rounded-lg pl-3 pr-8 py-1.5 focus:outline-none focus:ring-1 focus:ring-[#168BFF] cursor-pointer"
+                      className="appearance-none bg-white border border-[#D8E2ED] text-[#102A4C] font-medium text-xs sm:text-sm rounded-lg pl-2.5 sm:pl-3 pr-7 sm:pr-8 py-1 sm:py-1.5 focus:outline-none focus:ring-1 focus:ring-[#168BFF] cursor-pointer"
                     >
                       <option value={10}>10</option>
                       <option value={25}>25</option>
@@ -777,12 +865,9 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
         <RecordDetailsModal
           isOpen={!!viewingRecord}
           onClose={() => setViewingRecord(null)}
-          record={viewingRecord}
+          record={records.find(r => r.id === viewingRecord.id) || viewingRecord}
+          onToggleDelivery={handleToggleDelivery}
           onEdit={handleEditRecord}
-          onSettlePayment={r => {
-            setViewingRecord(null);
-            setSettlingRecord(r);
-          }}
         />
       )}
 

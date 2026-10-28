@@ -196,4 +196,92 @@ describe('Authentication API Endpoints (/api/auth)', { timeout: 25000 }, () => {
       expect(verifyRes.body.user.isDemo).toBe(true);
     });
   });
+
+  describe('POST /api/auth/reset-password', () => {
+    it('rejects password reset without authorization header (401)', async () => {
+      const res = await request(app)
+        .post('/api/auth/reset-password')
+        .send({ password: 'newSecurePassword123' });
+
+      expect(res.status).toBe(401);
+      expect(res.body.success).toBe(false);
+      expect(res.body.message).toContain('Missing recovery session token');
+    });
+
+    it('rejects password reset with malformed or invalid token (401)', async () => {
+      const res = await request(app)
+        .post('/api/auth/reset-password')
+        .set('Authorization', 'Bearer fake-invalid-token')
+        .send({ password: 'newSecurePassword123' });
+
+      expect(res.status).toBe(401);
+      expect(res.body.success).toBe(false);
+      expect(res.body.message).toContain('Invalid or expired recovery session');
+    });
+
+    it('rejects password reset with short password under 8 characters (400)', async () => {
+      // Login to obtain a valid owner session token
+      const loginRes = await request(app)
+        .post('/api/auth/login')
+        .send({ username: 'owner', password: 'password123' });
+
+      expect(loginRes.status).toBe(200);
+      const token = loginRes.body.session.access_token;
+
+      const res = await request(app)
+        .post('/api/auth/reset-password')
+        .set('Authorization', `Bearer ${token}`)
+        .send({ password: 'short' });
+
+      expect(res.status).toBe(400);
+      expect(res.body.success).toBe(false);
+      expect(res.body.message).toContain('at least 8 characters');
+    });
+
+    it('successfully resets password with valid token and enables login with new password', async () => {
+      // 1. Initial login with current password
+      const initialLogin = await request(app)
+        .post('/api/auth/login')
+        .send({ username: 'owner', password: 'password123' });
+
+      expect(initialLogin.status).toBe(200);
+      const token = initialLogin.body.session.access_token;
+      expect(token).toBeDefined();
+
+      // 2. Perform password update using the valid token
+      const newPassword = 'newPassword456!';
+      const resetRes = await request(app)
+        .post('/api/auth/reset-password')
+        .set('Authorization', `Bearer ${token}`)
+        .send({ password: newPassword });
+
+      expect(resetRes.status).toBe(200);
+      expect(resetRes.body.success).toBe(true);
+
+      // 3. Confirm NEW password logs in successfully
+      const newLogin = await request(app)
+        .post('/api/auth/login')
+        .send({ username: 'owner', password: newPassword });
+
+      expect(newLogin.status).toBe(200);
+      expect(newLogin.body.success).toBe(true);
+      expect(newLogin.body.session.access_token).toBeDefined();
+
+      // 4. Confirm OLD password is now rejected
+      const oldLogin = await request(app)
+        .post('/api/auth/login')
+        .send({ username: 'owner', password: 'password123' });
+
+      expect(oldLogin.status).toBe(401);
+      expect(oldLogin.body.success).toBe(false);
+
+      // 5. Restore original password for downstream tests
+      const restoreRes = await request(app)
+        .post('/api/auth/reset-password')
+        .set('Authorization', `Bearer ${newLogin.body.session.access_token}`)
+        .send({ password: 'password123' });
+
+      expect(restoreRes.status).toBe(200);
+    });
+  });
 });

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { ArrowLeft, Mail, CheckCircle2 } from 'lucide-react';
+import { ArrowLeft, Mail, CheckCircle2, AlertCircle } from 'lucide-react';
 import { requestPasswordReset, RECOVERY_CONFIRMATION_MSG } from '../../services/auth.js';
 
 interface ForgotPasswordProps {
@@ -11,20 +11,27 @@ export const ForgotPassword: React.FC<ForgotPasswordProps> = ({ onNavigateToLogi
   const [isLoading, setIsLoading] = useState(false);
   const [isSubmitted, setIsSubmitted] = useState(false);
   const [feedbackMsg, setFeedbackMsg] = useState<string | null>(null);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!identifier.trim()) return;
+    const clean = identifier.trim();
+    if (!clean) return;
 
+    // Validate email format if input contains '@'
+    if (clean.includes('@') && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(clean)) {
+      setErrorMsg('Please enter a valid email address (e.g. owner@rtrmobiles.com).');
+      return;
+    }
+
+    setErrorMsg(null);
     setIsLoading(true);
     try {
-      const msg = await requestPasswordReset(identifier);
+      const msg = await requestPasswordReset(clean);
       setFeedbackMsg(msg || RECOVERY_CONFIRMATION_MSG);
       setIsSubmitted(true);
-    } catch {
-      // Regardless of error, display neutral confirmation to avoid enumeration
-      setFeedbackMsg(RECOVERY_CONFIRMATION_MSG);
-      setIsSubmitted(true);
+    } catch (err: any) {
+      setErrorMsg(err?.message || 'Unable to submit recovery request. Please try again.');
     } finally {
       setIsLoading(false);
     }
@@ -53,7 +60,7 @@ export const ForgotPassword: React.FC<ForgotPasswordProps> = ({ onNavigateToLogi
               </div>
               <div className="space-y-2">
                 <h3 className="text-sm sm:text-base font-bold text-slate-900">
-                  Recovery Request Submitted
+                  Recovery Instructions Sent
                 </h3>
                 <p className="text-xs text-slate-600 leading-relaxed bg-slate-50 p-3.5 rounded-xl border border-slate-100">
                   {feedbackMsg || RECOVERY_CONFIRMATION_MSG}
@@ -85,6 +92,13 @@ export const ForgotPassword: React.FC<ForgotPasswordProps> = ({ onNavigateToLogi
             </div>
           ) : (
             <form className="space-y-5" onSubmit={handleSubmit} noValidate>
+              {errorMsg && (
+                <div className="p-3.5 bg-rose-50 border border-rose-200 rounded-xl text-xs text-rose-700 flex items-start gap-2 animate-shake">
+                  <AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5 text-rose-500" />
+                  <span className="font-medium leading-relaxed">{errorMsg}</span>
+                </div>
+              )}
+
               <div className="space-y-1">
                 <label htmlFor="identifier-input" className="block text-xs font-semibold text-slate-700">
                   Username or Registered Email
@@ -98,8 +112,11 @@ export const ForgotPassword: React.FC<ForgotPasswordProps> = ({ onNavigateToLogi
                     name="identifier"
                     type="text"
                     value={identifier}
-                    onChange={e => setIdentifier(e.target.value)}
-                    placeholder="e.g. owner or vino@rtrmobiles.com"
+                    onChange={e => {
+                      setIdentifier(e.target.value);
+                      if (errorMsg) setErrorMsg(null);
+                    }}
+                    placeholder="e.g. owner or owner@rtrmobiles.com"
                     required
                     disabled={isLoading}
                     autoFocus

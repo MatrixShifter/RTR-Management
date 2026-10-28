@@ -90,29 +90,62 @@ describe('Record Action Components (Menu & Modals)', () => {
   });
 
   describe('RecordDetailsModal', () => {
-    it('renders comprehensive delivery and financial details', () => {
+    it('renders only the 4 simplified workflow fields: Date, Product, Amount, and Delivery', () => {
       const html = renderToString(
         <RecordDetailsModal
           isOpen={true}
           record={mockRecord}
           onClose={() => {}}
-          onEdit={() => {}}
-          onRecordPayment={() => {}}
         />
       );
 
-      expect(html).toContain('Metro Telecom');
-      expect(html).toContain('Tempered Glass 9H');
-      expect(html).toContain('TG-9H');
-      expect(html).toContain('50');
-      expect(html).toContain('pcs');
-      expect(html).toContain('40');
-      expect(html).toContain('2,000');
-      expect(html).toContain('800');
-      expect(html).toContain('Fragile shipment');
+      // Header
+      expect(html).toContain('Record Details');
       expect(html).toContain('Delivered');
-      expect(html).toContain('Record Payment');
-      expect(html).toContain('Edit Record');
+
+      // 4 Clean Workflow Fields
+      expect(html).toContain('Date');
+      expect(html).toContain('24/10/2026');
+
+      expect(html).toContain('Product');
+      expect(html).toContain('Tempered Glass 9H');
+
+      expect(html).toContain('Amount (₹)');
+      expect(html).toContain('₹2,000');
+
+      expect(html).toContain('Delivery');
+
+      // Close button
+      expect(html).toContain('Close');
+
+      // Strictly verifies removed fields and buttons do NOT appear
+      expect(html).not.toContain('Metro Telecom'); // No Shop Name
+      expect(html).not.toContain('TG-9H'); // No SKU
+      expect(html).not.toContain('50 pcs'); // No Quantity
+      expect(html).not.toContain('Unit Price'); // No Unit Price
+      expect(html).not.toContain('Outstanding Balance'); // No Financial Breakdown
+      expect(html).not.toContain('Amount Paid'); // No Paid Amount
+      expect(html).not.toContain('Fragile shipment'); // No Notes
+      expect(html).not.toContain('Record Payment'); // No Record Payment Button
+      expect(html).not.toContain('Edit Record'); // No Edit Record Button
+    });
+
+    it('renders Pending status badge when delivery status is pending', () => {
+      const pendingRecord: BusinessRecord = {
+        ...mockRecord,
+        deliveryStatus: 'pending'
+      };
+
+      const html = renderToString(
+        <RecordDetailsModal
+          isOpen={true}
+          record={pendingRecord}
+          onClose={() => {}}
+        />
+      );
+
+      expect(html).toContain('Pending');
+      expect(html).not.toContain('Delivered');
     });
 
     it('does not render when isOpen is false', () => {

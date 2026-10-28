@@ -237,6 +237,7 @@ export async function requestPasswordReset(identifier: string): Promise<string> 
     return RECOVERY_CONFIRMATION_MSG;
   }
 
+  // 1. Primary: Send request through secure backend endpoint
   try {
     const res = await fetch('/api/auth/forgot-password', {
       method: 'POST',
@@ -251,31 +252,98 @@ export async function requestPasswordReset(identifier: string): Promise<string> 
       const data = await res.json();
       return data.message || RECOVERY_CONFIRMATION_MSG;
     }
-  } catch {
-    // Fallback to client-side Supabase if API unreachable
-    if (isSupabaseConfigured && supabase && clean.includes('@')) {
-      await supabase.auth.resetPasswordForEmail(clean, {
-        redirectTo: `${window.location.origin}/reset-password`
-      }).catch(() => {});
+
+    if (res.status === 429) {
+      const data = await res.json().catch(() => ({}));
+      throw new Error(data.message || 'Email rate limit exceeded. Please wait a minute before requesting another reset link.');
     }
+
+    if (res.status >= 400 && res.status < 500) {
+      const data = await res.json().catch(() => ({}));
+      throw new Error(data.message || 'Unable to submit password recovery request.');
+    }
+  } catch (err: any) {
+    if (err.message && (err.message.includes('rate limit') || err.message.includes('wait') || err.message.includes('Unable to submit'))) {
+      throw err;
+    }
+
+    // 2. Direct Supabase fallback if backend API server is offline
+    if (isSupabaseConfigured && supabase) {
+      const email = resolveLoginEmail(clean) || (clean.includes('@') ? clean : null);
+      if (email) {
+        const { error } = await supabase.auth.resetPasswordForEmail(email, {
+          redirectTo: `${window.location.origin}/reset-password`
+        });
+        if (error) {
+          if (error.status === 429 || error.message.toLowerCase().includes('rate limit')) {
+            throw new Error('Email rate limit exceeded. Please wait a minute before requesting another reset link.');
+          }
+          throw new Error(error.message || 'Failed to send password recovery email.');
+        }
+        return RECOVERY_CONFIRMATION_MSG;
+      }
+    }
+
+    throw err;
   }
 
   return RECOVERY_CONFIRMATION_MSG;
 }
 
 /**
- * Update password using current active recovery session
+ * Update password using current active recovery session.
+ * Safely signs out of the temporary recovery session upon completion to guarantee
+ * that subsequent logins strictly authenticate with the new credentials.
  */
 export async function updatePassword(newPassword: string): Promise<void> {
   if (!isSupabaseConfigured || !supabase) {
     throw new Error('Authentication service is not configured.');
   }
 
-  const { error } = await supabase.auth.updateUser({
+  // Retrieve current recovery access token
+  const { data: { session } } = await supabase.auth.getSession();
+  const token = session?.access_token;
+
+  // 1. Client-side password update
+  const { error: clientError } = await supabase.auth.updateUser({
     password: newPassword
   });
 
-  if (error) {
-    throw new Error(error.message || 'Failed to update password. Recovery link may have expired.');
+  if (clientError) {
+    // If client-side failed, try server-side endpoint with token if available
+    if (token) {
+      const res = await fetch('/api/auth/reset-password', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify({ password: newPassword })
+      });
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.message || clientError.message || 'Failed to update password. Recovery link may have expired.');
+      }
+    } else {
+      throw new Error(clientError.message || 'Failed to update password. Recovery session expired.');
+    }
+  } else if (token) {
+    // Sync backend audit if token is present
+    fetch('/api/auth/reset-password', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`
+      },
+      body: JSON.stringify({ password: newPassword })
+    }).catch(() => {});
   }
+
+  // 2. CRITICAL: Safely sign out of the recovery session so that stale tokens
+  // do not prevent the user from logging in freshly with their new password.
+  await supabase.auth.signOut().catch(() => {});
+  try {
+    localStorage.removeItem('rtr_current_user');
+    localStorage.removeItem('rtr_session_expiry');
+  } catch {}
 }

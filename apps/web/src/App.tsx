@@ -62,6 +62,14 @@ const AppContent: React.FC = () => {
 
   // 1. Session verification & hydration
   const runInitSession = useCallback(async () => {
+    // If user is currently on the reset-password recovery page, do NOT initialize
+    // a workspace session or trigger verify-session redirects.
+    if (typeof window !== 'undefined' && window.location.pathname.startsWith('/reset-password')) {
+      isVerifyingRef.current = false;
+      setIsBootstrapping(false);
+      return;
+    }
+
     if (isVerifyingRef.current) {
       return;
     }
@@ -199,6 +207,13 @@ const AppContent: React.FC = () => {
     if (isSupabaseConfigured && supabase) {
       const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
         if (!isMounted) return;
+        if (event === 'PASSWORD_RECOVERY') {
+          // Do not overwrite recovery session with workspace login
+          return;
+        }
+        if (typeof window !== 'undefined' && window.location.pathname.startsWith('/reset-password')) {
+          return;
+        }
         if (event === 'SIGNED_OUT') {
           lastVerifiedTokenRef.current = null;
           setCurrentUser(null);
@@ -366,10 +381,10 @@ const AppContent: React.FC = () => {
                   <Route path="/payments" element={<Navigate to="/records" replace />} />
                   {/* Redirect legacy employee links to records */}
                   <Route path="/employee" element={<Navigate to="/records" replace />} />
-                  {/* Redirect auth pages to workspace when already signed in */}
+                  {/* Redirect auth pages to workspace when already signed in, but keep reset-password accessible */}
                   <Route path="/login" element={<Navigate to="/records" replace />} />
                   <Route path="/forgot-password" element={<Navigate to="/records" replace />} />
-                  <Route path="/reset-password" element={<Navigate to="/records" replace />} />
+                  <Route path="/reset-password" element={<ResetPassword onNavigateToLogin={handleSignOut} />} />
                   <Route path="*" element={<NotFound />} />
                 </Routes>
               </Suspense>
