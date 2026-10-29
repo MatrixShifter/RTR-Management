@@ -428,7 +428,10 @@ authRouter.post('/forgot-password', passwordRecoveryRateLimiter, async (req: Req
       }
 
       if (isOwner) {
-        const defaultOrigin = config.CORS_ORIGIN || 'http://localhost:5173';
+        const isProduction = config.NODE_ENV === 'production';
+        const defaultOrigin = isProduction 
+          ? 'https://rtr-management-cfn4.vercel.app' 
+          : (config.CORS_ORIGIN || 'http://localhost:5173');
         let redirectUrl = `${defaultOrigin}/reset-password`;
 
         if (typeof redirectTo === 'string' && redirectTo.trim()) {
@@ -436,12 +439,15 @@ authRouter.post('/forgot-password', passwordRecoveryRateLimiter, async (req: Req
             const parsedRedirect = new URL(redirectTo);
             const isLocal = ['localhost', '127.0.0.1'].includes(parsedRedirect.hostname);
             const isConfiguredOrigin = parsedRedirect.origin === config.CORS_ORIGIN;
-            const isApprovedDomain = parsedRedirect.hostname.endsWith('.vercel.app') || 
+            const isApprovedDomain = parsedRedirect.hostname === 'rtr-management-cfn4.vercel.app' ||
+                                     parsedRedirect.hostname.endsWith('.vercel.app') || 
                                      parsedRedirect.hostname === 'rtrmobiles.com' ||
                                      parsedRedirect.hostname.endsWith('.rtrmobiles.com');
 
-            // Strictly allow only verified origins and paths matching /reset-password
-            if ((isLocal || isConfiguredOrigin || isApprovedDomain) && parsedRedirect.pathname === '/reset-password') {
+            // Strictly allow verified origins; never allow localhost in production mode
+            if (isProduction && isLocal) {
+              redirectUrl = 'https://rtr-management-cfn4.vercel.app/reset-password';
+            } else if ((isLocal || isConfiguredOrigin || isApprovedDomain) && parsedRedirect.pathname === '/reset-password') {
               redirectUrl = parsedRedirect.href;
             }
           } catch {

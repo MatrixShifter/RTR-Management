@@ -1613,14 +1613,38 @@ export async function recordDelivery(input: Omit<DeliveryRecord, 'id' | 'created
 // ----------------------------------------------------
 // BUSINESS RECORDS (UNIFIED DELIVERY & PAYMENT LEDGER)
 // ----------------------------------------------------
-export async function getBusinessRecords(): Promise<BusinessRecord[]> {
-  const [deliveries, invoices, shops, products] = await Promise.all([
-    getDeliveries(),
-    getInvoices(),
-    getShops(),
-    getProducts()
-  ]);
 
+export function mapViewRecordToBusinessRecord(row: any): BusinessRecord {
+  const rawStatus = row.delivery_status ?? row.deliveryStatus ?? row.status;
+  const deliveryStatus = getAuthoritativeDeliveryStatus(rawStatus);
+  const targetId = String(row.record_id || row.id || row.delivery_id || row.deliveryId);
+  const deliveryId = String(row.delivery_id || row.deliveryId || targetId);
+
+  return {
+    id: targetId,
+    deliveryId,
+    date: row.date || row.delivery_date || row.deliveryDate || '',
+    shopId: row.shop_id || row.shopId || '',
+    shopName: row.shop_name || row.shopName || 'Retail Store',
+    productId: row.product_id || row.productId || '',
+    productName: row.product_name || row.productName || 'Wholesale Accessory',
+    productSku: row.product_sku || row.productSku || '',
+    quantity: Number(row.quantity) || 1,
+    unitPrice: Number(row.unit_price ?? row.unitPrice ?? 0),
+    totalAmount: Number(row.total_amount ?? row.totalAmount ?? 0),
+    deliveryStatus,
+    pendingAmount: Number(row.pending_amount ?? row.pendingAmount ?? 0),
+    notes: row.notes || '',
+    createdAt: row.created_at || row.createdAt || new Date().toISOString()
+  };
+}
+
+function buildBusinessRecordsFromDeliveries(
+  deliveries: DeliveryRecord[],
+  invoices: Invoice[],
+  shops: Shop[],
+  products: Product[]
+): BusinessRecord[] {
   const shopMap = new Map(shops.map(s => [s.id, s.name]));
   const prodMap = new Map(products.map(p => [p.id, p]));
   const invoiceByDelivery = new Map<string, Invoice>();
@@ -1666,7 +1690,7 @@ export async function getBusinessRecords(): Promise<BusinessRecord[]> {
           quantity: qty,
           unitPrice,
           totalAmount,
-          deliveryStatus: normalizeDeliveryStatus(deliv.status),
+          deliveryStatus: getAuthoritativeDeliveryStatus(deliv.status),
           pendingAmount: itemPending,
           notes: deliv.notes,
           createdAt: deliv.createdAt
@@ -1702,7 +1726,7 @@ export async function getBusinessRecords(): Promise<BusinessRecord[]> {
         quantity: fallbackQty,
         unitPrice: fallbackPrice,
         totalAmount,
-        deliveryStatus: normalizeDeliveryStatus(deliv.status),
+        deliveryStatus: getAuthoritativeDeliveryStatus(deliv.status),
         pendingAmount: pendingVal,
         notes: deliv.notes,
         createdAt: deliv.createdAt
@@ -1710,8 +1734,70 @@ export async function getBusinessRecords(): Promise<BusinessRecord[]> {
     }
   }
 
-  // Sort deterministically: Pending at top (1->2->3), Completed at bottom (4), newest first within groups
   return sortBusinessRecords(records);
+}
+
+export async function getBusinessRecords(): Promise<BusinessRecord[]> {
+  if (isDemoMode()) {
+    return dedupeRequest('business_records_demo', async () => {
+      const [deliveries, invoices, shops, products] = await Promise.all([
+        getDeliveries(),
+        getInvoices(),
+        getShops(),
+        getProducts()
+      ]);
+      return buildBusinessRecordsFromDeliveries(deliveries, invoices, shops, products);
+    });
+  }
+
+  return dedupeRequest('business_records', async () => {
+    // 1. Direct query against canonical Supabase view (public.v_business_records)
+    if (isSupabaseConfigured && supabase) {
+      try {
+        await ensureAuthenticatedSession();
+        const { data: viewRecords, error: viewErr } = await withTimeout(
+          supabase
+            .from('v_business_records')
+            .select('*')
+            .order('priority_rank', { ascending: true })
+            .order('date', { ascending: false }),
+          6000
+        );
+
+        if (!viewErr && Array.isArray(viewRecords) && viewRecords.length > 0) {
+          const nonDemo = viewRecords.filter((r: any) => !r.shop_name?.startsWith('[DEMO]') && !r.shop_name?.startsWith('DEMO -'));
+          const mapped = nonDemo.map(mapViewRecordToBusinessRecord);
+          return sortBusinessRecords(mapped);
+        }
+      } catch (viewEx) {
+        console.warn('Direct v_business_records query error, attempting API / fallback:', viewEx);
+      }
+
+      // 2. Query through backend Express API (/api/records) which queries v_business_records via admin client
+      try {
+        const res = await authenticatedFetch('/api/records');
+        if (res.ok) {
+          const json = await res.json();
+          if (Array.isArray(json.records) && json.records.length > 0) {
+            const nonDemo = json.records.filter((r: any) => !r.shop_name?.startsWith('[DEMO]') && !r.shop_name?.startsWith('DEMO -'));
+            const mapped = nonDemo.map(mapViewRecordToBusinessRecord);
+            return sortBusinessRecords(mapped);
+          }
+        }
+      } catch (apiEx) {
+        // Non-fatal, fallback to join below
+      }
+    }
+
+    // 3. Fallback: Reconstruct from deliveries, invoices, shops, products
+    const [deliveries, invoices, shops, products] = await Promise.all([
+      getDeliveries(),
+      getInvoices(),
+      getShops(),
+      getProducts()
+    ]);
+    return buildBusinessRecordsFromDeliveries(deliveries, invoices, shops, products);
+  });
 }
 
 export async function saveBusinessRecord(input: SaveBusinessRecordInput): Promise<BusinessRecord> {

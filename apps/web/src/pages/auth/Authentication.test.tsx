@@ -143,6 +143,13 @@ describe('Secure Owner Authentication Suite', () => {
       expect(decoded).toBe('Email link is invalid or has expired');
       expect(decoded.toLowerCase().includes('expired')).toBe(true);
     });
+
+    it('determines canonical recovery redirect URL per environment without leaking localhost to production', async () => {
+      const { getPasswordResetRedirectUrl } = await import('../../services/auth.js');
+      const url = getPasswordResetRedirectUrl();
+      expect(url).toMatch(/reset-password/);
+      expect(url.endsWith('/reset-password')).toBe(true);
+    });
   });
 
   describe('Remember Me Preference Storage', () => {

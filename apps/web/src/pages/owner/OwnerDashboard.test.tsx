@@ -2291,6 +2291,127 @@ describe('OwnerDashboard Component — Modern UI & Simple Delivery/Pending Manag
       expect(htmlSearch).toMatch(/Showing[\s\S]*?1[\s\S]*?to[\s\S]*?1[\s\S]*?of[\s\S]*?1[\s\S]*?records/);
     });
   });
+
+  describe('v_business_records Mapping & Production Status Synchronization Suite', () => {
+    it('correctly maps raw snake_case database view rows from public.v_business_records into canonical BusinessRecord', () => {
+      const rawViewRow = {
+        record_id: 'rec-uuid-1234',
+        delivery_id: 'deliv-uuid-5678',
+        business_id: 'biz-uuid-0001',
+        date: '2026-10-29',
+        shop_id: 'shop-uuid-1',
+        shop_name: 'Metro Wholesale Telecom',
+        shop_code: 'RTR-METR-001',
+        product_id: 'prod-uuid-1',
+        product_name: 'Fast Charging Power Bank 20000mAh',
+        product_sku: 'SKU-PB-20K',
+        quantity: 5,
+        unit_price: 1200,
+        total_amount: 6000,
+        delivery_status: 'pending',
+        amount_paid: 1000,
+        pending_amount: 5000,
+        payment_status: 'partially_paid',
+        notes: 'Priority morning delivery dispatch',
+        created_at: '2026-10-29T08:30:00Z',
+        priority_rank: 1
+      };
+
+      const mapped = db.mapViewRecordToBusinessRecord(rawViewRow);
+
+      expect(mapped.id).toBe('rec-uuid-1234');
+      expect(mapped.deliveryId).toBe('deliv-uuid-5678');
+      expect(mapped.shopName).toBe('Metro Wholesale Telecom');
+      expect(mapped.productName).toBe('Fast Charging Power Bank 20000mAh');
+      expect(mapped.quantity).toBe(5);
+      expect(mapped.unitPrice).toBe(1200);
+      expect(mapped.totalAmount).toBe(6000);
+      expect(mapped.deliveryStatus).toBe('pending');
+      expect(mapped.pendingAmount).toBe(5000);
+      expect(db.isDelivered(mapped)).toBe(false);
+      expect(isPendingRecord(mapped)).toBe(true);
+    });
+
+    it('never defaults unknown or missing status values in view records to delivered', () => {
+      const rowWithMissingStatus = {
+        record_id: 'rec-unknown-1',
+        delivery_id: 'deliv-unknown-1',
+        date: '2026-10-29',
+        shop_name: 'New Shop',
+        product_name: 'New Item',
+        quantity: 1,
+        unit_price: 500,
+        total_amount: 500,
+        delivery_status: null,
+        pending_amount: 500
+      };
+
+      const mapped = db.mapViewRecordToBusinessRecord(rowWithMissingStatus);
+      expect(mapped.deliveryStatus).toBe('pending');
+      expect(db.isDelivered(mapped)).toBe(false);
+
+      const rowWithUnrecognizedStatus = {
+        ...rowWithMissingStatus,
+        delivery_status: 'processing_unknown_state'
+      };
+      const mapped2 = db.mapViewRecordToBusinessRecord(rowWithUnrecognizedStatus);
+      expect(mapped2.deliveryStatus).toBe('pending');
+      expect(db.isDelivered(mapped2)).toBe(false);
+    });
+
+    it('places newly created pending records strictly in Pending Deliveries section, not Delivered Items', () => {
+      const records: db.BusinessRecord[] = [
+        {
+          id: 'existing-delivered-1',
+          deliveryId: 'deliv-1',
+          date: '2026-10-28',
+          shopId: 'shop-1',
+          shopName: 'Metro Telecom',
+          productId: 'prod-1',
+          productName: 'Existing Delivered Cable',
+          quantity: 10,
+          unitPrice: 50,
+          totalAmount: 500,
+          deliveryStatus: 'delivered',
+          pendingAmount: 0,
+          createdAt: '2026-10-28T10:00:00Z'
+        },
+        db.mapViewRecordToBusinessRecord({
+          record_id: 'new-pending-dispatch',
+          delivery_id: 'new-deliv-dispatch',
+          date: '2026-10-29',
+          shop_name: 'Apex Mobiles',
+          product_name: 'Newly Created Pending Earphones',
+          quantity: 2,
+          unitPrice: 400,
+          total_amount: 800,
+          delivery_status: 'pending',
+          pending_amount: 800,
+          created_at: '2026-10-29T11:00:00Z'
+        })
+      ];
+
+      const html = renderToString(
+        <MemoryRouter>
+          <OwnerDashboard
+            initialLoading={false}
+            initialRecords={records}
+          />
+        </MemoryRouter>
+      );
+
+      // Verify Newly Created Pending Earphones appears in pending section above delivered separator
+      const pendingPos = html.indexOf('Newly Created Pending Earphones');
+      const deliveredSeparatorPos = html.indexOf('Delivered Items');
+      const deliveredItemPos = html.indexOf('Existing Delivered Cable');
+
+      expect(pendingPos).toBeGreaterThan(-1);
+      expect(deliveredSeparatorPos).toBeGreaterThan(-1);
+      expect(deliveredItemPos).toBeGreaterThan(-1);
+      expect(pendingPos).toBeLessThan(deliveredSeparatorPos);
+      expect(deliveredSeparatorPos).toBeLessThan(deliveredItemPos);
+    });
+  });
 });
 
 

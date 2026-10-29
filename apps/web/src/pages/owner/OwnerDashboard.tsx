@@ -28,6 +28,7 @@ import {
   updateDeliveryStatus,
   deleteBusinessRecord,
   compareBusinessRecords,
+  getAuthoritativeDeliveryStatus,
   isDelivered,
   isDatabaseCapacityError,
   DATABASE_STORAGE_FULL_TITLE,
@@ -50,8 +51,9 @@ export type SortDirection = 'asc' | 'desc';
  * 2) Its delivery is still pending.
  */
 export const isPendingRecord = (r: BusinessRecord): boolean => {
-  const pendingAmt = Number(r.pendingAmount) || 0;
-  return pendingAmt > 0 || r.deliveryStatus === 'pending';
+  const pendingAmt = Number(r.pendingAmount ?? (r as any).pending_amount) || 0;
+  const status = getAuthoritativeDeliveryStatus(r);
+  return pendingAmt > 0 || status === 'pending';
 };
 
 export interface OwnerDashboardProps {
@@ -106,7 +108,7 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
             quantity: item.quantity || 0,
             unitPrice: item.unitPrice || 0,
             totalAmount: (item.quantity || 0) * (item.unitPrice || 0),
-            deliveryStatus: d.status,
+            deliveryStatus: getAuthoritativeDeliveryStatus(d.status),
             pendingAmount: idx === 0 ? pending : 0,
             notes: d.notes,
             createdAt: d.createdAt
@@ -123,7 +125,7 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
           quantity: 0,
           unitPrice: 0,
           totalAmount: 0,
-          deliveryStatus: d.status,
+          deliveryStatus: getAuthoritativeDeliveryStatus(d.status),
           pendingAmount: pending,
           notes: d.notes,
           createdAt: d.createdAt
@@ -222,7 +224,7 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
                             recentlySavedRecordsRef.current.get(r.id) ||
                             (r.deliveryId ? recentlySavedRecordsRef.current.get(r.deliveryId) : undefined);
         if (recentSaved && now - recentSaved.timestamp < 15000) {
-          current = { ...current, ...recentSaved.record };
+          current = { ...current, ...recentSaved.record, id: r.id };
         }
 
         // Apply recent delivery status override
@@ -937,13 +939,14 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
 
                 <tbody>
                   {/* 1. Pending Deliveries Group (Clean White with Subtle Hover) */}
-                  {paginatedPending.map(rec => {
-                    const pendingAmt = Number(rec.pendingAmount) || 0;
-                    const totalAmt = Number(rec.totalAmount) || (Number(rec.quantity || 0) * Number(rec.unitPrice || 0));
+                  {paginatedPending.map((rec, idx) => {
+                    const rowKey = rec.id || `${rec.deliveryId || 'deliv'}-${rec.productId || idx}`;
+                    const pendingAmt = Number(rec.pendingAmount ?? (rec as any).pending_amount) || 0;
+                    const totalAmt = Number(rec.totalAmount ?? (rec as any).total_amount) || (Number(rec.quantity || 0) * Number(rec.unitPrice || 0));
 
                     return (
                       <tr
-                        key={rec.id}
+                        key={rowKey}
                         className="bg-white hover:bg-slate-50 transition-colors border-b border-[#E2E8F0]"
                       >
                         {/* Date */}
@@ -1032,13 +1035,14 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
                   )}
 
                   {/* 3. Delivered Records Group (Subtle Tint with Continuous Grid) */}
-                  {paginatedDelivered.map(rec => {
-                    const pendingAmt = Number(rec.pendingAmount) || 0;
-                    const totalAmt = Number(rec.totalAmount) || (Number(rec.quantity || 0) * Number(rec.unitPrice || 0));
+                  {paginatedDelivered.map((rec, idx) => {
+                    const rowKey = rec.id || `${rec.deliveryId || 'deliv'}-${rec.productId || idx}`;
+                    const pendingAmt = Number(rec.pendingAmount ?? (rec as any).pending_amount) || 0;
+                    const totalAmt = Number(rec.totalAmount ?? (rec as any).total_amount) || (Number(rec.quantity || 0) * Number(rec.unitPrice || 0));
 
                     return (
                       <tr
-                        key={rec.id}
+                        key={rowKey}
                         className="bg-[#F8FAFC]/60 hover:bg-[#F1F5F9] transition-colors border-b border-[#E2E8F0]"
                       >
                         {/* Date */}

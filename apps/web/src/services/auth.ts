@@ -200,6 +200,31 @@ export async function signIn(username: string, password: string): Promise<AuthUs
 }
 
 /**
+ * Computes canonical password-recovery redirect URL based on environment.
+ * Local development strictly returns http://localhost:5173/reset-password.
+ * Deployed/production environments strictly return https://rtr-management-cfn4.vercel.app/reset-password.
+ */
+export function getPasswordResetRedirectUrl(): string {
+  if (typeof window === 'undefined' || !window.location) {
+    return 'https://rtr-management-cfn4.vercel.app/reset-password';
+  }
+
+  const hostname = window.location.hostname;
+  const isLocal = hostname === 'localhost' || hostname === '127.0.0.1';
+
+  if (isLocal) {
+    return `${window.location.origin}/reset-password`;
+  }
+
+  const origin = window.location.origin;
+  if (origin && origin.startsWith('https://') && !origin.includes('localhost') && !origin.includes('127.0.0.1')) {
+    return `${origin}/reset-password`;
+  }
+
+  return 'https://rtr-management-cfn4.vercel.app/reset-password';
+}
+
+/**
  * Request password recovery instructions for a username or email
  */
 export async function requestPasswordReset(identifier: string): Promise<string> {
@@ -208,6 +233,8 @@ export async function requestPasswordReset(identifier: string): Promise<string> 
     return RECOVERY_CONFIRMATION_MSG;
   }
 
+  const redirectUrl = getPasswordResetRedirectUrl();
+
   // 1. Primary: Send request through secure backend endpoint
   try {
     const res = await fetch('/api/auth/forgot-password', {
@@ -215,7 +242,7 @@ export async function requestPasswordReset(identifier: string): Promise<string> 
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         identifier: clean,
-        redirectTo: `${window.location.origin}/reset-password`
+        redirectTo: redirectUrl
       })
     });
 
@@ -254,7 +281,7 @@ export async function requestPasswordReset(identifier: string): Promise<string> 
       const email = resolveLoginEmail(clean) || (clean.includes('@') ? clean : null);
       if (email) {
         const { error } = await supabase.auth.resetPasswordForEmail(email, {
-          redirectTo: `${window.location.origin}/reset-password`
+          redirectTo: redirectUrl
         });
         if (error) {
           if (error.status === 429 || error.message.toLowerCase().includes('rate limit')) {

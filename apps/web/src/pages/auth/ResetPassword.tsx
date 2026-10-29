@@ -1,6 +1,6 @@
-import React, { useState, useEffect } from 'react';
-import { Lock, Eye, EyeOff, CheckCircle2, AlertCircle, ArrowLeft, ShieldAlert } from 'lucide-react';
-import { updatePassword } from '../../services/auth.js';
+import React, { useState, useEffect, useRef } from 'react';
+import { Lock, Eye, EyeOff, CheckCircle2, AlertCircle, ArrowLeft, ShieldAlert, KeyRound } from 'lucide-react';
+import { updatePassword, resolveLoginEmail } from '../../services/auth.js';
 import { supabase, isSupabaseConfigured } from '../../lib/supabase.js';
 
 interface ResetPasswordProps {
@@ -23,6 +23,16 @@ export const ResetPassword: React.FC<ResetPasswordProps> = ({
   const [isSuccess, setIsSuccess] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
+  // Manual OTP verification state (solves email link scanner prefetch)
+  const [otpEmail, setOtpEmail] = useState('vinov042007@gmail.com');
+  const [otpToken, setOtpToken] = useState('');
+  const [isVerifyingOtp, setIsVerifyingOtp] = useState(false);
+  const [otpError, setOtpError] = useState<string | null>(null);
+  const [showOtpForm, setShowOtpForm] = useState(false);
+
+  // Guard against duplicate code/token redemptions across concurrent React effects
+  const hasAttemptedExchangeRef = useRef(false);
+
   // Validate recovery token / session on mount across PKCE, token_hash, and hash flows
   useEffect(() => {
     let isMounted = true;
@@ -40,117 +50,10 @@ export const ResetPassword: React.FC<ResetPasswordProps> = ({
           return;
         }
 
-        // Parse both query parameters (?code=...) and hash fragment parameters (#access_token=...)
-        const searchParams = new URLSearchParams(window.location.search);
-        const hashStr = window.location.hash.startsWith('#') ? window.location.hash.slice(1) : window.location.hash;
-        const hashParams = new URLSearchParams(hashStr);
-
-        // 1. Check for error parameters in either URL query or hash fragment (e.g. expired link from Supabase)
-        const errorDesc = hashParams.get('error_description') ||
-                          searchParams.get('error_description') ||
-                          hashParams.get('error') ||
-                          searchParams.get('error');
-        if (errorDesc) {
-          if (isMounted) {
-            const decoded = decodeURIComponent(errorDesc).replace(/\+/g, ' ');
-            setErrorMsg(
-              decoded.toLowerCase().includes('expired') || decoded.toLowerCase().includes('invalid')
-                ? 'The password reset link is invalid or has expired. Please request a new recovery link.'
-                : decoded
-            );
-            setHasValidRecoverySession(false);
-            setIsVerifyingSession(false);
-          }
-          return;
-        }
-
-        // 2. Handle PKCE authorization code in query string: ?code=...
-        const code = searchParams.get('code');
-        if (code) {
-          const { data, error } = await supabase.auth.exchangeCodeForSession(code);
-          if (error) {
-            if (process.env.NODE_ENV !== 'production') {
-              console.warn('[Recovery Session Error]', 'PKCE exchange was unsuccessful');
-            }
-            if (isMounted) {
-              setErrorMsg(error.message || 'The password reset link is invalid or has expired.');
-              setHasValidRecoverySession(false);
-              setIsVerifyingSession(false);
-            }
-            return;
-          }
-          if (data.session) {
-            // Clean URL query parameters to avoid duplicate code redemption on refresh
-            window.history.replaceState({}, document.title, window.location.pathname);
-            if (isMounted) {
-              setHasValidRecoverySession(true);
-              setIsVerifyingSession(false);
-            }
-            return;
-          }
-        }
-
-        // 3. Handle Token Hash / OTP query string: ?token_hash=...&type=recovery
-        const tokenHash = searchParams.get('token_hash');
-        const type = searchParams.get('type') || hashParams.get('type');
-        if (tokenHash && type === 'recovery') {
-          const { data, error } = await supabase.auth.verifyOtp({
-            token_hash: tokenHash,
-            type: 'recovery'
-          });
-          if (error) {
-            if (process.env.NODE_ENV !== 'production') {
-              console.warn('[Recovery Session Error]', 'OTP token hash verification was unsuccessful');
-            }
-            if (isMounted) {
-              setErrorMsg(error.message || 'The password reset link is invalid or has expired.');
-              setHasValidRecoverySession(false);
-              setIsVerifyingSession(false);
-            }
-            return;
-          }
-          if (data.session) {
-            window.history.replaceState({}, document.title, window.location.pathname);
-            if (isMounted) {
-              setHasValidRecoverySession(true);
-              setIsVerifyingSession(false);
-            }
-            return;
-          }
-        }
-
-        // 4. Handle URL hash fragment tokens (Implicit flow): #access_token=...&refresh_token=...
-        const accessToken = hashParams.get('access_token');
-        const refreshToken = hashParams.get('refresh_token');
-        if (accessToken && refreshToken) {
-          const { data, error } = await supabase.auth.setSession({
-            access_token: accessToken,
-            refresh_token: refreshToken
-          });
-          if (error) {
-            if (process.env.NODE_ENV !== 'production') {
-              console.warn('[Recovery Session Error]', 'Session initialization was unsuccessful');
-            }
-            if (isMounted) {
-              setErrorMsg(error.message || 'The password reset link is invalid or has expired.');
-              setHasValidRecoverySession(false);
-              setIsVerifyingSession(false);
-            }
-            return;
-          }
-          if (data.session) {
-            window.history.replaceState({}, document.title, window.location.pathname);
-            if (isMounted) {
-              setHasValidRecoverySession(true);
-              setIsVerifyingSession(false);
-            }
-            return;
-          }
-        }
-
-        // 5. Check existing active Supabase session (e.g. on page refresh after session set)
-        const { data: { session } } = await supabase.auth.getSession();
-        if (session?.user) {
+        // 1. Check existing active Supabase session first
+        // If client's internal URL detector already verified the token/code, accept it immediately
+        const { data: { session: initialSession } } = await supabase.auth.getSession();
+        if (initialSession?.user) {
           if (isMounted) {
             setHasValidRecoverySession(true);
             setIsVerifyingSession(false);
@@ -158,7 +61,180 @@ export const ResetPassword: React.FC<ResetPasswordProps> = ({
           return;
         }
 
-        // If none of the above resulted in an active recovery session
+        // Parse both query parameters (?code=...) and hash fragment parameters (#access_token=...)
+        const searchParams = new URLSearchParams(window.location.search);
+        const hashStr = window.location.hash.startsWith('#') ? window.location.hash.slice(1) : window.location.hash;
+        const hashParams = new URLSearchParams(hashStr);
+
+        // 2. Check for error parameters in either URL query or hash fragment (e.g. expired link from Supabase)
+        const errorDesc = hashParams.get('error_description') ||
+                          searchParams.get('error_description') ||
+                          hashParams.get('error') ||
+                          searchParams.get('error');
+        const errorCode = hashParams.get('error_code') || searchParams.get('error_code');
+
+        if (errorDesc || errorCode) {
+          if (isMounted) {
+            const raw = errorDesc || errorCode || '';
+            const decoded = decodeURIComponent(raw).replace(/\+/g, ' ');
+            const isExpired = errorCode === 'otp_expired' || 
+                              decoded.toLowerCase().includes('expired') || 
+                              decoded.toLowerCase().includes('invalid');
+            setErrorMsg(
+              isExpired
+                ? 'The password reset link is invalid or has expired. If you received a 6-digit recovery code in your email, enter it below, or request a fresh link.'
+                : decoded
+            );
+            if (isExpired) {
+              setShowOtpForm(true);
+            }
+            setHasValidRecoverySession(false);
+            setIsVerifyingSession(false);
+          }
+          return;
+        }
+
+        // 3. Handle PKCE authorization code in query string: ?code=...
+        const code = searchParams.get('code');
+        if (code) {
+          if (!hasAttemptedExchangeRef.current) {
+            hasAttemptedExchangeRef.current = true;
+            const { data, error } = await supabase.auth.exchangeCodeForSession(code);
+            if (error) {
+              // Re-check getSession in case Supabase's internal client listener already exchanged it
+              const { data: { session: postSession } } = await supabase.auth.getSession();
+              if (postSession?.user) {
+                window.history.replaceState({}, document.title, window.location.pathname);
+                if (isMounted) {
+                  setHasValidRecoverySession(true);
+                  setIsVerifyingSession(false);
+                }
+                return;
+              }
+
+              if (process.env.NODE_ENV !== 'production') {
+                console.warn('[Recovery Session Error]', 'PKCE exchange was unsuccessful');
+              }
+              if (isMounted) {
+                setErrorMsg(error.message || 'The password reset link is invalid or has expired.');
+                setShowOtpForm(true);
+                setHasValidRecoverySession(false);
+                setIsVerifyingSession(false);
+              }
+              return;
+            }
+
+            if (data.session) {
+              window.history.replaceState({}, document.title, window.location.pathname);
+              if (isMounted) {
+                setHasValidRecoverySession(true);
+                setIsVerifyingSession(false);
+              }
+              return;
+            }
+          }
+        }
+
+        // 4. Handle Token Hash query string: ?token_hash=...&type=recovery
+        const tokenHash = searchParams.get('token_hash');
+        const type = searchParams.get('type') || hashParams.get('type');
+        if (tokenHash && type === 'recovery') {
+          if (!hasAttemptedExchangeRef.current) {
+            hasAttemptedExchangeRef.current = true;
+            const { data, error } = await supabase.auth.verifyOtp({
+              token_hash: tokenHash,
+              type: 'recovery'
+            });
+
+            if (error) {
+              const { data: { session: postSession } } = await supabase.auth.getSession();
+              if (postSession?.user) {
+                window.history.replaceState({}, document.title, window.location.pathname);
+                if (isMounted) {
+                  setHasValidRecoverySession(true);
+                  setIsVerifyingSession(false);
+                }
+                return;
+              }
+
+              if (process.env.NODE_ENV !== 'production') {
+                console.warn('[Recovery Session Error]', 'OTP token hash verification was unsuccessful');
+              }
+              if (isMounted) {
+                setErrorMsg(error.message || 'The password reset link is invalid or has expired.');
+                setShowOtpForm(true);
+                setHasValidRecoverySession(false);
+                setIsVerifyingSession(false);
+              }
+              return;
+            }
+
+            if (data.session) {
+              window.history.replaceState({}, document.title, window.location.pathname);
+              if (isMounted) {
+                setHasValidRecoverySession(true);
+                setIsVerifyingSession(false);
+              }
+              return;
+            }
+          }
+        }
+
+        // 5. Handle URL hash fragment tokens (Implicit flow): #access_token=...&refresh_token=...
+        const accessToken = hashParams.get('access_token');
+        const refreshToken = hashParams.get('refresh_token');
+        if (accessToken && refreshToken) {
+          if (!hasAttemptedExchangeRef.current) {
+            hasAttemptedExchangeRef.current = true;
+            const { data, error } = await supabase.auth.setSession({
+              access_token: accessToken,
+              refresh_token: refreshToken
+            });
+
+            if (error) {
+              const { data: { session: postSession } } = await supabase.auth.getSession();
+              if (postSession?.user) {
+                window.history.replaceState({}, document.title, window.location.pathname);
+                if (isMounted) {
+                  setHasValidRecoverySession(true);
+                  setIsVerifyingSession(false);
+                }
+                return;
+              }
+
+              if (process.env.NODE_ENV !== 'production') {
+                console.warn('[Recovery Session Error]', 'Session initialization was unsuccessful');
+              }
+              if (isMounted) {
+                setErrorMsg(error.message || 'The password reset link is invalid or has expired.');
+                setShowOtpForm(true);
+                setHasValidRecoverySession(false);
+                setIsVerifyingSession(false);
+              }
+              return;
+            }
+
+            if (data.session) {
+              window.history.replaceState({}, document.title, window.location.pathname);
+              if (isMounted) {
+                setHasValidRecoverySession(true);
+                setIsVerifyingSession(false);
+              }
+              return;
+            }
+          }
+        }
+
+        // 6. Final session check
+        const { data: { session: finalCheck } } = await supabase.auth.getSession();
+        if (finalCheck?.user) {
+          if (isMounted) {
+            setHasValidRecoverySession(true);
+            setIsVerifyingSession(false);
+          }
+          return;
+        }
+
         if (isMounted) {
           setHasValidRecoverySession(false);
           setIsVerifyingSession(false);
@@ -194,6 +270,45 @@ export const ResetPassword: React.FC<ResetPasswordProps> = ({
       isMounted = false;
     };
   }, []);
+
+  const handleVerifyOtp = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setOtpError(null);
+
+    const cleanInput = otpEmail.trim();
+    const resolvedEmail = resolveLoginEmail(cleanInput) || cleanInput;
+    const cleanToken = otpToken.trim().replace(/\s+/g, '');
+
+    if (!resolvedEmail || !cleanToken) {
+      setOtpError('Please enter your registered username or email and the 6-digit recovery code.');
+      return;
+    }
+
+    if (!isSupabaseConfigured || !supabase) {
+      setOtpError('Authentication service is not configured.');
+      return;
+    }
+
+    setIsVerifyingOtp(true);
+    try {
+      const { data, error } = await supabase.auth.verifyOtp({
+        email: resolvedEmail,
+        token: cleanToken,
+        type: 'recovery'
+      });
+
+      if (error || !data.session) {
+        setOtpError(error?.message || 'Invalid or expired recovery code. Please check your email or request a fresh link.');
+      } else {
+        setHasValidRecoverySession(true);
+        setErrorMsg(null);
+      }
+    } catch (err: any) {
+      setOtpError(err?.message || 'Failed to verify recovery code.');
+    } finally {
+      setIsVerifyingOtp(false);
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -285,7 +400,7 @@ export const ResetPassword: React.FC<ResetPasswordProps> = ({
               </div>
             </div>
           ) : !hasValidRecoverySession ? (
-            /* Expired / Invalid Link State */
+            /* Expired / Invalid Link State or Manual OTP verification */
             <div className="space-y-5 text-center">
               <div className="w-12 h-12 rounded-full bg-amber-50 text-amber-600 flex items-center justify-center mx-auto border border-amber-200">
                 <ShieldAlert className="w-6 h-6" />
@@ -295,22 +410,96 @@ export const ResetPassword: React.FC<ResetPasswordProps> = ({
                   Invalid or Expired Recovery Link
                 </h3>
                 <p className="text-xs text-slate-600 leading-relaxed bg-amber-50/50 p-3.5 rounded-xl border border-amber-100">
-                  {errorMsg || 'This recovery link is invalid, has already been used, or has expired. Please request a new password reset.'}
+                  {errorMsg || 'This recovery link is invalid, has already been used, or has expired.'}
                 </p>
               </div>
+
+              {/* 6-Digit Code Fallback Form */}
+              {showOtpForm ? (
+                <form className="mt-4 pt-4 border-t border-slate-100 text-left space-y-3.5" onSubmit={handleVerifyOtp} noValidate>
+                  <div className="flex items-center gap-2 text-xs font-semibold text-slate-800">
+                    <KeyRound className="w-4 h-4 text-blue-600" />
+                    <span>Enter 6-Digit Recovery Code</span>
+                  </div>
+
+                  {otpError && (
+                    <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl text-xs text-rose-700">
+                      {otpError}
+                    </div>
+                  )}
+
+                  <div className="space-y-1">
+                    <label htmlFor="otp-email-input" className="block text-[11px] font-medium text-slate-600">
+                      Registered Email or Username
+                    </label>
+                    <input
+                      id="otp-email-input"
+                      type="text"
+                      value={otpEmail}
+                      onChange={e => setOtpEmail(e.target.value)}
+                      placeholder="e.g. vinov042007@gmail.com or owner"
+                      required
+                      className="w-full px-3 py-2 text-xs bg-white border border-slate-200 rounded-lg text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                  </div>
+
+                  <div className="space-y-1">
+                    <label htmlFor="otp-token-input" className="block text-[11px] font-medium text-slate-600">
+                      6-Digit Code from Email
+                    </label>
+                    <input
+                      id="otp-token-input"
+                      type="text"
+                      maxLength={8}
+                      value={otpToken}
+                      onChange={e => setOtpToken(e.target.value)}
+                      placeholder="123456"
+                      required
+                      className="w-full px-3 py-2 text-center text-sm font-bold tracking-widest bg-white border border-slate-200 rounded-lg text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                  </div>
+
+                  <button
+                    type="submit"
+                    disabled={isVerifyingOtp || !otpToken.trim() || !otpEmail.trim()}
+                    className="w-full bg-[#2563EB] hover:bg-blue-700 disabled:bg-slate-300 text-white py-2 px-3 rounded-lg text-xs font-semibold flex items-center justify-center gap-2 transition-colors cursor-pointer"
+                  >
+                    {isVerifyingOtp ? (
+                      <>
+                        <div className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                        <span>Verifying Code...</span>
+                      </>
+                    ) : (
+                      <span>Verify Code &amp; Reset Password</span>
+                    )}
+                  </button>
+                </form>
+              ) : (
+                <div className="pt-1">
+                  <button
+                    type="button"
+                    onClick={() => setShowOtpForm(true)}
+                    className="text-xs font-medium text-blue-600 hover:text-blue-800 hover:underline flex items-center justify-center gap-1.5 mx-auto cursor-pointer"
+                  >
+                    <KeyRound className="w-3.5 h-3.5" />
+                    <span>Have a 6-digit recovery code from your email?</span>
+                  </button>
+                </div>
+              )}
+
               <div className="pt-2 space-y-2.5">
                 {onNavigateToForgot ? (
                   <button
                     type="button"
                     onClick={onNavigateToForgot}
-                    className="w-full bg-[#2563EB] hover:bg-blue-700 text-white py-2.5 px-4 rounded-xl text-xs sm:text-sm font-semibold flex items-center justify-center gap-2 shadow-xs transition-colors cursor-pointer"
+                    className="w-full bg-slate-100 hover:bg-slate-200 text-slate-700 py-2.5 px-4 rounded-xl text-xs sm:text-sm font-semibold flex items-center justify-center gap-2 transition-colors cursor-pointer"
                   >
                     <span>Request New Recovery Link</span>
                   </button>
                 ) : (
                   <a
                     href="/forgot-password"
-                    className="w-full bg-[#2563EB] hover:bg-blue-700 text-white py-2.5 px-4 rounded-xl text-xs sm:text-sm font-semibold flex items-center justify-center gap-2 shadow-xs transition-colors cursor-pointer"
+                    className="w-full bg-slate-100 hover:bg-slate-200 text-slate-700 py-2.5 px-4 rounded-xl text-xs sm:text-sm font-semibold flex items-center justify-center gap-2 transition-colors cursor-pointer"
                   >
                     <span>Request New Recovery Link</span>
                   </a>
