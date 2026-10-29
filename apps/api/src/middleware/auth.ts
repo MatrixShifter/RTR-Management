@@ -27,13 +27,16 @@ declare global {
 }
 
 export async function requireOwnerAuth(req: Request, res: Response, next: NextFunction) {
+  const correlationId = (req.headers['x-correlation-id'] as string);
   const authHeader = req.headers.authorization;
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
     logSecurityEvent({
       action: 'API_AUTH_ATTEMPT',
+      category: 'auth_session',
       status: 'FAILURE',
-      ip: req.ip,
-      details: { path: req.path, method: req.method, reason: 'Missing authorization header' }
+      statusCode: 401,
+      correlationId,
+      errorCategory: 'missing_authorization_header'
     });
     return res.status(401).json({
       error: 'Unauthorized',
@@ -49,9 +52,10 @@ export async function requireOwnerAuth(req: Request, res: Response, next: NextFu
     if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method)) {
       logSecurityEvent({
         action: 'DEMO_MUTATION_BLOCKED',
-        actorId: 'demo-user',
+        category: 'access_control',
         status: 'BLOCKED',
-        ip: req.ip,
+        statusCode: 403,
+        correlationId,
         details: { path: req.path, method: req.method }
       });
       return res.status(403).json({
@@ -76,9 +80,11 @@ export async function requireOwnerAuth(req: Request, res: Response, next: NextFu
     if (error || !user) {
       logSecurityEvent({
         action: 'API_AUTH_ATTEMPT',
+        category: 'auth_session',
         status: 'FAILURE',
-        ip: req.ip,
-        details: { path: req.path, method: req.method, reason: 'Invalid or expired token' }
+        statusCode: 401,
+        correlationId,
+        errorCategory: 'invalid_or_expired_token'
       });
       return res.status(401).json({
         error: 'Unauthorized',
@@ -95,9 +101,10 @@ export async function requireOwnerAuth(req: Request, res: Response, next: NextFu
       if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method)) {
         logSecurityEvent({
           action: 'DEMO_MUTATION_BLOCKED',
-          actorId: user.id,
+          category: 'access_control',
           status: 'BLOCKED',
-          ip: req.ip,
+          statusCode: 403,
+          correlationId,
           details: { path: req.path, method: req.method }
         });
         return res.status(403).json({
@@ -126,10 +133,11 @@ export async function requireOwnerAuth(req: Request, res: Response, next: NextFu
     if (memError || !membership || membership.role !== 'owner' || !membership.is_active) {
       logSecurityEvent({
         action: 'UNAUTHORIZED_ROLE_ACCESS',
-        actorId: user.id,
+        category: 'access_control',
         status: 'BLOCKED',
-        ip: req.ip,
-        details: { path: req.path, role: membership?.role || 'none', isActive: membership?.is_active }
+        statusCode: 403,
+        correlationId,
+        errorCategory: 'unauthorized_role'
       });
       return res.status(403).json({
         error: 'Forbidden',
@@ -146,12 +154,14 @@ export async function requireOwnerAuth(req: Request, res: Response, next: NextFu
     };
 
     return next();
-  } catch (err: any) {
+  } catch {
     logSecurityEvent({
       action: 'API_AUTH_ERROR',
+      category: 'auth_session',
       status: 'FAILURE',
-      ip: req.ip,
-      details: { error: err?.message }
+      statusCode: 401,
+      correlationId,
+      errorCategory: 'verification_failed'
     });
     return res.status(401).json({
       error: 'Unauthorized',

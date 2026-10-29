@@ -15,7 +15,7 @@ export const ForgotPassword: React.FC<ForgotPasswordProps> = ({ onNavigateToLogi
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    const clean = identifier.trim();
+    const clean = identifier.trim().toLowerCase();
     if (!clean) return;
 
     // Validate email format if input contains '@'
@@ -40,8 +40,15 @@ export const ForgotPassword: React.FC<ForgotPasswordProps> = ({ onNavigateToLogi
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col justify-center py-12 px-4 sm:px-6 lg:px-8 animate-fade-in">
       <div className="sm:mx-auto sm:w-full sm:max-w-md text-center">
-        <div className="w-14 h-14 rounded-2xl bg-[#0F172A] text-white flex items-center justify-center font-black text-xl mx-auto shadow-md border border-slate-700 tracking-tight">
-          RTR
+        <div className="w-20 h-16 sm:w-24 sm:h-20 rounded-2xl bg-[#0C1E38] p-2 flex items-center justify-center mx-auto shadow-md border border-slate-700/60 tracking-tight">
+          <img
+            src="/rtr-logo.png"
+            alt="RTR Mobiles logo"
+            className="w-full h-full object-contain drop-shadow-sm"
+            width="96"
+            height="80"
+            loading="eager"
+          />
         </div>
         <h1 className="mt-4 text-2xl sm:text-3xl font-extrabold tracking-tight text-slate-900">
           Reset Your Password
@@ -52,7 +59,7 @@ export const ForgotPassword: React.FC<ForgotPasswordProps> = ({ onNavigateToLogi
       </div>
 
       <div className="mt-8 sm:mx-auto sm:w-full sm:max-w-md">
-        <div className="bg-white py-8 px-6 sm:px-10 shadow-sm border border-slate-200/90 rounded-2xl">
+        <div className="bg-white py-6 sm:py-8 px-4 sm:px-10 shadow-sm border border-slate-200/90 rounded-2xl">
           {isSubmitted ? (
             <div className="space-y-5 text-center">
               <div className="w-12 h-12 rounded-full bg-emerald-50 text-emerald-600 flex items-center justify-center mx-auto border border-emerald-200">

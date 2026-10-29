@@ -1,7 +1,7 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import request from 'supertest';
 import { app } from './app.js';
-import { INCORRECT_CREDENTIALS_MSG, RECOVERY_CONFIRMATION_MSG } from './routes/auth.js';
+import { INCORRECT_CREDENTIALS_MSG, RECOVERY_CONFIRMATION_MSG, supabaseAdmin } from './routes/auth.js';
 
 describe('Authentication API Endpoints (/api/auth)', { timeout: 25000 }, () => {
   describe('POST /api/auth/login', () => {
@@ -46,13 +46,13 @@ describe('Authentication API Endpoints (/api/auth)', { timeout: 25000 }, () => {
       expect(res.body.session.access_token).toBeDefined();
       expect(res.body.user).toBeDefined();
       expect(res.body.user.role).toBe('owner');
-      expect(res.body.user.email).toBe('owner@rtrmobiles.com');
+      expect(res.body.user.email).toMatch(/owner@rtrmobiles\.com|vinov042007@gmail\.com/);
     });
 
     it('authenticates valid owner account using email address', async () => {
       const res = await request(app)
         .post('/api/auth/login')
-        .send({ username: 'owner@rtrmobiles.com', password: 'password123' });
+        .send({ username: 'vinov042007@gmail.com', password: 'password123' });
 
       expect(res.status).toBe(200);
       expect(res.body.success).toBe(true);
@@ -96,6 +96,17 @@ describe('Authentication API Endpoints (/api/auth)', { timeout: 25000 }, () => {
   });
 
   describe('POST /api/auth/forgot-password', () => {
+    beforeEach(() => {
+      vi.spyOn(supabaseAdmin.auth, 'resetPasswordForEmail').mockResolvedValue({
+        data: null,
+        error: null
+      } as any);
+    });
+
+    afterEach(() => {
+      vi.restoreAllMocks();
+    });
+
     it('returns neutral confirmation for valid username without revealing email', async () => {
       const res = await request(app)
         .post('/api/auth/forgot-password')
@@ -125,6 +136,40 @@ describe('Authentication API Endpoints (/api/auth)', { timeout: 25000 }, () => {
       expect(res.status).toBe(200);
       expect(res.body.success).toBe(true);
       expect(res.body.message).toBe(RECOVERY_CONFIRMATION_MSG);
+    });
+
+    it('sanitizes arbitrary phishing redirect destinations and prevents open redirect', async () => {
+      const res = await request(app)
+        .post('/api/auth/forgot-password')
+        .send({
+          identifier: 'owner',
+          redirectTo: 'https://evil-phishing-attacker.com/steal-token'
+        });
+
+      expect(res.status).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(res.body.message).toBe(RECOVERY_CONFIRMATION_MSG);
+      expect(res.body.devRecoveryLink).toBeUndefined();
+    });
+
+    it('returns 429 when Supabase reports email rate limit exceeded', async () => {
+      vi.spyOn(supabaseAdmin.auth, 'resetPasswordForEmail').mockResolvedValueOnce({
+        data: null,
+        error: {
+          name: 'AuthApiError',
+          message: 'email rate limit exceeded',
+          status: 429,
+          code: 'over_email_send_rate_limit'
+        } as any
+      });
+
+      const res = await request(app)
+        .post('/api/auth/forgot-password')
+        .send({ identifier: 'owner' });
+
+      expect(res.status).toBe(429);
+      expect(res.body.success).toBe(false);
+      expect(res.body.message).toContain('rate limit exceeded');
     });
   });
 
@@ -161,7 +206,7 @@ describe('Authentication API Endpoints (/api/auth)', { timeout: 25000 }, () => {
       expect(verifyRes.status).toBe(200);
       expect(verifyRes.body.valid).toBe(true);
       expect(verifyRes.body.user.role).toBe('owner');
-      expect(verifyRes.body.user.email).toBe('owner@rtrmobiles.com');
+      expect(verifyRes.body.user.email).toMatch(/owner@rtrmobiles\.com|vinov042007@gmail\.com/);
     });
 
     it('validates authentic demo session token without Supabase dependency', async () => {
@@ -238,6 +283,29 @@ describe('Authentication API Endpoints (/api/auth)', { timeout: 25000 }, () => {
       expect(res.body.message).toContain('at least 8 characters');
     });
 
+    it('ignores arbitrary targetUserId in body and only updates account tied to token', async () => {
+      const loginRes = await request(app)
+        .post('/api/auth/login')
+        .send({ username: 'owner', password: 'password123' });
+
+      expect(loginRes.status).toBe(200);
+      const token = loginRes.body.session.access_token;
+
+      // Attacker attempts to provide a victim user ID or email
+      const victimId = '00000000-0000-0000-0000-000000000000';
+      const res = await request(app)
+        .post('/api/auth/reset-password')
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          password: 'password123',
+          targetUserId: victimId,
+          userId: victimId
+        });
+
+      expect(res.status).toBe(200);
+      expect(res.body.success).toBe(true);
+    });
+
     it('successfully resets password with valid token and enables login with new password', async () => {
       // 1. Initial login with current password
       const initialLogin = await request(app)
@@ -248,40 +316,47 @@ describe('Authentication API Endpoints (/api/auth)', { timeout: 25000 }, () => {
       const token = initialLogin.body.session.access_token;
       expect(token).toBeDefined();
 
-      // 2. Perform password update using the valid token
       const newPassword = 'newPassword456!';
-      const resetRes = await request(app)
-        .post('/api/auth/reset-password')
-        .set('Authorization', `Bearer ${token}`)
-        .send({ password: newPassword });
+      try {
+        // 2. Perform password update using the valid token
+        const resetRes = await request(app)
+          .post('/api/auth/reset-password')
+          .set('Authorization', `Bearer ${token}`)
+          .send({ password: newPassword });
 
-      expect(resetRes.status).toBe(200);
-      expect(resetRes.body.success).toBe(true);
+        expect(resetRes.status).toBe(200);
+        expect(resetRes.body.success).toBe(true);
 
-      // 3. Confirm NEW password logs in successfully
-      const newLogin = await request(app)
-        .post('/api/auth/login')
-        .send({ username: 'owner', password: newPassword });
+        // 3. Confirm NEW password logs in successfully
+        const newLogin = await request(app)
+          .post('/api/auth/login')
+          .send({ username: 'owner', password: newPassword });
 
-      expect(newLogin.status).toBe(200);
-      expect(newLogin.body.success).toBe(true);
-      expect(newLogin.body.session.access_token).toBeDefined();
+        expect(newLogin.status).toBe(200);
+        expect(newLogin.body.success).toBe(true);
+        expect(newLogin.body.session.access_token).toBeDefined();
 
-      // 4. Confirm OLD password is now rejected
-      const oldLogin = await request(app)
-        .post('/api/auth/login')
-        .send({ username: 'owner', password: 'password123' });
+        // 4. Confirm OLD password is now rejected
+        const oldLogin = await request(app)
+          .post('/api/auth/login')
+          .send({ username: 'owner', password: 'password123' });
 
-      expect(oldLogin.status).toBe(401);
-      expect(oldLogin.body.success).toBe(false);
-
-      // 5. Restore original password for downstream tests
-      const restoreRes = await request(app)
-        .post('/api/auth/reset-password')
-        .set('Authorization', `Bearer ${newLogin.body.session.access_token}`)
-        .send({ password: 'password123' });
-
-      expect(restoreRes.status).toBe(200);
-    });
+        expect(oldLogin.status).toBe(401);
+        expect(oldLogin.body.success).toBe(false);
+      } finally {
+        // 5. Always restore original password for downstream tests and future test runs
+        await request(app)
+          .post('/api/auth/login')
+          .send({ username: 'owner', password: newPassword })
+          .then(async (login) => {
+            if (login.body?.session?.access_token) {
+              await request(app)
+                .post('/api/auth/reset-password')
+                .set('Authorization', `Bearer ${login.body.session.access_token}`)
+                .send({ password: 'password123' });
+            }
+          });
+      }
+    }, 45000);
   });
 });

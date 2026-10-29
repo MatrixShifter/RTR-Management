@@ -7,38 +7,63 @@ interface Props {
 
 interface State {
   hasError: boolean;
-  error: Error | null;
-  errorInfo: ErrorInfo | null;
+  referenceId: string | null;
 }
 
+/**
+ * Production-Safe Application Error Boundary.
+ * 
+ * In production:
+ * - Completely hides raw exception messages, stack traces, component traces, internal file paths,
+ *   and database details.
+ * - Displays a clean, professional, non-sensitive error page with Try Again and Reload App actions.
+ * - Displays an optional random reference ID (e.g. ref_...) for support diagnostics.
+ * - Falls back to a self-contained layout with zero external context dependencies.
+ * 
+ * In development / developer console:
+ * - Emits sanitized error and component trace to console.error without exposing tokens, passwords,
+ *   or secrets.
+ */
 export class ErrorBoundary extends Component<Props, State> {
   public override state: State = {
     hasError: false,
-    error: null,
-    errorInfo: null,
+    referenceId: null
   };
 
-  public static getDerivedStateFromError(error: Error): State {
-    return { hasError: true, error, errorInfo: null };
+  public static getDerivedStateFromError(_error: Error): State {
+    const referenceId = `ref_${Date.now().toString(36)}_${Math.random().toString(36).substring(2, 7)}`;
+    return { hasError: true, referenceId };
   }
 
   public override componentDidCatch(error: Error, errorInfo: ErrorInfo) {
-    console.error('ErrorBoundary caught an unhandled error:', error, errorInfo);
-    this.setState({ error, errorInfo });
+    try {
+      const refId = this.state.referenceId || `ref_${Date.now().toString(36)}`;
+      const isProduction = process.env.NODE_ENV === 'production' || Boolean(import.meta.env?.PROD);
+      
+      if (isProduction) {
+        // In production, emit safe reference ID without exposing raw stack trace or component hierarchy
+        // eslint-disable-next-line no-console
+        console.error(`[Application Error] Reference ID: ${refId}`);
+      } else {
+        // Preserve rich developer diagnostics in console during development without leaking secrets
+        // eslint-disable-next-line no-console
+        console.error(`[Application Error] Reference ID: ${refId}`, {
+          name: error?.name,
+          message: error?.message,
+          componentStack: errorInfo?.componentStack
+        });
+      }
+    } catch {
+      // Ensure logging failures never crash the error boundary
+    }
   }
 
   private handleReset = () => {
-    this.setState({ hasError: false, error: null, errorInfo: null });
+    this.setState({ hasError: false, referenceId: null });
   };
 
   private handleReload = () => {
-    window.location.reload();
-  };
-
-  private handleClearStorage = () => {
-    if (window.confirm('Are you sure you want to clear local cache and reload? This will not affect the remote database.')) {
-      localStorage.clear();
-      sessionStorage.clear();
+    if (typeof window !== 'undefined') {
       window.location.reload();
     }
   };
@@ -53,70 +78,52 @@ export class ErrorBoundary extends Component<Props, State> {
         <div 
           role="alert" 
           aria-live="assertive"
-          className="min-h-screen bg-slate-50 flex items-center justify-center p-4 sm:p-6"
+          className="min-h-screen bg-slate-50 flex items-center justify-center p-4 sm:p-6 select-none font-sans"
         >
-          <div className="max-w-lg w-full bg-white rounded-xl shadow-lg border border-slate-200 p-6 sm:p-8 space-y-6">
-            <div className="flex items-center space-x-3">
-              <div className="w-12 h-12 rounded-full bg-amber-100 flex items-center justify-center text-amber-600 flex-shrink-0">
-                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-                </svg>
-              </div>
-              <div>
-                <h1 className="text-xl font-bold text-slate-900">Application Error</h1>
-                <p className="text-sm text-slate-500">RTR Wholesale Management</p>
-              </div>
+          <div className="max-w-md w-full bg-white rounded-2xl shadow-xl border border-slate-200/90 p-6 sm:p-8 space-y-6 text-center">
+            {/* Brand Logo Container */}
+            <div className="w-14 h-14 rounded-2xl bg-[#0C1E38] mx-auto flex items-center justify-center shadow-md p-2 border border-slate-700/60">
+              <img 
+                src="/rtr-logo.png" 
+                alt="RTR Mobiles" 
+                className="w-full h-full object-contain"
+                width="40"
+                height="40"
+              />
             </div>
 
             <div className="space-y-2">
-              <p className="text-sm text-slate-700 font-medium">
-                An unexpected error occurred while rendering this view.
-              </p>
-              <p className="text-xs text-slate-500">
-                Your database records remain safe. You can retry loading this component, reload the application, or reset the local cache.
+              <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-slate-900">
+                Something went wrong
+              </h1>
+              <p className="text-sm text-slate-600 leading-relaxed">
+                We couldn't load this page. Please try again. If the problem continues, contact support.
               </p>
             </div>
 
-            {this.state.error && (
-              <div className="p-3 bg-slate-100 rounded-lg border border-slate-200">
-                <p className="text-xs font-mono text-slate-800 break-words">
-                  {this.state.error.name}: {this.state.error.message}
+            {/* Non-sensitive support reference ID */}
+            {this.state.referenceId && (
+              <div className="py-1.5 px-3 bg-slate-100 rounded-lg inline-block border border-slate-200/80">
+                <p className="text-xs text-slate-500 font-mono tracking-wide select-all">
+                  Reference: {this.state.referenceId}
                 </p>
-                {this.state.errorInfo?.componentStack && (
-                  <details className="mt-2">
-                    <summary className="text-xs text-slate-500 cursor-pointer hover:text-slate-700">
-                      View component trace
-                    </summary>
-                    <pre className="mt-2 text-[10px] text-slate-600 overflow-x-auto p-2 bg-white rounded border border-slate-200 max-h-40">
-                      {this.state.errorInfo.componentStack}
-                    </pre>
-                  </details>
-                )}
               </div>
             )}
 
-            <div className="flex flex-col sm:flex-row gap-2 pt-2">
+            <div className="flex flex-col sm:flex-row gap-3 pt-2">
               <button
                 type="button"
                 onClick={this.handleReset}
-                className="flex-1 py-2.5 px-4 bg-crimpston-navy text-white text-sm font-semibold rounded-lg hover:bg-slate-800 transition-colors shadow-sm focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-crimpston-navy"
+                className="flex-1 py-2.5 px-4 bg-[#102A4C] hover:bg-[#0C1E38] text-white text-sm font-semibold rounded-xl transition-all shadow-sm focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-[#102A4C] cursor-pointer"
               >
                 Try Again
               </button>
               <button
                 type="button"
                 onClick={this.handleReload}
-                className="flex-1 py-2.5 px-4 bg-white border border-slate-300 text-slate-700 text-sm font-semibold rounded-lg hover:bg-slate-50 transition-colors shadow-sm focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-crimpston-blue"
+                className="flex-1 py-2.5 px-4 bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 text-sm font-semibold rounded-xl transition-all shadow-sm focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-[#102A4C] cursor-pointer"
               >
                 Reload App
-              </button>
-              <button
-                type="button"
-                onClick={this.handleClearStorage}
-                className="py-2.5 px-3 text-slate-500 hover:text-slate-800 text-xs font-medium transition-colors"
-                title="Clears local storage in case of corrupted cache"
-              >
-                Reset Cache
               </button>
             </div>
           </div>
@@ -127,3 +134,5 @@ export class ErrorBoundary extends Component<Props, State> {
     return this.props.children;
   }
 }
+
+export default ErrorBoundary;

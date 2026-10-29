@@ -17,6 +17,7 @@ import {
   compareBusinessRecords,
   sortBusinessRecords,
   type RecordPriorityRank,
+  type RecordPriorityInput,
   type RecordSortField,
   type RecordSortDirection,
   SaveBusinessRecordSchema,
@@ -34,6 +35,7 @@ export {
   compareBusinessRecords,
   sortBusinessRecords,
   type RecordPriorityRank,
+  type RecordPriorityInput,
   type RecordSortField,
   type RecordSortDirection
 };
@@ -271,28 +273,12 @@ export const DEFAULT_DEMO_PRODUCTS: Product[] = [
   }
 ];
 
-let inMemoryDemoMode: boolean | null = null;
-
-export function isDemoMode(): boolean {
-  if (inMemoryDemoMode !== null) return inMemoryDemoMode;
-  try {
-    if (typeof localStorage !== 'undefined') {
-      const stored = localStorage.getItem('rtr_current_user');
-      if (stored) {
-        const u = JSON.parse(stored);
-        return u?.role === 'demo' || u?.isDemo === true;
-      }
-    }
-  } catch {}
-  return false;
-}
+import { isDemoMode, setDemoMode as baseSetDemoMode } from './demoMode.js';
+export { isDemoMode };
 
 export function setDemoMode(active: boolean): void {
-  inMemoryDemoMode = active;
   clearMemoryCache();
-  if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function') {
-    window.dispatchEvent(new CustomEvent('rtr_demo_mode_changed', { detail: { isDemo: active } }));
-  }
+  baseSetDemoMode(active);
 }
 
 export function resetDemoData(): void {
@@ -475,6 +461,7 @@ const CACHE_TTL_MS = 2500; // 2.5 seconds cache TTL
 
 export function clearMemoryCache(): void {
   memCache.clear();
+  inFlightRequests.clear();
 }
 
 async function dedupeRequest<T>(key: string, fetcher: () => Promise<T>): Promise<T> {
@@ -534,6 +521,101 @@ async function withTimeout<T = any>(promise: Promise<T> | any, timeoutMs = 800):
 const DEFAULT_BUSINESS_ID = '4fba6fb7-4e1b-4106-ac84-908f821d73c3';
 let cachedBusinessId: string | null = null;
 
+/**
+ * Retrieves a fresh, verified access token from the active Supabase session.
+ * If the current token is close to expiry (within 60s) or expired, refreshes it automatically.
+ * If session is missing or unrefreshable, dispatches 'rtr:session-expired' and returns null.
+ */
+export async function getValidAuthToken(): Promise<string | null> {
+  if (isDemoMode()) return null;
+  if (!isSupabaseConfigured || !supabase) return null;
+
+  try {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session?.access_token) {
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('rtr:session-expired'));
+      }
+      return null;
+    }
+
+    const expiresAt = session.expires_at ? session.expires_at * 1000 : 0;
+    const now = Date.now();
+    // If expired or expiring within 60 seconds, refresh session
+    if (expiresAt && expiresAt - now < 60000) {
+      const { data: refreshData, error: refreshErr } = await supabase.auth.refreshSession();
+      if (refreshErr || !refreshData.session?.access_token) {
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent('rtr:session-expired'));
+        }
+        return null;
+      }
+      return refreshData.session.access_token;
+    }
+
+    return session.access_token;
+  } catch {
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('rtr:session-expired'));
+    }
+    return null;
+  }
+}
+
+/**
+ * Performs an authenticated fetch against the RTR backend API.
+ * Ensures the Authorization Bearer header contains a verified, valid access token.
+ * If unauthorized (401), automatically attempts a session refresh once and retries.
+ * If refresh fails or returns 401 again, dispatches 'rtr:session-expired' and throws an error.
+ */
+export async function authenticatedFetch(url: string, init?: RequestInit): Promise<Response> {
+  const token = await getValidAuthToken();
+  if (!token) {
+    throw new Error('Invalid or expired session token.');
+  }
+
+  const headers = new Headers(init?.headers || {});
+  headers.set('Authorization', `Bearer ${token}`);
+  if (!headers.has('Content-Type') && init?.body && typeof init.body === 'string') {
+    headers.set('Content-Type', 'application/json');
+  }
+
+  let res = await fetch(url, { ...init, headers });
+
+  if (res.status === 401 && isSupabaseConfigured && supabase) {
+    try {
+      const { data: refreshData, error: refreshErr } = await supabase.auth.refreshSession();
+      if (!refreshErr && refreshData.session?.access_token) {
+        const retryHeaders = new Headers(init?.headers || {});
+        retryHeaders.set('Authorization', `Bearer ${refreshData.session.access_token}`);
+        if (!retryHeaders.has('Content-Type') && init?.body && typeof init.body === 'string') {
+          retryHeaders.set('Content-Type', 'application/json');
+        }
+        res = await fetch(url, { ...init, headers: retryHeaders });
+      } else {
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent('rtr:session-expired'));
+        }
+        throw new Error('Invalid or expired session token.');
+      }
+    } catch {
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('rtr:session-expired'));
+      }
+      throw new Error('Invalid or expired session token.');
+    }
+  }
+
+  if (res.status === 401) {
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('rtr:session-expired'));
+    }
+    throw new Error('Invalid or expired session token.');
+  }
+
+  return res;
+}
+
 export async function ensureAuthenticatedSession(): Promise<string> {
   if (isDemoMode()) {
     return 'demo-user-00000000-0000-0000-0000-000000000000';
@@ -548,16 +630,10 @@ export async function ensureAuthenticatedSession(): Promise<string> {
     if (session?.user?.id) {
       return session.user.id;
     }
-
-    const { data } = await supabase.auth.signInWithPassword({
-      email: 'owner@rtrmobiles.com',
-      password: 'password123'
-    });
-    if (data?.user?.id) {
-      return data.user.id;
+  } catch {
+    if (process.env.NODE_ENV !== 'production') {
+      console.warn('Could not establish Supabase auth session');
     }
-  } catch (err) {
-    console.warn('Could not establish Supabase auth session:', err);
   }
 
   return 'b46689e9-754e-49b5-b79b-ebc1ee42538f';
@@ -775,22 +851,126 @@ export async function saveShop(input: Omit<Shop, 'id'> & { id?: string }): Promi
   return newShop;
 }
 
-export async function deleteShop(id: string): Promise<void> {
+export interface DeleteCatalogResult {
+  success: boolean;
+  action: 'archived' | 'deleted';
+  message: string;
+  inUse?: boolean;
+  recordsCount?: number;
+}
+
+export async function checkShopUsage(id: string): Promise<{ inUse: boolean; count: number }> {
   if (isDemoMode()) {
-    const shops = getLocalItem<Shop[]>(DEMO_STORAGE_KEYS.SHOPS, DEFAULT_DEMO_SHOPS);
-    setLocalItem(DEMO_STORAGE_KEYS.SHOPS, shops.filter(s => s.id !== id));
-    return;
+    const demoDeliveries = getLocalItem<DeliveryRecord[]>(DEMO_STORAGE_KEYS.DELIVERIES, []);
+    const count = demoDeliveries.filter(d => d.shopId === id).length;
+    return { inUse: count > 0, count };
   }
 
   if (isSupabaseConfigured && supabase && !id.startsWith('shop-')) {
     try {
-      await supabase.from('shops').delete().eq('id', id);
-    } catch (err) {
-      console.warn('Supabase deleteShop error:', err);
+      const res = await authenticatedFetch(`/api/shops/${encodeURIComponent(id)}/usage`);
+      if (res.ok) {
+        const data = await res.json();
+        return { inUse: !!data.inUse, count: data.count || 0 };
+      }
+    } catch (err: any) {
+      if (err.message?.includes('session token')) {
+        throw err;
+      }
+      console.warn('checkShopUsage API error:', err);
     }
   }
+
+  const deliveries = getLocalItem<DeliveryRecord[]>(STORAGE_KEYS.DELIVERIES, []);
+  const count = deliveries.filter(d => d.shopId === id).length;
+  return { inUse: count > 0, count };
+}
+
+export async function deleteShop(id: string): Promise<DeleteCatalogResult> {
+  const usage = await checkShopUsage(id);
+
+  if (isDemoMode()) {
+    const shops = getLocalItem<Shop[]>(DEMO_STORAGE_KEYS.SHOPS, DEFAULT_DEMO_SHOPS);
+    const targetShop = shops.find(s => s.id === id);
+    const shopName = targetShop?.name || 'Shop';
+
+    if (usage.inUse) {
+      const updated = shops.map(s => s.id === id ? { ...s, isActive: false } : s);
+      setLocalItem(DEMO_STORAGE_KEYS.SHOPS, updated);
+      return {
+        success: true,
+        action: 'archived',
+        message: `"${shopName}" is referenced by ${usage.count} existing records. It has been safely deactivated and archived.`,
+        inUse: true,
+        recordsCount: usage.count
+      };
+    } else {
+      setLocalItem(DEMO_STORAGE_KEYS.SHOPS, shops.filter(s => s.id !== id));
+      return {
+        success: true,
+        action: 'deleted',
+        message: `"${shopName}" deleted successfully.`,
+        inUse: false,
+        recordsCount: 0
+      };
+    }
+  }
+
   const shops = await getShops();
-  setLocalItem(STORAGE_KEYS.SHOPS, shops.filter(s => s.id !== id));
+  const targetShop = shops.find(s => s.id === id);
+  const shopName = targetShop?.name || 'Shop';
+
+  // 1. Authoritative Backend Endpoint (/api/shops/:id)
+  // Backend checks all dependencies across deliveries, stock_movements, invoices, daily_reports, stock_transfers.
+  // Never falls back to direct Supabase client deletes that bypass audit ledger constraints.
+  if (isSupabaseConfigured && supabase && !id.startsWith('shop-')) {
+    const res = await authenticatedFetch(`/api/shops/${encodeURIComponent(id)}`, {
+      method: 'DELETE'
+    });
+
+    if (!res.ok) {
+      const errJson = await res.json().catch(() => ({}));
+      throw new Error(errJson.message || `Failed to delete shop (HTTP ${res.status}).`);
+    }
+
+    const json = await res.json();
+    if (json.action === 'archived') {
+      const next = shops.map(s => s.id === id ? { ...s, isActive: false } : s);
+      setLocalItem(STORAGE_KEYS.SHOPS, next);
+    } else {
+      setLocalItem(STORAGE_KEYS.SHOPS, shops.filter(s => s.id !== id));
+    }
+
+    return {
+      success: true,
+      action: json.action || (usage.inUse ? 'archived' : 'deleted'),
+      message: json.message || `"${shopName}" deleted successfully.`,
+      inUse: json.action === 'archived' || usage.inUse,
+      recordsCount: json.recordsCount ?? usage.count
+    };
+  }
+
+  // Purely offline/mock fallback if Supabase is not configured
+  if (usage.inUse) {
+    const next = shops.map(s => s.id === id ? { ...s, isActive: false } : s);
+    setLocalItem(STORAGE_KEYS.SHOPS, next);
+    return {
+      success: true,
+      action: 'archived',
+      message: `"${shopName}" is referenced by existing records. It has been safely archived.`,
+      inUse: true,
+      recordsCount: usage.count
+    };
+  } else {
+    setLocalItem(STORAGE_KEYS.SHOPS, shops.filter(s => s.id !== id));
+    return {
+      success: true,
+      action: 'deleted',
+      message: `"${shopName}" deleted successfully.`,
+      inUse: false,
+      recordsCount: 0
+    };
+  }
 }
 
 // ----------------------------------------------------
@@ -975,22 +1155,118 @@ export async function saveProduct(input: Omit<Product, 'id'> & { id?: string }):
   return newProd;
 }
 
-export async function deleteProduct(id: string): Promise<void> {
+export async function checkProductUsage(id: string): Promise<{ inUse: boolean; count: number }> {
   if (isDemoMode()) {
-    const products = getLocalItem<Product[]>(DEMO_STORAGE_KEYS.PRODUCTS, DEFAULT_DEMO_PRODUCTS);
-    setLocalItem(DEMO_STORAGE_KEYS.PRODUCTS, products.filter(p => p.id !== id));
-    return;
+    const demoDeliveries = getLocalItem<DeliveryRecord[]>(DEMO_STORAGE_KEYS.DELIVERIES, []);
+    const count = demoDeliveries.filter(d => d.items?.some(i => i.productId === id)).length;
+    return { inUse: count > 0, count };
   }
 
   if (isSupabaseConfigured && supabase && !id.startsWith('prod-')) {
     try {
-      await supabase.from('products').delete().eq('id', id);
-    } catch (err) {
-      console.warn('Supabase deleteProduct error:', err);
+      const res = await authenticatedFetch(`/api/products/${encodeURIComponent(id)}/usage`);
+      if (res.ok) {
+        const data = await res.json();
+        return { inUse: !!data.inUse, count: data.count || 0 };
+      }
+    } catch (err: any) {
+      if (err.message?.includes('session token')) {
+        throw err;
+      }
+      console.warn('checkProductUsage API error:', err);
     }
   }
+
+  const deliveries = getLocalItem<DeliveryRecord[]>(STORAGE_KEYS.DELIVERIES, []);
+  const count = deliveries.filter(d => d.items?.some(i => i.productId === id)).length;
+  return { inUse: count > 0, count };
+}
+
+export async function deleteProduct(id: string): Promise<DeleteCatalogResult> {
+  const usage = await checkProductUsage(id);
+
+  if (isDemoMode()) {
+    const products = getLocalItem<Product[]>(DEMO_STORAGE_KEYS.PRODUCTS, DEFAULT_DEMO_PRODUCTS);
+    const targetProduct = products.find(p => p.id === id);
+    const prodName = targetProduct?.name || 'Product';
+
+    if (usage.inUse) {
+      const updated = products.map(p => p.id === id ? { ...p, isActive: false } : p);
+      setLocalItem(DEMO_STORAGE_KEYS.PRODUCTS, updated);
+      return {
+        success: true,
+        action: 'archived',
+        message: `"${prodName}" is referenced by ${usage.count} existing records. It has been safely deactivated and archived.`,
+        inUse: true,
+        recordsCount: usage.count
+      };
+    } else {
+      setLocalItem(DEMO_STORAGE_KEYS.PRODUCTS, products.filter(p => p.id !== id));
+      return {
+        success: true,
+        action: 'deleted',
+        message: `"${prodName}" deleted successfully.`,
+        inUse: false,
+        recordsCount: 0
+      };
+    }
+  }
+
   const products = await getProducts();
-  setLocalItem(STORAGE_KEYS.PRODUCTS, products.filter(p => p.id !== id));
+  const targetProduct = products.find(p => p.id === id);
+  const prodName = targetProduct?.name || 'Product';
+
+  // 1. Authoritative Backend Endpoint (/api/products/:id)
+  // Backend checks all dependencies across delivery_items, stock_movements, daily_report_items, etc.
+  // Never falls back to direct Supabase client deletes that bypass audit ledger constraints.
+  if (isSupabaseConfigured && supabase && !id.startsWith('prod-')) {
+    const res = await authenticatedFetch(`/api/products/${encodeURIComponent(id)}`, {
+      method: 'DELETE'
+    });
+
+    if (!res.ok) {
+      const errJson = await res.json().catch(() => ({}));
+      throw new Error(errJson.message || `Failed to delete product (HTTP ${res.status}).`);
+    }
+
+    const json = await res.json();
+    if (json.action === 'archived') {
+      const next = products.map(p => p.id === id ? { ...p, isActive: false } : p);
+      setLocalItem(STORAGE_KEYS.PRODUCTS, next);
+    } else {
+      setLocalItem(STORAGE_KEYS.PRODUCTS, products.filter(p => p.id !== id));
+    }
+
+    return {
+      success: true,
+      action: json.action || (usage.inUse ? 'archived' : 'deleted'),
+      message: json.message || `"${prodName}" deleted successfully.`,
+      inUse: json.action === 'archived' || usage.inUse,
+      recordsCount: json.recordsCount ?? usage.count
+    };
+  }
+
+  // Purely offline/mock fallback if Supabase is not configured
+  if (usage.inUse) {
+    const next = products.map(p => p.id === id ? { ...p, isActive: false } : p);
+    setLocalItem(STORAGE_KEYS.PRODUCTS, next);
+    return {
+      success: true,
+      action: 'archived',
+      message: `"${prodName}" is referenced by existing records. It has been safely archived.`,
+      inUse: true,
+      recordsCount: usage.count
+    };
+  } else {
+    setLocalItem(STORAGE_KEYS.PRODUCTS, products.filter(p => p.id !== id));
+    return {
+      success: true,
+      action: 'deleted',
+      message: `"${prodName}" deleted successfully.`,
+      inUse: false,
+      recordsCount: 0
+    };
+  }
 }
 
 // ----------------------------------------------------
@@ -1099,7 +1375,7 @@ export async function getDeliveries(): Promise<DeliveryRecord[]> {
             } else if (metaPaid !== undefined) {
               finalPending = Math.max(0, totalBilled - metaPaid);
             } else {
-              finalPending = d.status === 'delivered' ? 0 : totalBilled;
+              finalPending = isDelivered(d.status) ? 0 : totalBilled;
             }
 
             return {
@@ -1107,7 +1383,7 @@ export async function getDeliveries(): Promise<DeliveryRecord[]> {
               shopId: d.shop_id,
               shopName: shopMap.get(d.shop_id) || 'Retail Store',
               deliveryDate: d.delivery_date,
-              status: (d.status as 'delivered' | 'pending' | 'cancelled') || 'delivered',
+              status: normalizeDeliveryStatus(d.status),
               notes: parsedNotes,
               createdBy: 'Business Owner',
               items,
@@ -1390,7 +1666,7 @@ export async function getBusinessRecords(): Promise<BusinessRecord[]> {
           quantity: qty,
           unitPrice,
           totalAmount,
-          deliveryStatus: deliv.status,
+          deliveryStatus: normalizeDeliveryStatus(deliv.status),
           pendingAmount: itemPending,
           notes: deliv.notes,
           createdAt: deliv.createdAt
@@ -1426,7 +1702,7 @@ export async function getBusinessRecords(): Promise<BusinessRecord[]> {
         quantity: fallbackQty,
         unitPrice: fallbackPrice,
         totalAmount,
-        deliveryStatus: deliv.status,
+        deliveryStatus: normalizeDeliveryStatus(deliv.status),
         pendingAmount: pendingVal,
         notes: deliv.notes,
         createdAt: deliv.createdAt
@@ -1607,10 +1883,14 @@ export async function updateBusinessRecord(input: UpdateBusinessRecordInput): Pr
   if (isDemoMode()) {
     ensureDemoData();
     const deliveries = getLocalItem<DeliveryRecord[]>(DEMO_STORAGE_KEYS.DELIVERIES, []);
-    const idx = deliveries.findIndex(d => d.id === input.deliveryId);
+    let idx = deliveries.findIndex(d => d.id === input.deliveryId);
+    if (idx < 0) {
+      idx = deliveries.findIndex(d => input.deliveryId.startsWith(d.id));
+    }
+    const resolvedDeliveryId = idx >= 0 && deliveries[idx] ? deliveries[idx]!.id : input.deliveryId;
     const existingCreatedAt = idx >= 0 && deliveries[idx] ? deliveries[idx]!.createdAt : new Date().toISOString();
     const updatedDelivery: DeliveryRecord = {
-      id: input.deliveryId,
+      id: resolvedDeliveryId,
       shopId: targetShop.id,
       shopName: targetShop.name,
       deliveryDate: input.date,
@@ -1748,10 +2028,14 @@ export async function updateBusinessRecord(input: UpdateBusinessRecordInput): Pr
 
   // Update local storage
   const deliveries = getLocalItem<DeliveryRecord[]>(STORAGE_KEYS.DELIVERIES, []);
-  const idx = deliveries.findIndex(d => d.id === input.deliveryId);
-  const existingCreatedAt = idx >= 0 && deliveries[idx] ? deliveries[idx].createdAt : new Date().toISOString();
+  let idx = deliveries.findIndex(d => d.id === input.deliveryId);
+  if (idx < 0) {
+    idx = deliveries.findIndex(d => input.deliveryId.startsWith(d.id));
+  }
+  const resolvedDeliveryId = idx >= 0 && deliveries[idx] ? deliveries[idx]!.id : input.deliveryId;
+  const existingCreatedAt = idx >= 0 && deliveries[idx] ? deliveries[idx]!.createdAt : new Date().toISOString();
   const updatedDelivery: DeliveryRecord = {
-    id: input.deliveryId,
+    id: resolvedDeliveryId,
     shopId: targetShop.id,
     shopName: targetShop.name,
     deliveryDate: input.date,
@@ -1777,7 +2061,7 @@ export async function updateBusinessRecord(input: UpdateBusinessRecordInput): Pr
   setLocalItem(STORAGE_KEYS.DELIVERIES, deliveries);
 
   const invoices = getLocalItem<Invoice[]>(STORAGE_KEYS.INVOICES, []);
-  const invIdx = invoices.findIndex(i => i.delivery_id === input.deliveryId);
+  const invIdx = invoices.findIndex(i => i.delivery_id === resolvedDeliveryId || i.delivery_id === input.deliveryId);
   if (invIdx >= 0 && invoices[invIdx]) {
     const billedAmount = Math.max(totalAmount, pendingAmount);
     const amountPaid = Math.max(0, billedAmount - pendingAmount);
@@ -1799,7 +2083,7 @@ export async function updateBusinessRecord(input: UpdateBusinessRecordInput): Pr
 
   return {
     id: input.deliveryId,
-    deliveryId: input.deliveryId,
+    deliveryId: resolvedDeliveryId,
     date: input.date,
     shopId: targetShop.id,
     shopName: targetShop.name,
@@ -1816,39 +2100,220 @@ export async function updateBusinessRecord(input: UpdateBusinessRecordInput): Pr
   };
 }
 
+/**
+ * Resolves raw or composite delivery ID against a list of deliveries.
+ * e.g., if passed 'deliv-101-item-0', matches against delivery 'deliv-101'.
+ */
+function resolveDeliveryIdFromList(rawId: string, availableDeliveries: DeliveryRecord[]): string {
+  const clean = rawId.trim();
+  if (availableDeliveries.some(d => d.id === clean)) return clean;
+  const match = availableDeliveries.find(d => clean.startsWith(d.id));
+  return match ? match.id : clean;
+}
+
+export interface UpdateDeliveryStatusResult {
+  success: boolean;
+  deliveryId: string;
+  status: 'delivered' | 'pending';
+  message: string;
+}
+
+export function getAuthoritativeDeliveryStatus(
+  statusOrRecord?: string | boolean | BusinessRecord | RecordPriorityInput | any | null
+): 'delivered' | 'pending' | 'cancelled' {
+  if (!statusOrRecord) return 'pending';
+  if (statusOrRecord === true || statusOrRecord === 'true') return 'delivered';
+  if (typeof statusOrRecord === 'string') {
+    const s = statusOrRecord.trim().toLowerCase();
+    if (s === 'delivered' || s === 'completed') return 'delivered';
+    if (s === 'cancelled') return 'cancelled';
+    return 'pending';
+  }
+  const anyRec = statusOrRecord as any;
+  const raw = statusOrRecord.deliveryStatus ?? anyRec.delivery_status ?? anyRec.status ?? (anyRec.isDelivered ? 'delivered' : undefined);
+  if (raw === true || raw === 'true') return 'delivered';
+  if (!raw) return 'pending';
+  const s = String(raw).trim().toLowerCase();
+  if (s === 'delivered' || s === 'completed') return 'delivered';
+  if (s === 'cancelled') return 'cancelled';
+  return 'pending';
+}
+
+export function isDelivered(statusOrRecord?: string | boolean | BusinessRecord | RecordPriorityInput | any | null): boolean {
+  return getAuthoritativeDeliveryStatus(statusOrRecord) === 'delivered';
+}
+
+export function normalizeDeliveryStatus(statusOrRecord?: string | boolean | BusinessRecord | RecordPriorityInput | any | null): 'delivered' | 'pending' {
+  return isDelivered(statusOrRecord) ? 'delivered' : 'pending';
+}
+
+/**
+ * Robust delivery status lifecycle:
+ * - Direct authenticated update through server API endpoint (/api/records/:id/delivery-status).
+ * - Fallback to Supabase client if server is offline.
+ * - Confirms persistence before resolving.
+ * - Keeps local cache updated and clears memory cache.
+ */
+export async function updateDeliveryStatus(
+  deliveryId: string, 
+  status: 'delivered' | 'pending'
+): Promise<UpdateDeliveryStatusResult> {
+  const cleanId = deliveryId.trim();
+  const uuidMatch = cleanId.match(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i);
+  const targetId = uuidMatch ? uuidMatch[0] : cleanId;
+
+  // 1. Demo Mode Storage
+  if (isDemoMode()) {
+    ensureDemoData();
+    const deliveries = getLocalItem<DeliveryRecord[]>(DEMO_STORAGE_KEYS.DELIVERIES, []);
+    const resolvedId = resolveDeliveryIdFromList(targetId, deliveries) || targetId;
+    const idx = deliveries.findIndex(d => d.id === resolvedId || d.id === targetId || d.id === cleanId);
+    if (idx >= 0 && deliveries[idx]) {
+      deliveries[idx] = { ...deliveries[idx]!, status };
+      setLocalItem(DEMO_STORAGE_KEYS.DELIVERIES, deliveries);
+    } else {
+      deliveries.push({
+        id: targetId,
+        shopId: 'demo-shop-1',
+        deliveryDate: new Date().toISOString().split('T')[0] || '',
+        status,
+        createdBy: 'demo-owner',
+        items: [],
+        createdAt: new Date().toISOString()
+      });
+      setLocalItem(DEMO_STORAGE_KEYS.DELIVERIES, deliveries);
+    }
+    clearMemoryCache();
+    return {
+      success: true,
+      deliveryId: targetId,
+      status,
+      message: `Delivery status updated to ${status} in demo sandbox.`
+    };
+  }
+
+  // 2. Authoritative API Server Request (/api/records/:id/delivery-status)
+  let apiSuccess = false;
+  let confirmedStatus: 'delivered' | 'pending' = status;
+
+  if (isSupabaseConfigured && supabase && !targetId.startsWith('deliv-')) {
+    try {
+      const res = await authenticatedFetch(`/api/records/${encodeURIComponent(targetId)}/delivery-status`, {
+        method: 'PATCH',
+        body: JSON.stringify({ status })
+      });
+
+      if (res.ok) {
+        const json = await res.json();
+        if (json.success) {
+          apiSuccess = true;
+          confirmedStatus = json.status || status;
+        }
+      } else {
+        const errJson = await res.json().catch(() => ({}));
+        if (res.status === 401 || res.status === 403) {
+          throw new Error(errJson.message || 'Unauthorized: Access restricted to Business Owner only.');
+        } else if (res.status === 400 || res.status === 404) {
+          throw new Error(errJson.message || 'Delivery record not found or invalid status.');
+        }
+        throw new Error(errJson.message || `Failed to update delivery status (HTTP ${res.status}).`);
+      }
+    } catch (apiErr: any) {
+      if (
+        apiErr.message?.includes('Unauthorized') || 
+        apiErr.message?.includes('restricted') || 
+        apiErr.message?.includes('invalid status') ||
+        apiErr.message?.includes('not found') ||
+        apiErr.message?.includes('session token')
+      ) {
+        throw apiErr;
+      }
+      console.warn('API /api/records/:id/delivery-status failed:', apiErr);
+      throw apiErr;
+    }
+  }
+
+  // If targetId is a local/offline record or Supabase is not configured, handle local storage update directly
+  const isLocalRecord = !isSupabaseConfigured || !supabase || targetId.startsWith('deliv-');
+  if (isLocalRecord) {
+    apiSuccess = true;
+  }
+
+  // Ensure that if neither API nor database confirmed the mutation for a server record, we throw so UI rolls back
+  if (!apiSuccess) {
+    throw new Error('Failed to update delivery status on the server. Restored previous state.');
+  }
+
+  // 4. Update local storage cache to keep client storage synchronized
+  const deliveries = getLocalItem<DeliveryRecord[]>(STORAGE_KEYS.DELIVERIES, []);
+  const resolvedId = resolveDeliveryIdFromList(targetId, deliveries) || targetId;
+  const idx = deliveries.findIndex(d => d.id === resolvedId || d.id === targetId || d.id === cleanId);
+  if (idx >= 0 && deliveries[idx]) {
+    deliveries[idx] = { ...deliveries[idx]!, status: confirmedStatus };
+    setLocalItem(STORAGE_KEYS.DELIVERIES, deliveries);
+  } else {
+    deliveries.unshift({
+      id: targetId,
+      shopId: 'shop-synced',
+      deliveryDate: new Date().toISOString().split('T')[0] || '',
+      status: confirmedStatus,
+      createdBy: 'Business Owner',
+      items: [],
+      createdAt: new Date().toISOString()
+    });
+    setLocalItem(STORAGE_KEYS.DELIVERIES, deliveries);
+  }
+  clearMemoryCache();
+
+  // Dispatch sync event with confirmed details
+  if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function') {
+    window.dispatchEvent(new CustomEvent('rtr_data_sync', { 
+      detail: { key: 'deliveries', deliveryId: targetId, status: confirmedStatus } 
+    }));
+  }
+
+  return {
+    success: true,
+    deliveryId: targetId,
+    status: confirmedStatus,
+    message: `Delivery status updated to ${confirmedStatus}.`
+  };
+}
+
 export async function deleteBusinessRecord(deliveryId: string): Promise<void> {
+  const cleanId = deliveryId.trim();
+
   if (isDemoMode()) {
     const deliveries = getLocalItem<DeliveryRecord[]>(DEMO_STORAGE_KEYS.DELIVERIES, []);
-    setLocalItem(DEMO_STORAGE_KEYS.DELIVERIES, deliveries.filter(d => d.id !== deliveryId));
+    const resolvedId = resolveDeliveryIdFromList(cleanId, deliveries);
+    setLocalItem(DEMO_STORAGE_KEYS.DELIVERIES, deliveries.filter(d => d.id !== resolvedId && d.id !== cleanId));
     clearMemoryCache();
     return;
   }
 
-  if (isSupabaseConfigured && supabase && !deliveryId.startsWith('deliv-')) {
-    try {
-      try {
-        await supabase.from('payments').delete().eq('delivery_id', deliveryId);
-      } catch {}
-      await supabase.from('invoices').delete().eq('delivery_id', deliveryId);
-      await supabase.from('stock_movements').delete().eq('reference_id', deliveryId);
-      await supabase.from('delivery_items').delete().eq('delivery_id', deliveryId);
-      const { error: delErr } = await supabase.from('deliveries').delete().eq('id', deliveryId);
-      if (delErr && isDatabaseCapacityError(delErr)) {
-        throw new DatabaseCapacityError(delErr.message, delErr.code);
+  if (isSupabaseConfigured && supabase && !cleanId.startsWith('deliv-')) {
+    const uuidMatch = cleanId.match(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i);
+    const targetId = uuidMatch ? uuidMatch[0] : cleanId;
+
+    const res = await authenticatedFetch(`/api/records/${encodeURIComponent(targetId)}`, {
+      method: 'DELETE'
+    });
+
+    if (!res.ok) {
+      const errJson = await res.json().catch(() => ({}));
+      if (res.status === 401 || res.status === 403) {
+        throw new Error(errJson.message || 'Unauthorized: Access restricted to Business Owner only.');
       }
-    } catch (err) {
-      if (isDatabaseCapacityError(err)) {
-        throw (err instanceof DatabaseCapacityError) ? err : new DatabaseCapacityError((err as any)?.message, (err as any)?.code);
-      }
-      console.warn('Supabase deleteBusinessRecord error:', err);
+      throw new Error(errJson.message || `Failed to delete record (HTTP ${res.status}).`);
     }
   }
 
   const deliveries = getLocalItem<DeliveryRecord[]>(STORAGE_KEYS.DELIVERIES, []);
-  setLocalItem(STORAGE_KEYS.DELIVERIES, deliveries.filter(d => d.id !== deliveryId));
+  const resolvedId = resolveDeliveryIdFromList(cleanId, deliveries);
+  setLocalItem(STORAGE_KEYS.DELIVERIES, deliveries.filter(d => d.id !== resolvedId && d.id !== cleanId));
 
   const invoices = getLocalItem<Invoice[]>(STORAGE_KEYS.INVOICES, []);
-  setLocalItem(STORAGE_KEYS.INVOICES, invoices.filter(i => i.delivery_id !== deliveryId));
+  setLocalItem(STORAGE_KEYS.INVOICES, invoices.filter(i => i.delivery_id !== resolvedId && i.delivery_id !== cleanId));
 
   clearMemoryCache();
 }

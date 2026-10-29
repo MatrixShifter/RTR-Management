@@ -8,12 +8,9 @@ import {
   WifiOff, 
   Menu, 
   X,
-  ChevronsUpDown,
   ChevronDown,
-  MoreVertical,
-  RotateCcw
+  MoreVertical
 } from 'lucide-react';
-import { resetDemoData } from '../services/db.js';
 
 interface NavbarProps {
   userRole?: 'owner' | 'demo';
@@ -120,8 +117,15 @@ export const Navbar: React.FC<NavbarProps> = ({
             </div>
 
             <Link to="/" className="flex items-center space-x-2.5 py-1">
-              <div className="w-8 h-8 rounded-lg bg-crimpston-electric bg-[#168BFF] flex items-center justify-center font-black text-white text-xs tracking-wider shadow-sm flex-shrink-0">
-                RTR
+              <div className="w-8 h-8 rounded-lg bg-crimpston-electric bg-[#168BFF] flex items-center justify-center font-black text-white text-xs tracking-wider shadow-sm flex-shrink-0 overflow-hidden p-0.5">
+                <img 
+                  src="/rtr-logo.png" 
+                  alt="RTR Mobiles logo" 
+                  className="w-full h-full object-contain"
+                  width="32"
+                  height="32"
+                  loading="eager"
+                />
               </div>
               <div className="flex flex-col">
                 <span className="font-extrabold text-sm sm:text-base tracking-tight text-white leading-tight">
@@ -135,35 +139,24 @@ export const Navbar: React.FC<NavbarProps> = ({
             </Link>
           </div>
 
-          {/* Right: Desktop Demo indicator & User profile menu */}
+          {/* Right: Desktop Live indicator & User profile menu */}
           <div className="hidden lg:flex items-center space-x-4">
-            {/* Demo indicator pill */}
-            {userRole === 'demo' ? (
-              <div 
-                className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#082922] border border-[#10B981]/40 text-[#10B981] text-xs font-semibold select-none cursor-default shadow-2xs"
-                title="Operating in isolated Demo Sandbox mode"
-              >
-                <span>Demo</span>
-                <ChevronsUpDown className="w-3.5 h-3.5 text-[#10B981]" />
-              </div>
-            ) : (
-              <div 
-                className="flex items-center space-x-1.5 px-2.5 py-1 rounded-full bg-[#152744]/80 text-[11px] border border-[#233B60]"
-                title={isOnline ? "System connected and live" : "Working in offline mode"}
-              >
-                {isOnline ? (
-                  <>
-                    <Wifi className="w-3 h-3 text-emerald-400 flex-shrink-0" />
-                    <span className="text-slate-200 font-medium">Live</span>
-                  </>
-                ) : (
-                  <>
-                    <WifiOff className="w-3 h-3 text-amber-400 flex-shrink-0" />
-                    <span className="text-amber-300 font-semibold">Offline</span>
-                  </>
-                )}
-              </div>
-            )}
+            <div 
+              className="flex items-center space-x-1.5 px-2.5 py-1 rounded-full bg-[#152744]/80 text-[11px] border border-[#233B60]"
+              title={isOnline ? "System connected and live" : "Working in offline mode"}
+            >
+              {isOnline ? (
+                <>
+                  <Wifi className="w-3 h-3 text-emerald-400 flex-shrink-0" />
+                  <span className="text-slate-200 font-medium">Live</span>
+                </>
+              ) : (
+                <>
+                  <WifiOff className="w-3 h-3 text-amber-400 flex-shrink-0" />
+                  <span className="text-amber-300 font-semibold">Offline</span>
+                </>
+              )}
+            </div>
 
             {/* Authenticated user menu */}
             <div className="relative user-dropdown-container">
@@ -175,10 +168,10 @@ export const Navbar: React.FC<NavbarProps> = ({
                 aria-expanded={userMenuOpen}
               >
                 <div className="w-8 h-8 rounded-full bg-[#7DD3FC] text-[#0C1E38] font-bold text-xs flex items-center justify-center flex-shrink-0 shadow-xs">
-                  {userName ? userName.charAt(0).toUpperCase() : 'D'}
+                  {userName ? userName.charAt(0).toUpperCase() : 'B'}
                 </div>
                 <span className="text-xs sm:text-sm font-medium text-white max-w-[130px] truncate">
-                  {userName || 'Demo Owner'}
+                  {userName || 'Business Owner'}
                 </span>
                 <ChevronDown className="w-3.5 h-3.5 text-slate-300" />
               </button>
@@ -186,7 +179,7 @@ export const Navbar: React.FC<NavbarProps> = ({
               {userMenuOpen && (
                 <div className="absolute right-0 mt-2 w-56 bg-[#0C1E38] text-white border border-[#1F3A60] rounded-xl shadow-xl py-2 z-50 animate-fade-in text-xs">
                   <div className="px-3.5 py-2 border-b border-[#1F3A60]/80">
-                    <p className="font-semibold text-white truncate">{userName || 'Demo Owner'}</p>
+                    <p className="font-semibold text-white truncate">{userName || 'Business Owner'}</p>
                     <span className="inline-block mt-1 px-2 py-0.5 rounded text-[10px] font-bold bg-[#168BFF]/20 text-[#7DD3FC]">
                       {userRole.toUpperCase()}
                     </span>
@@ -200,20 +193,6 @@ export const Navbar: React.FC<NavbarProps> = ({
                       <Settings className="w-4 h-4 text-slate-400" />
                       <span>Settings</span>
                     </Link>
-                    {userRole === 'demo' && (
-                      <button
-                        type="button"
-                        onClick={async () => {
-                          setUserMenuOpen(false);
-                          resetDemoData();
-                          window.location.reload();
-                        }}
-                        className="w-full flex items-center gap-2.5 px-3.5 py-2 hover:bg-[#152744] text-amber-300 transition-colors text-left cursor-pointer"
-                      >
-                        <RotateCcw className="w-4 h-4 text-amber-400" />
-                        <span>Reset Demo Data</span>
-                      </button>
-                    )}
                   </div>
                   <div className="border-t border-[#1F3A60]/80 pt-1">
                     <button
@@ -233,23 +212,15 @@ export const Navbar: React.FC<NavbarProps> = ({
             </div>
           </div>
 
-          {/* Right: Mobile Demo indicator & 3-dot menu */}
+          {/* Right: Mobile Live indicator & 3-dot menu */}
           <div className="lg:hidden flex items-center space-x-2">
-            {userRole === 'demo' ? (
-              <div 
-                className="flex items-center px-2.5 py-1 rounded-full bg-[#082922] border border-[#10B981]/40 text-[#10B981] text-[11px] font-semibold select-none"
-              >
-                <span>Demo</span>
-              </div>
-            ) : (
-              <div 
-                className="flex items-center space-x-1.5 px-2.5 py-1 rounded-full bg-[#152744]/80 text-[11px] border border-[#233B60]"
-                title={isOnline ? "System connected and live" : "Working in offline mode"}
-              >
-                <span className={`w-1.5 h-1.5 rounded-full ${isOnline ? 'bg-emerald-400' : 'bg-amber-400'}`} />
-                <span className="text-slate-200">{isOnline ? 'Live' : 'Offline'}</span>
-              </div>
-            )}
+            <div 
+              className="flex items-center space-x-1.5 px-2.5 py-1 rounded-full bg-[#152744]/80 text-[11px] border border-[#233B60]"
+              title={isOnline ? "System connected and live" : "Working in offline mode"}
+            >
+              <span className={`w-1.5 h-1.5 rounded-full ${isOnline ? 'bg-emerald-400' : 'bg-amber-400'}`} />
+              <span className="text-slate-200">{isOnline ? 'Live' : 'Offline'}</span>
+            </div>
 
             {/* 3-dot overflow menu for mobile */}
             <div className="relative user-dropdown-container">
@@ -265,7 +236,7 @@ export const Navbar: React.FC<NavbarProps> = ({
               {userMenuOpen && (
                 <div className="absolute right-0 mt-1 w-52 bg-[#0C1E38] text-white border border-[#1F3A60] rounded-xl shadow-xl py-2 z-50 animate-fade-in text-xs">
                   <div className="px-3 py-1.5 border-b border-[#1F3A60]/80">
-                    <p className="font-semibold text-white truncate">{userName || 'Demo Owner'}</p>
+                    <p className="font-semibold text-white truncate">{userName || 'Business Owner'}</p>
                     <span className="text-[10px] text-[#7DD3FC] font-semibold">{userRole.toUpperCase()}</span>
                   </div>
                   <Link
@@ -276,20 +247,6 @@ export const Navbar: React.FC<NavbarProps> = ({
                     <Settings className="w-4 h-4 text-slate-400" />
                     <span>Settings</span>
                   </Link>
-                  {userRole === 'demo' && (
-                    <button
-                      type="button"
-                      onClick={async () => {
-                        setUserMenuOpen(false);
-                        resetDemoData();
-                        window.location.reload();
-                      }}
-                      className="w-full flex items-center gap-2.5 px-3 py-2 hover:bg-[#152744] text-amber-300 text-left cursor-pointer"
-                    >
-                      <RotateCcw className="w-4 h-4 text-amber-400" />
-                      <span>Reset Demo Data</span>
-                    </button>
-                  )}
                   <div className="border-t border-[#1F3A60]/80 pt-1">
                     <button
                       type="button"
@@ -382,8 +339,15 @@ export const Navbar: React.FC<NavbarProps> = ({
             {/* Mobile Drawer Header */}
             <div className="p-4 pt-[max(1rem,env(safe-area-inset-top))] flex items-center justify-between border-b border-[#152744] bg-[#0A192F]">
               <div className="flex items-center space-x-2.5">
-                <div className="w-8 h-8 rounded-lg bg-[#168BFF] flex items-center justify-center font-black text-white text-xs tracking-wider shadow-sm flex-shrink-0">
-                  RTR
+                <div className="w-8 h-8 rounded-lg bg-[#168BFF] flex items-center justify-center font-black text-white text-xs tracking-wider shadow-sm flex-shrink-0 overflow-hidden p-0.5">
+                  <img 
+                    src="/rtr-logo.png" 
+                    alt="RTR Mobiles logo" 
+                    className="w-full h-full object-contain"
+                    width="32"
+                    height="32"
+                    loading="eager"
+                  />
                 </div>
                 <div>
                   <div className="font-extrabold text-sm text-white leading-tight">RTR Management</div>

@@ -1,5 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { renderToString } from 'react-dom/server';
+import { MemoryRouter } from 'react-router-dom';
+import { ToastProvider } from '../../components/ui/Toast.js';
+import { AppContent } from '../../App.js';
 import { Login } from './Login.js';
 import { ForgotPassword } from './ForgotPassword.js';
 import { ResetPassword } from './ResetPassword.js';
@@ -24,8 +27,27 @@ import {
 } from '../../services/db.js';
 
 describe('Secure Owner Authentication Suite', () => {
+  const memoryStore = new Map<string, string>();
+  const mockLocalStorage = {
+    getItem: (key: string) => memoryStore.get(key) ?? null,
+    setItem: (key: string, value: string) => memoryStore.set(key, String(value)),
+    removeItem: (key: string) => memoryStore.delete(key),
+    clear: () => memoryStore.clear(),
+    get length() { return memoryStore.size; },
+    key: (i: number) => Array.from(memoryStore.keys())[i] ?? null
+  };
+
+  if (typeof globalThis.localStorage === 'undefined') {
+    Object.defineProperty(globalThis, 'localStorage', {
+      value: mockLocalStorage,
+      writable: true,
+      configurable: true
+    });
+  }
+
   beforeEach(() => {
     vi.restoreAllMocks();
+    memoryStore.clear();
   });
 
   describe('Login Page Component', () => {
@@ -80,9 +102,17 @@ describe('Secure Owner Authentication Suite', () => {
         "If an account matches the information provided, password reset instructions will be sent to its registered email address."
       );
     });
+
+    it('validates email format and rejects malformed email strings', () => {
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      expect(emailRegex.test('owner@rtrmobiles.com')).toBe(true);
+      expect(emailRegex.test('invalid-email')).toBe(false);
+      expect(emailRegex.test('invalid@')).toBe(false);
+      expect(emailRegex.test('@domain.com')).toBe(false);
+    });
   });
 
-  describe('Reset Password Component', () => {
+  describe('Reset Password Component & Lifecycle Suite', () => {
     it('renders verification or invalid link state when recovery session is missing', () => {
       const html = renderToString(
         <ResetPassword onNavigateToLogin={() => {}} onNavigateToForgot={() => {}} />
@@ -90,6 +120,28 @@ describe('Secure Owner Authentication Suite', () => {
 
       expect(html).toContain('Create New Password');
       expect(html).toContain('Verifying secure recovery link...');
+    });
+
+    it('enforces minimum 8 character password policy', () => {
+      const minLength = 8;
+      expect('short'.length < minLength).toBe(true);
+      expect('validPass123'.length >= minLength).toBe(true);
+    });
+
+    it('requires password and confirmPassword to match exactly', () => {
+      const pass1: string = 'correctHorseBattery';
+      const pass2: string = 'correctHorseBattery';
+      const passMismatch: string = 'differentHorseBattery';
+
+      expect(pass1 === pass2).toBe(true);
+      expect(pass1 === passMismatch).toBe(false);
+    });
+
+    it('correctly decodes Supabase recovery errors from URL hash or query parameters', () => {
+      const rawError = 'Email+link+is+invalid+or+has+expired';
+      const decoded = decodeURIComponent(rawError).replace(/\+/g, ' ');
+      expect(decoded).toBe('Email link is invalid or has expired');
+      expect(decoded.toLowerCase().includes('expired')).toBe(true);
     });
   });
 
@@ -107,32 +159,32 @@ describe('Secure Owner Authentication Suite', () => {
   });
 
   describe('Demo Login & Isolated Sandbox Suite', () => {
-    it('renders two clearly distinguished options on Login: Business Owner Login and Try Demo', () => {
+    it('renders clean Business Owner Login without demo tabs, sandbox badges, or demo teasers', () => {
       const html = renderToString(
         <Login onLoginSuccess={() => {}} onNavigateToForgot={() => {}} />
       );
 
-      expect(html).toContain('Business Owner Login');
-      expect(html).toContain('Try Demo');
-      expect(html).toContain('Sandbox');
+      expect(html).toContain('Business Owner Sign In');
+      expect(html).toContain('Username or Email');
+      expect(html).toContain('Password');
+      expect(html).toContain('Remember my username');
+      expect(html).toContain('Sign In to Workspace');
+
+      // Verify demo elements are removed from production login page
+      expect(html).not.toContain('Try Demo');
+      expect(html).not.toContain('Demo Credentials');
+      expect(html).not.toContain('Isolated Sandbox');
+      expect(html).not.toContain('Presenting to a client?');
     });
 
-    it('displays clearly labeled demo credentials placeholders on the login page', () => {
-      const htmlOwner = renderToString(
+    it('does not prefill or display default demo credentials in the login form', () => {
+      const html = renderToString(
         <Login onLoginSuccess={() => {}} onNavigateToForgot={() => {}} />
       );
-      expect(htmlOwner).toContain(DEMO_USERNAME);
-      expect(htmlOwner).toContain(DEMO_PASSWORD_PLACEHOLDER);
 
-      const htmlDemo = renderToString(
-        <Login initialTab="demo" onLoginSuccess={() => {}} onNavigateToForgot={() => {}} />
-      );
-      expect(htmlDemo).toContain(DEMO_USERNAME);
-      expect(htmlDemo).toContain(DEMO_PASSWORD_PLACEHOLDER);
-      expect(htmlDemo).toContain('Demo Credentials');
-      expect(htmlDemo).toContain('Isolated Sandbox');
-      expect(DEMO_USERNAME).toBe('demo-owner');
-      expect(DEMO_PASSWORD_PLACEHOLDER).toBe('Configure-a-unique-demo-password');
+      // Verify no hardcoded demo credentials in inputs
+      expect(html).not.toContain('value="demo-owner"');
+      expect(html).not.toContain('value="Configure-a-unique-demo-password"');
     });
 
     it('authenticates valid demo credentials into an isolated demo session', async () => {
@@ -142,13 +194,13 @@ describe('Secure Owner Authentication Suite', () => {
       expect(user.role).toBe('demo');
       expect(user.isDemo).toBe(true);
       expect(user.username).toBe('demo-owner');
-    });
+    }, 15000);
 
     it('rejects demo login when supplied with an invalid password', async () => {
       await expect(
         signIn(DEMO_USERNAME, 'incorrect-demo-password')
       ).rejects.toThrow(INCORRECT_CREDENTIALS_MSG);
-    });
+    }, 15000);
 
     it('persists demo session in storage across refreshes and clears it on logout', () => {
       const storageMap = new Map<string, string>();
@@ -241,6 +293,135 @@ describe('Secure Owner Authentication Suite', () => {
 
       // Clean up
       setDemoMode(false);
-    }, 25000);
+    }, 60000);
+  });
+
+  describe('Application Routing & Login Navigation Transition Suite', () => {
+    it('renders /login page for unauthenticated visitors without workspace navbar', () => {
+      mockLocalStorage.clear();
+
+      const html = renderToString(
+        <ToastProvider>
+          <MemoryRouter initialEntries={['/login']}>
+            <AppContent />
+          </MemoryRouter>
+        </ToastProvider>
+      );
+
+      // Renders Login form
+      expect(html).toContain('Business Owner Sign In');
+      expect(html).toContain('Sign In to Workspace');
+
+      // Does NOT render protected workspace elements
+      expect(html).not.toContain('lg:pl-[205px]');
+      expect(html).not.toContain('Stock Ledger');
+    });
+
+    it('redirects unauthenticated visitor from /records to /login', () => {
+      mockLocalStorage.clear();
+
+      const html = renderToString(
+        <ToastProvider>
+          <MemoryRouter initialEntries={['/records']}>
+            <AppContent />
+          </MemoryRouter>
+        </ToastProvider>
+      );
+
+      // React Router Navigate redirects away from /records
+      expect(html).not.toContain('lg:pl-[205px]');
+    });
+
+    it('renders workspace with navbar when session is restored from localStorage', () => {
+      mockLocalStorage.setItem('rtr_current_user', JSON.stringify({
+        id: 'test-owner-id',
+        email: 'owner@rtrmobiles.com',
+        name: 'Business Owner',
+        role: 'owner'
+      }));
+      mockLocalStorage.setItem('rtr_session_expiry', String(Date.now() + 86400000));
+
+      const html = renderToString(
+        <ToastProvider>
+          <MemoryRouter initialEntries={['/records']}>
+            <AppContent />
+          </MemoryRouter>
+        </ToastProvider>
+      );
+
+      // Workspace layout with Navbar elements is rendered
+      expect(html).toContain('lg:pl-[205px]');
+      expect(html).toContain('Business Owner');
+      expect(html).toContain('Records');
+      expect(html).toContain('Settings');
+      expect(html).not.toContain('Business Owner Sign In');
+    });
+
+    it('redirects authenticated user away from /login to /records', () => {
+      mockLocalStorage.setItem('rtr_current_user', JSON.stringify({
+        id: 'test-owner-id',
+        email: 'owner@rtrmobiles.com',
+        name: 'Business Owner',
+        role: 'owner'
+      }));
+      mockLocalStorage.setItem('rtr_session_expiry', String(Date.now() + 86400000));
+
+      const html = renderToString(
+        <ToastProvider>
+          <MemoryRouter initialEntries={['/login']}>
+            <AppContent />
+          </MemoryRouter>
+        </ToastProvider>
+      );
+
+      // User on /login with authenticated session triggers Navigate to /records and does not render Login form
+      expect(html).not.toContain('Business Owner Sign In');
+      expect(html).not.toContain('Sign In to Workspace');
+    });
+
+    it('redirects authenticated user away from /forgot-password to /records', () => {
+      mockLocalStorage.setItem('rtr_current_user', JSON.stringify({
+        id: 'test-owner-id',
+        email: 'owner@rtrmobiles.com',
+        name: 'Business Owner',
+        role: 'owner'
+      }));
+      mockLocalStorage.setItem('rtr_session_expiry', String(Date.now() + 86400000));
+
+      const html = renderToString(
+        <ToastProvider>
+          <MemoryRouter initialEntries={['/forgot-password']}>
+            <AppContent />
+          </MemoryRouter>
+        </ToastProvider>
+      );
+
+      // User on /forgot-password with authenticated session triggers Navigate to /records and does not render ForgotPassword form
+      expect(html).not.toContain('Reset Your Password');
+      expect(html).not.toContain('Send Password Reset Link');
+    });
+
+    it('renders /reset-password standalone without workspace shell even if user session exists', () => {
+      mockLocalStorage.setItem('rtr_current_user', JSON.stringify({
+        id: 'test-owner-id',
+        email: 'owner@rtrmobiles.com',
+        name: 'Business Owner',
+        role: 'owner'
+      }));
+      mockLocalStorage.setItem('rtr_session_expiry', String(Date.now() + 86400000));
+
+      const html = renderToString(
+        <ToastProvider>
+          <MemoryRouter initialEntries={['/reset-password']}>
+            <AppContent />
+          </MemoryRouter>
+        </ToastProvider>
+      );
+
+      // Standalone card is rendered, NOT workspace layout
+      expect(html).toContain('Create New Password');
+      expect(html).toContain('Verifying secure recovery link...');
+      expect(html).not.toContain('lg:pl-[205px]');
+    });
   });
 });

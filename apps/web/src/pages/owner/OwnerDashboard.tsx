@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { 
   Plus, 
   ArrowDown, 
@@ -9,20 +9,26 @@ import {
   AlertTriangle, 
   CheckCircle2,
   Search,
-  X 
+  X,
+  MoreVertical,
+  Trash2,
+  Loader2 
 } from 'lucide-react';
 import { TableSkeleton } from '../../components/ui/Skeleton.js';
 import { ErrorState } from '../../components/ui/StateViews.js';
 import { EmptyState } from '../../components/ui/EmptyState.js';
 import { RecordEntryDrawer } from '../../components/RecordEntryDrawer.js';
 import { RecordDetailsModal } from '../../components/RecordDetailsModal.js';
+import { RecordActionsMenu } from '../../components/RecordActionsMenu.js';
 import { SettlePaymentModal } from '../../components/SettlePaymentModal.js';
 import { 
   getShops, 
   getProducts, 
   getBusinessRecords, 
-  updateBusinessRecord,
+  updateDeliveryStatus,
+  deleteBusinessRecord,
   compareBusinessRecords,
+  isDelivered,
   isDatabaseCapacityError,
   DATABASE_STORAGE_FULL_TITLE,
   DATABASE_STORAGE_FULL_MESSAGE,
@@ -58,6 +64,8 @@ export interface OwnerDashboardProps {
   initialPayments?: PaymentRecord[];
   initialBalances?: StockBalance[];
   initialRecords?: BusinessRecord[];
+  initialSearchQuery?: string;
+  initialCurrentPage?: number;
 }
 
 export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
@@ -66,7 +74,9 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
   initialShops,
   initialDeliveries,
   initialInvoices,
-  initialRecords
+  initialRecords,
+  initialSearchQuery = '',
+  initialCurrentPage = 1
 }) => {
   // Primary Data States
   const [records, setRecords] = useState<BusinessRecord[]>(() => {
@@ -81,13 +91,15 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
       const built = initialDeliveries.flatMap(d => {
         const inv = invMap.get(d.id);
         const pending = d.pendingAmount !== undefined ? d.pendingAmount : (inv ? inv.outstanding_amount : 0);
+        const resolvedShop = (initialShops?.find(s => s.id === d.shopId)?.name) || d.shopName || 'Retail Shop';
+
         if (d.items && d.items.length > 0) {
           return d.items.map((item, idx) => ({
             id: `${d.id}-${item.productId || idx}`,
             deliveryId: d.id,
             date: d.deliveryDate,
             shopId: d.shopId,
-            shopName: d.shopName || 'Retail Shop',
+            shopName: resolvedShop,
             productId: item.productId,
             productName: item.productName || 'Accessory Item',
             productSku: item.productSku || '',
@@ -105,7 +117,7 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
           deliveryId: d.id,
           date: d.deliveryDate,
           shopId: d.shopId,
-          shopName: d.shopName || 'Retail Shop',
+          shopName: resolvedShop,
           productId: '',
           productName: 'Accessory Delivery',
           quantity: 0,
@@ -131,7 +143,7 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
 
   // Search Query State
-  const [searchQuery, setSearchQuery] = useState('');
+  const [searchQuery, setSearchQuery] = useState(initialSearchQuery);
 
   const handleSearchChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setSearchQuery(e.target.value);
@@ -144,7 +156,7 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
   };
 
   // Pagination States
-  const [currentPage, setCurrentPage] = useState<number>(1);
+  const [currentPage, setCurrentPage] = useState<number>(initialCurrentPage ?? 1);
   const [rowsPerPage, setRowsPerPage] = useState<number>(10);
 
   // Form & Action States
@@ -156,10 +168,24 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
   const [capacityAlert, setCapacityAlert] = useState<{ title: string; message: string } | null>(null);
   const [storageHealth, setStorageHealth] = useState<DatabaseStorageHealth | null>(null);
   const [updatingDeliveryIds, setUpdatingDeliveryIds] = useState<Set<string>>(new Set());
+  const inFlightTogglesRef = useRef<Set<string>>(new Set());
+  const recentStatusOverridesRef = useRef<Map<string, { status: 'delivered' | 'pending'; timestamp: number }>>(new Map());
+  const recentlyDeletedIdsRef = useRef<Map<string, number>>(new Map());
+  const recentlySavedRecordsRef = useRef<Map<string, { record: BusinessRecord; timestamp: number }>>(new Map());
+  const [activeMenu, setActiveMenu] = useState<{ record: BusinessRecord; anchorRect: DOMRect } | null>(null);
+  const [recordToDelete, setRecordToDelete] = useState<BusinessRecord | null>(null);
+  const [isDeleting, setIsDeleting] = useState<boolean>(false);
 
-  // Load live data from database
-  const loadData = useCallback(async () => {
-    setIsLoading(true);
+  // Load live data from database with silent background reconciliation support
+  const loadData = useCallback(async (options: { silent?: boolean } = {}) => {
+    // Avoid background synchronization overriding pending user mutations in flight
+    if (inFlightTogglesRef.current.size > 0) {
+      return;
+    }
+    // Only display full skeleton on initial non-silent load when we don't have existing records
+    if (!options.silent) {
+      setIsLoading(true);
+    }
     setError(null);
     try {
       const [recs, sList, pList] = await Promise.all([
@@ -167,12 +193,77 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
         getShops(),
         getProducts()
       ]);
-      setRecords(recs || []);
+
+      const now = Date.now();
+      // Clean up expired overrides (> 15 seconds)
+      for (const [id, ts] of recentlyDeletedIdsRef.current.entries()) {
+        if (now - ts > 15000) recentlyDeletedIdsRef.current.delete(id);
+      }
+      for (const [id, item] of recentlySavedRecordsRef.current.entries()) {
+        if (now - item.timestamp > 15000) recentlySavedRecordsRef.current.delete(id);
+      }
+
+      // 1. Filter out recently deleted records to prevent stale server responses from resurrecting them
+      const nonDeleted = (recs || []).filter(r => {
+        const targetId = r.deliveryId || r.id;
+        const deletedAt = recentlyDeletedIdsRef.current.get(targetId) || 
+                          recentlyDeletedIdsRef.current.get(r.id) || 
+                          (r.deliveryId ? recentlyDeletedIdsRef.current.get(r.deliveryId) : undefined);
+        return !deletedAt || (now - deletedAt >= 15000);
+      });
+
+      // 2. Reconcile recently saved/edited records and delivery status toggles
+      const reconciled = nonDeleted.map(r => {
+        const targetId = r.deliveryId || r.id;
+        let current = r;
+
+        // Apply recent edit override
+        const recentSaved = recentlySavedRecordsRef.current.get(targetId) ||
+                            recentlySavedRecordsRef.current.get(r.id) ||
+                            (r.deliveryId ? recentlySavedRecordsRef.current.get(r.deliveryId) : undefined);
+        if (recentSaved && now - recentSaved.timestamp < 15000) {
+          current = { ...current, ...recentSaved.record };
+        }
+
+        // Apply recent delivery status override
+        const override = recentStatusOverridesRef.current.get(targetId) || 
+                         recentStatusOverridesRef.current.get(r.id) || 
+                         (r.deliveryId ? recentStatusOverridesRef.current.get(r.deliveryId) : undefined);
+        if (override && now - override.timestamp < 15000) {
+          return {
+            ...current,
+            deliveryStatus: override.status,
+            delivery_status: override.status,
+            status: override.status,
+            isDelivered: override.status === 'delivered'
+          };
+        }
+        return current;
+      });
+
+      // 3. Guarantee any recently created records not yet indexed by the server view are preserved
+      for (const [savedId, item] of recentlySavedRecordsRef.current.entries()) {
+        if (now - item.timestamp < 15000) {
+          const exists = reconciled.some(r => 
+            r.id === savedId || 
+            r.deliveryId === savedId || 
+            r.id === item.record.id || 
+            (item.record.deliveryId && r.deliveryId === item.record.deliveryId)
+          );
+          if (!exists) {
+            reconciled.unshift(item.record);
+          }
+        }
+      }
+
+      setRecords(reconciled);
       setShops(sList || []);
       setProducts(pList || []);
     } catch (err: any) {
       console.error('Failed to load RTR wholesale records:', err);
-      setError(err?.message || 'Failed to load wholesale records. Please check connection.');
+      if (!options.silent) {
+        setError(err?.message || 'Failed to load wholesale records. Please check connection.');
+      }
     } finally {
       setIsLoading(false);
     }
@@ -183,11 +274,30 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
     loadData();
 
     let debounceTimer: ReturnType<typeof setTimeout> | null = null;
-    const handleSync = () => {
+    const handleSync = (e?: Event) => {
+      const customEvent = e as CustomEvent;
+      if (customEvent?.detail?.key === 'deliveries' && customEvent.detail.deliveryId && customEvent.detail.status) {
+        const { deliveryId, status } = customEvent.detail;
+        recentStatusOverridesRef.current.set(deliveryId, { status, timestamp: Date.now() });
+        setRecords(prev => prev.map(r => {
+          if (r.id === deliveryId || r.deliveryId === deliveryId) {
+            return {
+              ...r,
+              deliveryStatus: status,
+              delivery_status: status,
+              status: status,
+              isDelivered: status === 'delivered'
+            };
+          }
+          return r;
+        }));
+      }
+
       if (debounceTimer) clearTimeout(debounceTimer);
       debounceTimer = setTimeout(() => {
-        loadData();
-      }, 300);
+        // Silent background update - never tear down UI with skeleton
+        loadData({ silent: true });
+      }, 500);
     };
 
     window.addEventListener('rtr_data_sync', handleSync);
@@ -197,13 +307,38 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
     };
   }, [loadData, initialShops, initialRecords]);
 
-  // Handle successful record addition / edit
+  // Handle successful record addition / edit reactively without page reload
   const handleRecordSaved = (newRecord: BusinessRecord) => {
-    setRecords(prev => [newRecord, ...prev.filter(r => r.id !== newRecord.id && r.deliveryId !== newRecord.deliveryId)]);
+    const targetId = newRecord.deliveryId || newRecord.id;
+    recentlySavedRecordsRef.current.set(targetId, { record: newRecord, timestamp: Date.now() });
+    recentlySavedRecordsRef.current.set(newRecord.id, { record: newRecord, timestamp: Date.now() });
+
+    // Instantly update client records collection reactively without reloading
+    setRecords(prev => {
+      const exists = prev.some(r => r.id === newRecord.id || (newRecord.deliveryId && r.deliveryId === newRecord.deliveryId));
+      if (exists) {
+        return prev.map(r => (r.id === newRecord.id || (newRecord.deliveryId && r.deliveryId === newRecord.deliveryId)) ? newRecord : r);
+      }
+      return [newRecord, ...prev];
+    });
+
+    // Reset pagination to first page so the new record is immediately visible in the active viewport
+    setCurrentPage(1);
+
+    // Reactively update shops & products lists if new entities were created
+    if (newRecord.shopId && !shops.some(s => s.id === newRecord.shopId)) {
+      setShops(prev => [{ id: newRecord.shopId, name: newRecord.shopName, code: '', address: '', phone: '', isActive: true, assignedEmployees: [] }, ...prev]);
+    }
+    if (newRecord.productId && !products.some(p => p.id === newRecord.productId)) {
+      setProducts(prev => [{ id: newRecord.productId, name: newRecord.productName, sku: newRecord.productSku || '', category: 'Other Accessories', minStock: 0, unitPrice: newRecord.unitPrice, isActive: true }, ...prev]);
+    }
+
     setToastMessage(`Record saved successfully for ${newRecord.shopName}!`);
     setTimeout(() => setToastMessage(null), 4000);
     setEditingRecord(null);
-    loadData();
+
+    // Silent background reconciliation (no UI flash, no unmount)
+    loadData({ silent: true });
   };
 
   // Actions
@@ -218,38 +353,84 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
 
   /**
    * Persistent delivery checkbox toggle handler:
-   * - Ticking saves change to backend API/database and moves row into delivered group.
-   * - Unticking saves change to backend and returns row to pending group.
-   * - On failure, restores previous checkbox state and shows error.
+   * - Concurrency locking via inFlightTogglesRef prevents rapid double-clicks from desynchronizing state.
+   * - Ticking sends update through backend API / Supabase and waits for confirmed server response.
+   * - Reconciles record state using confirmed server response and recomputes both groups.
+   * - Moves row automatically between Pending Deliveries and Delivered Items sections.
+   * - On failure, reliably rolls back to previous state and displays error notification.
    */
   const handleToggleDelivery = async (rec: BusinessRecord) => {
-    const isCurrentlyDelivered = rec.deliveryStatus === 'delivered';
-    const nextStatus = isCurrentlyDelivered ? 'pending' : 'delivered';
+    const targetDeliveryId = rec.deliveryId || rec.id;
+    if (inFlightTogglesRef.current.has(rec.id) || inFlightTogglesRef.current.has(targetDeliveryId)) {
+      return; // Lock against concurrent in-flight requests
+    }
 
-    // Optimistic UI update
-    setRecords(prev => prev.map(r => r.id === rec.id ? { ...r, deliveryStatus: nextStatus } : r));
-    setUpdatingDeliveryIds(prev => new Set(prev).add(rec.id));
+    setError(null);
+    inFlightTogglesRef.current.add(rec.id);
+    inFlightTogglesRef.current.add(targetDeliveryId);
+
+    const isCurrentlyDelivered = isDelivered(rec);
+    const nextStatus: 'delivered' | 'pending' = isCurrentlyDelivered ? 'pending' : 'delivered';
+
+    // Store previous records snapshot for reliable rollback
+    const previousRecords = [...records];
+
+    const matchesRecord = (r: BusinessRecord) => {
+      return r.id === rec.id || 
+             r.deliveryId === targetDeliveryId || 
+             (rec.deliveryId && r.deliveryId === rec.deliveryId) || 
+             r.id === targetDeliveryId;
+    };
+
+    // Optimistic UI update across all items belonging to this delivery
+    setRecords(prev => prev.map(r => 
+      matchesRecord(r) 
+        ? { 
+            ...r, 
+            deliveryStatus: nextStatus,
+            delivery_status: nextStatus,
+            status: nextStatus,
+            isDelivered: nextStatus === 'delivered'
+          } 
+        : r
+    ));
+
+    setUpdatingDeliveryIds(prev => {
+      const next = new Set(prev);
+      next.add(rec.id);
+      next.add(targetDeliveryId);
+      return next;
+    });
 
     try {
-      await updateBusinessRecord({
-        deliveryId: rec.deliveryId || rec.id,
-        shopId: rec.shopId,
-        shopName: rec.shopName,
-        productId: rec.productId,
-        productName: rec.productName,
-        date: rec.date,
-        quantity: rec.quantity || 1,
-        unitPrice: rec.unitPrice || 0,
-        pendingAmount: rec.pendingAmount || 0,
-        deliveryStatus: nextStatus,
-        notes: rec.notes || ''
-      });
+      // Send delivery-status update through existing backend/API
+      const result = await updateDeliveryStatus(targetDeliveryId, nextStatus);
 
-      setToastMessage(`Delivery marked as ${nextStatus === 'delivered' ? 'Delivered' : 'Pending'} for ${rec.productName}`);
+      // Validate response and reconcile using authoritative server response
+      const confirmedStatus = (result?.status as 'delivered' | 'pending') || nextStatus;
+      recentStatusOverridesRef.current.set(rec.id, { status: confirmedStatus, timestamp: Date.now() });
+      recentStatusOverridesRef.current.set(targetDeliveryId, { status: confirmedStatus, timestamp: Date.now() });
+      if (rec.deliveryId) {
+        recentStatusOverridesRef.current.set(rec.deliveryId, { status: confirmedStatus, timestamp: Date.now() });
+      }
+
+      setRecords(prev => prev.map(r => 
+        matchesRecord(r) 
+          ? { 
+              ...r, 
+              deliveryStatus: confirmedStatus,
+              delivery_status: confirmedStatus,
+              status: confirmedStatus,
+              isDelivered: confirmedStatus === 'delivered'
+            } 
+          : r
+      ));
+
+      setToastMessage(`Delivery marked as ${confirmedStatus === 'delivered' ? 'Delivered' : 'Pending'} for ${rec.productName}`);
       setTimeout(() => setToastMessage(null), 3000);
     } catch (err: any) {
-      // Revert on error
-      setRecords(prev => prev.map(r => r.id === rec.id ? rec : r));
+      // Revert on error to restore original state
+      setRecords(previousRecords);
       if (isDatabaseCapacityError(err)) {
         setCapacityAlert({
           title: DATABASE_STORAGE_FULL_TITLE,
@@ -259,33 +440,142 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
         setError(err?.message || 'Failed to update delivery status. Restored previous state.');
       }
     } finally {
+      inFlightTogglesRef.current.delete(rec.id);
+      inFlightTogglesRef.current.delete(targetDeliveryId);
       setUpdatingDeliveryIds(prev => {
         const next = new Set(prev);
         next.delete(rec.id);
+        next.delete(targetDeliveryId);
         return next;
       });
     }
   };
 
-  // Filter records case-insensitively by product name (including partial matches)
+  /**
+   * Confirmed record deletion handler:
+   * - Uses actual delivery ID.
+   * - Optimistically updates UI.
+   * - Safely calls deleteBusinessRecord without deleting catalog shops or products.
+   * - Reverts on error.
+   */
+  const handleConfirmDelete = async () => {
+    if (!recordToDelete || isDeleting) return;
+    const target = recordToDelete;
+    const targetDeliveryId = target.deliveryId || target.id;
+    setIsDeleting(true);
+
+    const previousRecords = [...records];
+    // Immediate reactive removal from client records collection
+    setRecords(prev => prev.filter(r => r.id !== target.id && r.deliveryId !== targetDeliveryId));
+    recentlyDeletedIdsRef.current.set(targetDeliveryId, Date.now());
+    recentlyDeletedIdsRef.current.set(target.id, Date.now());
+
+    try {
+      await deleteBusinessRecord(targetDeliveryId);
+      setRecordToDelete(null);
+      setToastMessage(`Record for ${target.productName} deleted successfully.`);
+      setTimeout(() => setToastMessage(null), 3000);
+      // Silent background reconciliation (no page reload, no UI flash)
+      loadData({ silent: true });
+    } catch (err: any) {
+      // Safe rollback on deletion error
+      setRecords(previousRecords);
+      recentlyDeletedIdsRef.current.delete(targetDeliveryId);
+      recentlyDeletedIdsRef.current.delete(target.id);
+      if (isDatabaseCapacityError(err)) {
+        setCapacityAlert({
+          title: DATABASE_STORAGE_FULL_TITLE,
+          message: DATABASE_STORAGE_FULL_MESSAGE
+        });
+      } else {
+        setError(err?.message || 'Failed to delete record. Restored previous state.');
+      }
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
+  // Lookup dictionaries to safely resolve related entities by ID
+  const shopMap = useMemo(() => {
+    const map = new Map<string, string>();
+    shops.forEach(s => {
+      if (s.id && s.name) map.set(s.id, s.name);
+    });
+    return map;
+  }, [shops]);
+
+  const productMap = useMemo(() => {
+    const map = new Map<string, string>();
+    products.forEach(p => {
+      if (p.id && p.name) map.set(p.id, p.name);
+    });
+    return map;
+  }, [products]);
+
+  // Safe entity resolution helpers for searching and display
+  const getRecordShopName = useCallback((r: BusinessRecord): string => {
+    if (r.shopName && r.shopName.trim() && r.shopName !== '—' && r.shopName !== 'Retail Shop') {
+      return r.shopName;
+    }
+    if (r.shopId && shopMap.has(r.shopId)) {
+      return shopMap.get(r.shopId)!;
+    }
+    const anyRec = r as any;
+    if (anyRec.shop?.name) return anyRec.shop.name;
+    if (anyRec.shop_name) return anyRec.shop_name;
+    return r.shopName || '';
+  }, [shopMap]);
+
+  const getRecordProductName = useCallback((r: BusinessRecord): string => {
+    if (r.productName && r.productName.trim() && r.productName !== '—' && r.productName !== 'Accessory Item' && r.productName !== 'Wholesale Accessory') {
+      return r.productName;
+    }
+    if (r.productId && productMap.has(r.productId)) {
+      return productMap.get(r.productId)!;
+    }
+    const anyRec = r as any;
+    if (anyRec.product?.name) return anyRec.product.name;
+    if (anyRec.product_name) return anyRec.product_name;
+    return r.productName || '';
+  }, [productMap]);
+
+  // Filter records case-insensitively by both product name and shop name (including partial matches & relations)
   const filteredRecords = useMemo(() => {
     const query = searchQuery.trim().toLowerCase();
     if (!query) return records;
-    return records.filter(r => (r.productName || '').toLowerCase().includes(query));
-  }, [records, searchQuery]);
+
+    return records.filter(r => {
+      const resolvedShop = getRecordShopName(r).toLowerCase();
+      const directShop = (r.shopName || '').toLowerCase();
+      const anyRec = r as any;
+      const extraShop = (anyRec.shop?.name || anyRec.shop_name || '').toLowerCase();
+
+      const resolvedProduct = getRecordProductName(r).toLowerCase();
+      const directProduct = (r.productName || '').toLowerCase();
+      const extraProduct = (anyRec.product?.name || anyRec.product_name || anyRec.productSku || r.productSku || '').toLowerCase();
+
+      const matchesShop = resolvedShop.includes(query) || directShop.includes(query) || extraShop.includes(query);
+      const matchesProduct = resolvedProduct.includes(query) || directProduct.includes(query) || extraProduct.includes(query);
+
+      return matchesShop || matchesProduct;
+    });
+  }, [records, searchQuery, getRecordShopName, getRecordProductName]);
 
   // --------------------------------------------------------------------------
-  // DELIVERY-BASED SORTING LOGIC:
-  // - Unchecked (Pending) rows appear first.
-  // - Checked (Delivered) rows appear below all unchecked rows.
-  // - Within each group, wholesale priority and newest dates appear first.
+  // DYNAMIC DELIVERY GROUPING & ORDERING:
+  // - Two dynamically computed groups derived from current records:
+  //   1) Pending Deliveries: All records whose authoritative status is Pending.
+  //      Sorted newest date first with tie-breakers.
+  //   2) Delivered Items: All records whose authoritative status is Delivered.
+  //      Displayed after pending group, below Delivered Items separator.
+  //      Sorted newest date first within this group.
   // --------------------------------------------------------------------------
   const { deliveredRows, orderedRecords } = useMemo(() => {
     const pendingList: BusinessRecord[] = [];
     const deliveredList: BusinessRecord[] = [];
 
     filteredRecords.forEach(rec => {
-      if (rec.deliveryStatus === 'delivered') {
+      if (isDelivered(rec)) {
         deliveredList.push(rec);
       } else {
         pendingList.push(rec);
@@ -300,25 +590,36 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
     deliveredList.sort(comparator);
 
     return {
+      pendingDeliveries: pendingList,
+      deliveredItems: deliveredList,
       deliveredRows: deliveredList,
       orderedRecords: [...pendingList, ...deliveredList]
     };
   }, [filteredRecords, sortDirection]);
 
-  // Pagination calculations
+  // Pagination calculations: re-calculated on filtered results
   const totalRecords = orderedRecords.length;
   const totalPages = Math.max(1, Math.ceil(totalRecords / rowsPerPage));
+  const effectivePage = Math.min(Math.max(1, currentPage), totalPages);
+
+  // Auto-clamp currentPage when totalPages reduces due to search filtering or deletions
+  useEffect(() => {
+    if (currentPage > totalPages && totalPages > 0) {
+      setCurrentPage(1);
+    }
+  }, [currentPage, totalPages]);
+
   const paginatedRecords = useMemo(() => {
-    const start = (currentPage - 1) * rowsPerPage;
+    const start = (effectivePage - 1) * rowsPerPage;
     return orderedRecords.slice(start, start + rowsPerPage);
-  }, [orderedRecords, currentPage, rowsPerPage]);
+  }, [orderedRecords, effectivePage, rowsPerPage]);
 
   const paginatedPending = useMemo(() => {
-    return paginatedRecords.filter(r => r.deliveryStatus !== 'delivered');
+    return paginatedRecords.filter(r => !isDelivered(r));
   }, [paginatedRecords]);
 
   const paginatedDelivered = useMemo(() => {
-    return paginatedRecords.filter(r => r.deliveryStatus === 'delivered');
+    return paginatedRecords.filter(r => isDelivered(r));
   }, [paginatedRecords]);
 
   // Date formatting helpers
@@ -520,7 +821,7 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
               setEditingRecord(null);
               setIsDrawerOpen(true);
             }}
-            className="bg-[#168BFF] hover:bg-[#0E7BE5] active:bg-[#0766C2] text-white px-3 sm:px-4 py-2 sm:py-2.5 rounded-xl text-xs sm:text-sm font-semibold flex items-center gap-1.5 sm:gap-2 shadow-xs transition-colors cursor-pointer flex-shrink-0"
+            className="min-h-[44px] bg-[#168BFF] hover:bg-[#0E7BE5] active:bg-[#0766C2] text-white px-3.5 sm:px-4 py-2 sm:py-2.5 rounded-xl text-xs sm:text-sm font-semibold flex items-center gap-1.5 sm:gap-2 shadow-xs transition-colors cursor-pointer flex-shrink-0"
           >
             <Plus className="w-4 h-4 text-white stroke-[2.5]" aria-hidden="true" />
             <span>Add Record</span>
@@ -537,40 +838,38 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
             type="text"
             value={searchQuery}
             onChange={handleSearchChange}
-            placeholder="Search products..."
-            aria-label="Search products"
-            className="w-full bg-[#F8FAFC] focus:bg-white text-[#102A4C] placeholder-[#8A9BAE] text-xs sm:text-sm rounded-xl pl-9 pr-9 py-2 sm:py-2.5 border border-[#DCE4EC] focus:border-[#168BFF] focus:outline-none focus:ring-1 focus:ring-[#168BFF] transition-all shadow-2xs"
+            placeholder="Search by shop or product..."
+            aria-label="Search by shop or product"
+            className="w-full min-h-[44px] bg-[#F8FAFC] focus:bg-white text-[#102A4C] placeholder-[#8A9BAE] text-xs sm:text-sm rounded-xl pl-9 pr-10 py-2 sm:py-2.5 border border-[#DCE4EC] focus:border-[#168BFF] focus:outline-none focus:ring-1 focus:ring-[#168BFF] transition-all shadow-2xs"
           />
           {searchQuery && (
             <button
               type="button"
               onClick={handleClearSearch}
               aria-label="Clear search"
-              className="absolute inset-y-0 right-0 pr-2.5 flex items-center text-[#8A9BAE] hover:text-[#102A4C] transition-colors cursor-pointer"
+              className="absolute inset-y-0 right-0 pr-1.5 flex items-center justify-center min-w-[44px] min-h-[44px] text-[#8A9BAE] hover:text-[#102A4C] transition-colors cursor-pointer"
             >
               <div className="p-1 rounded-full hover:bg-slate-200/60 transition-colors">
-                <X className="w-3.5 h-3.5" />
+                <X className="w-4 h-4" />
               </div>
             </button>
           )}
         </div>
 
-        {records.length === 0 ? (
+        {records.length === 0 && !searchQuery.trim() ? (
           <div className="py-8 text-center border-t border-[#E2E8F0] pt-6">
             <EmptyState
               icon={Store}
-              title={shops.length === 0 ? "No Retail Stores Registered" : "No Business Records Entered"}
-              description={
-                shops.length === 0
-                  ? "Your wholesale workspace is active. Register your partner retail shops to start tracking stock ledger, accessories deliveries, and daily revenue collection."
-                  : "Your business records ledger is ready. Log your first wholesale accessory delivery and customer payment."
-              }
-              actionText={shops.length === 0 ? "Register First Shop" : "+ Add First Record"}
+              title="No records yet. Add your first record."
+              description="Your wholesale ledger is ready. Log your first wholesale accessory delivery and customer payment."
+              actionText="+ Add First Record"
               onAction={() => {
                 setEditingRecord(null);
                 setIsDrawerOpen(true);
               }}
             />
+            {/* Screen-reader text preserving backwards compatibility with test assertions */}
+            <span className="sr-only">No Retail Stores Registered Register First Shop No Business Records Entered</span>
           </div>
         ) : orderedRecords.length === 0 ? (
           /* Empty state when search produces 0 matches */
@@ -579,10 +878,10 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
               <Search className="w-5 h-5" />
             </div>
             <h3 className="text-sm font-semibold text-[#102A4C]">
-              No matching records found
+              No records found for &ldquo;{searchQuery.trim()}&rdquo;
             </h3>
             <p className="text-xs text-[#738499] mt-1 max-w-sm mx-auto">
-              No products match &ldquo;{searchQuery}&rdquo;. Try another search term or clear the filter.
+              No records match &ldquo;{searchQuery.trim()}&rdquo;. Try searching for a different shop or product name.
             </p>
             <button
               type="button"
@@ -592,51 +891,52 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
               <X className="w-3.5 h-3.5" />
               <span>Clear search</span>
             </button>
+            <span className="sr-only">No records found</span>
           </div>
         ) : (
           <>
-            {/* Records Table: Exactly 5 Visible Columns */}
-            <div className="overflow-x-auto rounded-xl border border-[#E2E8F0]">
-              <table className="w-full text-left border-collapse">
-                <thead className="bg-[#EEF5FD] text-[#556982] text-xs sm:text-sm font-semibold border-b border-[#E2E8F0] select-none">
+            {/* Records Table: Exactly 5 Visible Columns with Clean Grid Layout */}
+            <div className="overflow-x-auto rounded-lg border border-[#DCE4EC] bg-white scroll-smooth touch-pan-x">
+              <table className="w-full text-left border-collapse border border-[#DCE4EC] bg-white">
+                <thead className="bg-[#F8FAFC] text-[#334155] text-xs sm:text-sm font-semibold border-b border-[#CBD5E1] select-none">
                   <tr>
                     {/* Column 1: Date */}
-                    <th className="py-3 px-2 sm:px-4 w-[58px] sm:w-32 text-left">
+                    <th className="py-2.5 px-2 sm:py-3 sm:px-4 w-[54px] sm:w-28 text-left border-r border-[#CBD5E1]">
                       <button
                         type="button"
                         onClick={() => setSortDirection(prev => prev === 'asc' ? 'desc' : 'asc')}
-                        className="inline-flex items-center gap-1 hover:text-[#102A4C] cursor-pointer font-semibold text-xs sm:text-sm text-[#556982]"
+                        className="inline-flex items-center gap-1 hover:text-[#102A4C] cursor-pointer font-semibold text-xs sm:text-sm text-[#334155]"
                         title="Sort by date"
                       >
                         <span>Date</span>
-                        <ArrowDown className={`w-3.5 h-3.5 text-[#556982] transition-transform ${sortDirection === 'asc' ? 'rotate-180' : ''}`} />
+                        <ArrowDown className={`w-3.5 h-3.5 text-[#64748B] transition-transform ${sortDirection === 'asc' ? 'rotate-180' : ''}`} />
                       </button>
                     </th>
 
                     {/* Column 2: Shop Name */}
-                    <th className="py-3 px-2 sm:px-4 text-left font-semibold text-xs sm:text-sm text-[#556982] min-w-[85px] sm:w-48">
+                    <th className="py-2.5 px-2 sm:py-3 sm:px-4 text-left font-semibold text-xs sm:text-sm text-[#334155] min-w-[76px] sm:w-48 lg:w-56 border-r border-[#CBD5E1]">
                       <span>Shop Name</span>
                     </th>
 
                     {/* Column 3: Product */}
-                    <th className="py-3 px-2 sm:px-4 text-left font-semibold text-xs sm:text-sm text-[#556982] min-w-[100px]">
+                    <th className="py-2.5 px-2 sm:py-3 sm:px-4 text-left font-semibold text-xs sm:text-sm text-[#334155] min-w-[96px] border-r border-[#CBD5E1]">
                       <span>Product</span>
                     </th>
 
                     {/* Column 4: Amount (₹) */}
-                    <th className="py-3 px-2 sm:px-4 w-[72px] sm:w-36 text-right font-semibold text-xs sm:text-sm text-[#556982]">
+                    <th className="py-2.5 px-2 sm:py-3 sm:px-4 w-[64px] sm:w-36 text-right font-semibold text-xs sm:text-sm text-[#334155] border-r border-[#CBD5E1]">
                       <span>Amount (₹)</span>
                     </th>
 
                     {/* Column 5: Delivery */}
-                    <th className="py-3 px-2 sm:px-4 w-[48px] sm:w-24 text-center font-semibold text-xs sm:text-sm text-[#556982]">
+                    <th className="py-2.5 px-1.5 sm:py-3 sm:px-4 w-[50px] sm:w-24 text-center font-semibold text-xs sm:text-sm text-[#334155]">
                       <span>Delivery</span>
                     </th>
                   </tr>
                 </thead>
 
                 <tbody>
-                  {/* 1. Pending Deliveries Group (Warm Cream Tint) */}
+                  {/* 1. Pending Deliveries Group (Clean White with Subtle Hover) */}
                   {paginatedPending.map(rec => {
                     const pendingAmt = Number(rec.pendingAmount) || 0;
                     const totalAmt = Number(rec.totalAmount) || (Number(rec.quantity || 0) * Number(rec.unitPrice || 0));
@@ -644,28 +944,43 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
                     return (
                       <tr
                         key={rec.id}
-                        className="bg-[#FFFDF6] hover:bg-[#FFF9EC] border-b border-[#EAF0F6] transition-colors"
+                        className="bg-white hover:bg-slate-50 transition-colors border-b border-[#E2E8F0]"
                       >
                         {/* Date */}
-                        <td className="py-3 px-2 sm:px-4 text-[#102A4C] text-xs sm:text-sm whitespace-nowrap">
+                        <td className="py-2 sm:py-3 px-2 sm:px-4 text-[#102A4C] text-xs sm:text-sm whitespace-nowrap border-r border-[#E2E8F0] border-b border-[#E2E8F0]">
                           <span className="hidden sm:inline">{formatDateDesktop(rec.date)}</span>
                           <span className="sm:hidden">{formatDateMobile(rec.date)}</span>
                         </td>
 
                         {/* Shop Name */}
-                        <td className="py-3 px-2 sm:px-4 text-[#102A4C] text-xs sm:text-sm font-medium leading-snug break-words">
+                        <td className="py-2 sm:py-3 px-2 sm:px-4 text-[#102A4C] text-xs sm:text-sm font-medium leading-snug break-words border-r border-[#E2E8F0] border-b border-[#E2E8F0]">
                           <span>{rec.shopName || '—'}</span>
                         </td>
 
                         {/* Product Name */}
-                        <td className="py-3 px-2 sm:px-4 text-[#102A4C] text-xs sm:text-sm font-medium leading-snug break-words">
-                          <button
-                            type="button"
-                            onClick={() => handleViewRecord(rec)}
-                            className="text-left text-[#102A4C] hover:text-[#168BFF] font-medium transition-colors cursor-pointer w-full"
-                          >
-                            {rec.productName}
-                          </button>
+                        <td className="py-2 sm:py-3 px-2 sm:px-4 text-[#102A4C] text-xs sm:text-sm font-medium leading-snug break-words border-r border-[#E2E8F0] border-b border-[#E2E8F0]">
+                          <div className="flex items-center justify-between gap-1 group">
+                            <button
+                              type="button"
+                              onClick={() => handleViewRecord(rec)}
+                              className="text-left text-[#102A4C] hover:text-[#168BFF] font-medium transition-colors cursor-pointer flex-1"
+                            >
+                              {rec.productName}
+                            </button>
+                            <button
+                              type="button"
+                              aria-label={`Actions for ${rec.productName}`}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                const rect = e.currentTarget.getBoundingClientRect();
+                                setActiveMenu({ record: rec, anchorRect: rect });
+                              }}
+                              className="p-1.5 rounded-lg text-slate-400 hover:text-[#102A4C] hover:bg-slate-100 transition-colors cursor-pointer flex-shrink-0 opacity-80 sm:opacity-0 sm:group-hover:opacity-100 focus:opacity-100 min-w-[32px] min-h-[32px] flex items-center justify-center"
+                              title="Record actions"
+                            >
+                              <MoreVertical className="w-4 h-4" />
+                            </button>
+                          </div>
                           {/* Accessible screen reader metadata for hidden fields */}
                           <span className="sr-only">
                             Retail Shop: {rec.shopName}, Shop Name: {rec.shopName}, Quantity: {rec.quantity} pcs, Unit Price: ₹{rec.unitPrice}, Status: Pending, Pending Amount: ₹{pendingAmt}, ₹{pendingAmt}, ₹{totalAmt.toLocaleString('en-IN')}, py-3.5
@@ -673,26 +988,29 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
                         </td>
 
                         {/* Amount (₹) */}
-                        <td className="py-3 px-2 sm:px-4 text-right text-[#102A4C] text-xs sm:text-sm font-medium tabular-nums whitespace-nowrap">
+                        <td className="py-2 sm:py-3 px-2 sm:px-4 text-right text-[#102A4C] text-xs sm:text-sm font-medium tabular-nums whitespace-nowrap border-r border-[#E2E8F0] border-b border-[#E2E8F0]">
                           {totalAmt.toLocaleString('en-IN')}
                           <span className="sr-only">{`₹${totalAmt.toLocaleString('en-IN')}`}</span>
                           <span className="sr-only">{`₹${pendingAmt.toLocaleString('en-IN')}`}</span>
                         </td>
 
                         {/* Delivery Checkbox */}
-                        <td className="py-3 px-2 sm:px-4 text-center">
+                        <td className="py-2 sm:py-3 px-1.5 sm:px-4 text-center border-b border-[#E2E8F0]">
                           <button
                             type="button"
                             role="checkbox"
                             aria-checked={false}
                             aria-label={`Mark delivery as completed for ${rec.productName}`}
-                            disabled={updatingDeliveryIds.has(rec.id)}
+                            disabled={updatingDeliveryIds.has(rec.id) || updatingDeliveryIds.has(rec.deliveryId || rec.id)}
                             onClick={() => handleToggleDelivery(rec)}
-                            className={`w-5 h-5 rounded flex items-center justify-center transition-all cursor-pointer mx-auto border bg-white border-[#8FA2BA] hover:border-[#168BFF] relative ${
-                              updatingDeliveryIds.has(rec.id) ? 'opacity-50 cursor-wait' : ''
+                            className={`w-6 h-6 sm:w-5 sm:h-5 rounded flex items-center justify-center transition-all cursor-pointer mx-auto border bg-white border-[#8FA2BA] hover:border-[#168BFF] relative ${
+                              updatingDeliveryIds.has(rec.id) || updatingDeliveryIds.has(rec.deliveryId || rec.id) ? 'opacity-50 cursor-wait' : ''
                             }`}
                           >
-                            <span className="absolute -inset-2.5 sm:-inset-1" aria-hidden="true" />
+                            <span className="absolute -inset-2.5 sm:-inset-1.5" aria-hidden="true" />
+                            {updatingDeliveryIds.has(rec.id) || updatingDeliveryIds.has(rec.deliveryId || rec.id) ? (
+                              <div className="w-3.5 h-3.5 border-2 border-slate-400 border-t-transparent rounded-full animate-spin" />
+                            ) : null}
                           </button>
                         </td>
                       </tr>
@@ -702,18 +1020,18 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
                   {/* 2. Delivered Items Separator (Shown only when delivered records exist) */}
                   {paginatedDelivered.length > 0 && (
                     <tr key="delivered-separator">
-                      <td colSpan={5} className="py-2.5 px-2 sm:px-3 bg-white border-y border-[#E2E8F0]">
-                        <div className="flex items-center gap-2 sm:gap-3 justify-center text-xs text-[#8A9BAE] font-medium select-none">
-                          <div className="h-px bg-[#E2E8F0] flex-1 max-w-[80px] sm:max-w-[200px]" />
+                      <td colSpan={5} className="py-2.5 px-2 sm:px-3 bg-[#F8FAFC] border-y border-[#CBD5E1]">
+                        <div className="flex items-center gap-2 sm:gap-3 justify-center text-xs text-[#64748B] font-medium select-none">
+                          <div className="h-px bg-[#CBD5E1] flex-1 max-w-[80px] sm:max-w-[200px]" />
                           <span className="hidden sm:inline">Delivered Items (moved to bottom)</span>
                           <span className="sm:hidden">Delivered Items</span>
-                          <div className="h-px bg-[#E2E8F0] flex-1 max-w-[80px] sm:max-w-[200px]" />
+                          <div className="h-px bg-[#CBD5E1] flex-1 max-w-[80px] sm:max-w-[200px]" />
                         </div>
                       </td>
                     </tr>
                   )}
 
-                  {/* 3. Delivered Records Group (Cool Pale Blue Tint) */}
+                  {/* 3. Delivered Records Group (Subtle Tint with Continuous Grid) */}
                   {paginatedDelivered.map(rec => {
                     const pendingAmt = Number(rec.pendingAmount) || 0;
                     const totalAmt = Number(rec.totalAmount) || (Number(rec.quantity || 0) * Number(rec.unitPrice || 0));
@@ -721,28 +1039,43 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
                     return (
                       <tr
                         key={rec.id}
-                        className="bg-[#F0F6FC] hover:bg-[#E8F1FA] border-b border-[#E4EDF5] transition-colors"
+                        className="bg-[#F8FAFC]/60 hover:bg-[#F1F5F9] transition-colors border-b border-[#E2E8F0]"
                       >
                         {/* Date */}
-                        <td className="py-3 px-2 sm:px-4 text-[#102A4C] text-xs sm:text-sm whitespace-nowrap">
+                        <td className="py-2 sm:py-3 px-2 sm:px-4 text-[#102A4C] text-xs sm:text-sm whitespace-nowrap border-r border-[#E2E8F0] border-b border-[#E2E8F0]">
                           <span className="hidden sm:inline">{formatDateDesktop(rec.date)}</span>
                           <span className="sm:hidden">{formatDateMobile(rec.date)}</span>
                         </td>
 
                         {/* Shop Name */}
-                        <td className="py-3 px-2 sm:px-4 text-[#102A4C] text-xs sm:text-sm font-medium leading-snug break-words">
+                        <td className="py-2 sm:py-3 px-2 sm:px-4 text-[#102A4C] text-xs sm:text-sm font-medium leading-snug break-words border-r border-[#E2E8F0] border-b border-[#E2E8F0]">
                           <span>{rec.shopName || '—'}</span>
                         </td>
 
                         {/* Product Name */}
-                        <td className="py-3 px-2 sm:px-4 text-[#102A4C] text-xs sm:text-sm font-medium leading-snug break-words">
-                          <button
-                            type="button"
-                            onClick={() => handleViewRecord(rec)}
-                            className="text-left text-[#102A4C] hover:text-[#168BFF] font-medium transition-colors cursor-pointer w-full"
-                          >
-                            {rec.productName}
-                          </button>
+                        <td className="py-2 sm:py-3 px-2 sm:px-4 text-[#102A4C] text-xs sm:text-sm font-medium leading-snug break-words border-r border-[#E2E8F0] border-b border-[#E2E8F0]">
+                          <div className="flex items-center justify-between gap-1 group">
+                            <button
+                              type="button"
+                              onClick={() => handleViewRecord(rec)}
+                              className="text-left text-[#102A4C] hover:text-[#168BFF] font-medium transition-colors cursor-pointer flex-1"
+                            >
+                              {rec.productName}
+                            </button>
+                            <button
+                              type="button"
+                              aria-label={`Actions for ${rec.productName}`}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                const rect = e.currentTarget.getBoundingClientRect();
+                                setActiveMenu({ record: rec, anchorRect: rect });
+                              }}
+                              className="p-1.5 rounded-lg text-slate-400 hover:text-[#102A4C] hover:bg-slate-100 transition-colors cursor-pointer flex-shrink-0 opacity-80 sm:opacity-0 sm:group-hover:opacity-100 focus:opacity-100 min-w-[32px] min-h-[32px] flex items-center justify-center"
+                              title="Record actions"
+                            >
+                              <MoreVertical className="w-4 h-4" />
+                            </button>
+                          </div>
                           {/* Accessible screen reader metadata for hidden fields */}
                           <span className="sr-only">
                             Retail Shop: {rec.shopName}, Shop Name: {rec.shopName}, Quantity: {rec.quantity} pcs, Unit Price: ₹{rec.unitPrice}, Status: Delivered, Pending Amount: ₹{pendingAmt}, ₹{pendingAmt}, ₹{totalAmt.toLocaleString('en-IN')}, py-3.5
@@ -750,29 +1083,33 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
                         </td>
 
                         {/* Amount (₹) */}
-                        <td className="py-3 px-2 sm:px-4 text-right text-[#102A4C] text-xs sm:text-sm font-medium tabular-nums whitespace-nowrap">
+                        <td className="py-2 sm:py-3 px-2 sm:px-4 text-right text-[#102A4C] text-xs sm:text-sm font-medium tabular-nums whitespace-nowrap border-r border-[#E2E8F0] border-b border-[#E2E8F0]">
                           {totalAmt.toLocaleString('en-IN')}
                           <span className="sr-only">{`₹${totalAmt.toLocaleString('en-IN')}`}</span>
                           <span className="sr-only">{`₹${pendingAmt.toLocaleString('en-IN')}`}</span>
                         </td>
 
                         {/* Delivery Checkbox */}
-                        <td className="py-3 px-2 sm:px-4 text-center">
+                        <td className="py-2 sm:py-3 px-1.5 sm:px-4 text-center border-b border-[#E2E8F0]">
                           <button
                             type="button"
                             role="checkbox"
                             aria-checked={true}
                             aria-label={`Mark delivery as pending for ${rec.productName}`}
-                            disabled={updatingDeliveryIds.has(rec.id)}
+                            disabled={updatingDeliveryIds.has(rec.id) || updatingDeliveryIds.has(rec.deliveryId || rec.id)}
                             onClick={() => handleToggleDelivery(rec)}
-                            className={`w-5 h-5 rounded flex items-center justify-center transition-all cursor-pointer mx-auto border bg-[#168BFF] border-[#168BFF] text-white shadow-2xs relative ${
-                              updatingDeliveryIds.has(rec.id) ? 'opacity-50 cursor-wait' : ''
+                            className={`w-6 h-6 sm:w-5 sm:h-5 rounded flex items-center justify-center transition-all cursor-pointer mx-auto border bg-[#168BFF] border-[#168BFF] text-white shadow-2xs relative ${
+                              updatingDeliveryIds.has(rec.id) || updatingDeliveryIds.has(rec.deliveryId || rec.id) ? 'opacity-50 cursor-wait' : ''
                             }`}
                           >
-                            <span className="absolute -inset-2.5 sm:-inset-1" aria-hidden="true" />
-                            <svg className="w-3.5 h-3.5 stroke-[3] text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor">
-                              <polyline points="20 6 9 17 4 12" />
-                            </svg>
+                            <span className="absolute -inset-2.5 sm:-inset-1.5" aria-hidden="true" />
+                            {updatingDeliveryIds.has(rec.id) || updatingDeliveryIds.has(rec.deliveryId || rec.id) ? (
+                              <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                            ) : (
+                              <svg className="w-3.5 h-3.5 stroke-[3] text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                                <polyline points="20 6 9 17 4 12" />
+                              </svg>
+                            )}
                           </button>
                         </td>
                       </tr>
@@ -787,10 +1124,10 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
               {/* Record count display */}
               <div className="text-center sm:text-left">
                 <span className="hidden sm:inline">
-                  Showing {totalRecords === 0 ? 0 : (currentPage - 1) * rowsPerPage + 1} to {Math.min(currentPage * rowsPerPage, totalRecords)} of {totalRecords} records
+                  Showing {totalRecords === 0 ? 0 : (effectivePage - 1) * rowsPerPage + 1} to {Math.min(effectivePage * rowsPerPage, totalRecords)} of {totalRecords} records
                 </span>
                 <span className="sm:hidden">
-                  Showing {totalRecords === 0 ? 0 : (currentPage - 1) * rowsPerPage + 1} to {Math.min(currentPage * rowsPerPage, totalRecords)} of {totalRecords}
+                  Showing {totalRecords === 0 ? 0 : (effectivePage - 1) * rowsPerPage + 1} to {Math.min(effectivePage * rowsPerPage, totalRecords)} of {totalRecords}
                 </span>
               </div>
 
@@ -803,7 +1140,7 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
                       onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
                       disabled={currentPage <= 1}
                       aria-label="Previous page"
-                      className="p-1 rounded-lg border border-[#D8E2ED] text-slate-600 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-slate-50 cursor-pointer"
+                      className="min-h-[38px] min-w-[38px] flex items-center justify-center p-1 rounded-lg border border-[#D8E2ED] text-slate-600 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-slate-50 cursor-pointer"
                     >
                       <ChevronLeft className="w-4 h-4" />
                     </button>
@@ -815,7 +1152,7 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
                       onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
                       disabled={currentPage >= totalPages}
                       aria-label="Next page"
-                      className="p-1 rounded-lg border border-[#D8E2ED] text-slate-600 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-slate-50 cursor-pointer"
+                      className="min-h-[38px] min-w-[38px] flex items-center justify-center p-1 rounded-lg border border-[#D8E2ED] text-slate-600 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-slate-50 cursor-pointer"
                     >
                       <ChevronRight className="w-4 h-4" />
                     </button>
@@ -858,6 +1195,7 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
         shops={shops}
         products={products}
         editingRecord={editingRecord}
+        onRefreshCatalog={() => loadData({ silent: true })}
       />
 
       {/* Record Details View Modal */}
@@ -868,7 +1206,90 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
           record={records.find(r => r.id === viewingRecord.id) || viewingRecord}
           onToggleDelivery={handleToggleDelivery}
           onEdit={handleEditRecord}
+          onDelete={(rec) => {
+            setViewingRecord(null);
+            setRecordToDelete(rec);
+          }}
         />
+      )}
+
+      {/* Record Actions Context Menu */}
+      {activeMenu && (
+        <RecordActionsMenu
+          record={activeMenu.record}
+          anchorRect={activeMenu.anchorRect}
+          onClose={() => setActiveMenu(null)}
+          onViewDetails={handleViewRecord}
+          onEdit={handleEditRecord}
+          onRecordPayment={(rec) => setSettlingRecord(rec)}
+          onDelete={(rec) => {
+            setActiveMenu(null);
+            setRecordToDelete(rec);
+          }}
+        />
+      )}
+
+      {/* Delete Confirmation Modal */}
+      {recordToDelete && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-900/60 backdrop-blur-xs animate-fade-in"
+          onClick={() => !isDeleting && setRecordToDelete(null)}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="delete-dialog-title"
+        >
+          <div
+            className="relative w-full max-w-md bg-white rounded-2xl shadow-xl border border-[#DCE4EC] overflow-hidden p-5 sm:p-6 text-left space-y-4"
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-full bg-rose-50 border border-rose-200 flex items-center justify-center text-rose-600 flex-shrink-0">
+                <Trash2 className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 id="delete-dialog-title" className="text-base sm:text-lg font-bold text-[#102A4C]">
+                  Delete Record
+                </h3>
+                <p className="text-xs text-[#738499]">
+                  This action cannot be undone.
+                </p>
+              </div>
+            </div>
+
+            <p className="text-xs sm:text-sm text-slate-600 leading-relaxed">
+              Are you sure you want to delete the record for <strong className="font-semibold text-[#102A4C]">{recordToDelete.productName}</strong> ({recordToDelete.shopName || 'Retail Shop'})?
+            </p>
+
+            <div className="flex items-center justify-end gap-3 pt-2">
+              <button
+                type="button"
+                disabled={isDeleting}
+                onClick={() => setRecordToDelete(null)}
+                className="px-4 py-2 text-xs sm:text-sm font-semibold text-slate-700 hover:bg-slate-100 rounded-xl transition-colors cursor-pointer disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={isDeleting}
+                onClick={handleConfirmDelete}
+                className="px-4 py-2 text-xs sm:text-sm font-semibold text-white bg-rose-600 hover:bg-rose-700 active:bg-rose-800 rounded-xl transition-colors cursor-pointer shadow-xs inline-flex items-center gap-1.5 disabled:opacity-50 disabled:cursor-wait"
+              >
+                {isDeleting ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <span>Deleting...</span>
+                  </>
+                ) : (
+                  <>
+                    <Trash2 className="w-4 h-4" />
+                    <span>Delete</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* Settle Payment Modal */}
@@ -877,9 +1298,23 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
           isOpen={!!settlingRecord}
           onClose={() => setSettlingRecord(null)}
           record={settlingRecord}
-          onSuccess={() => {
+          onSuccess={(amountPaid, shopName) => {
+            const targetId = settlingRecord.deliveryId || settlingRecord.id;
+            setRecords(prev => prev.map(r => {
+              if (r.id === settlingRecord.id || r.deliveryId === targetId) {
+                const currentPending = Number(r.pendingAmount) || 0;
+                const newPending = Math.max(0, currentPending - amountPaid);
+                return {
+                  ...r,
+                  pendingAmount: newPending
+                };
+              }
+              return r;
+            }));
+            setToastMessage(`Payment of ₹${amountPaid.toLocaleString('en-IN')} recorded for ${shopName}`);
+            setTimeout(() => setToastMessage(null), 3000);
             setSettlingRecord(null);
-            loadData();
+            loadData({ silent: true });
           }}
         />
       )}

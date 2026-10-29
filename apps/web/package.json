@@ -6,6 +6,7 @@
     "prebuild": "npm run build --workspace=@crimpston/shared",
     "dev": "vite",
     "dev:all": "npm run dev --prefix ../..",
+    "start": "npm run dev --prefix ../..",
     "build": "tsc && vite build",
     "preview": "vite preview",
     "test": "vitest run"

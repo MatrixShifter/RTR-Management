@@ -98,7 +98,7 @@ export async function provisionDemoAccount() {
     throw new Error('Demo authentication verification failed');
   }
 
-  console.log(`✓ Verification successful: demo user authenticated with token ${authData.session.access_token.slice(0, 15)}...`);
+  console.log('✓ Verification successful: demo user session established successfully.');
   return demoUser;
 }
 

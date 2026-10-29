@@ -25,10 +25,15 @@ export const AppLoadingScreen: React.FC<AppLoadingScreenProps> = ({
       <div className="flex flex-col items-center space-y-6 max-w-md text-center">
         {/* Brand Icon */}
         <div className="relative">
-          <div className="w-16 h-16 rounded-2xl bg-crimpston-blue flex items-center justify-center shadow-lg shadow-blue-500/30">
-            <svg className="w-8 h-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" />
-            </svg>
+          <div className="w-20 h-16 rounded-2xl bg-[#0C1E38] p-2 flex items-center justify-center shadow-lg shadow-blue-500/20 border border-[#1F3A60]">
+            <img
+              src="/rtr-logo.png"
+              alt="RTR Mobiles logo"
+              className="w-full h-full object-contain"
+              width="80"
+              height="64"
+              loading="eager"
+            />
           </div>
           {!error && (
             <div className="absolute -inset-1 rounded-2xl bg-blue-500/20 filter blur-sm -z-10 animate-ping"></div>

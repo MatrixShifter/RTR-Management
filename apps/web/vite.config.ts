@@ -2,7 +2,6 @@ import { defineConfig, type Plugin } from 'vite';
 import react from '@vitejs/plugin-react';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { spawn } from 'child_process';
 import net from 'net';
 
 const currentDir = import.meta.dirname ?? path.dirname(fileURLToPath(import.meta.url));
@@ -10,7 +9,7 @@ const currentDir = import.meta.dirname ?? path.dirname(fileURLToPath(import.meta
 function checkPortOpen(port: number, host = '127.0.0.1'): Promise<boolean> {
   return new Promise((resolve) => {
     const socket = new net.Socket();
-    socket.setTimeout(350);
+    socket.setTimeout(250);
     socket.on('connect', () => {
       socket.destroy();
       resolve(true);
@@ -27,58 +26,67 @@ function checkPortOpen(port: number, host = '127.0.0.1'): Promise<boolean> {
   });
 }
 
-function apiServerDevPlugin(): Plugin {
+/**
+ * Non-invasive backend readiness helper for Vite dev server.
+ * Instead of spawning a competing duplicate process, it gracefully verifies
+ * whether the backend API is ready on port 4000 before Vite accepts traffic.
+ */
+function apiReadinessPlugin(): Plugin {
   return {
-    name: 'api-server-dev',
-    apply: 'serve', // Only active during `vite` dev server, never during build
-    async configureServer(server) {
-      const isRunning = await checkPortOpen(4000);
-      if (!isRunning) {
-        const tsxCli = path.resolve(currentDir, '../../node_modules/tsx/dist/cli.mjs');
-        const serverFile = path.resolve(currentDir, '../api/src/server.ts');
-        const apiCwd = path.resolve(currentDir, '../api');
+    name: 'api-readiness-check',
+    apply: 'serve',
+    async configureServer() {
+      const targetPort = 4000;
+      const maxWaitMs = 15000;
+      const pollIntervalMs = 200;
+      const startTime = Date.now();
 
-        const apiProcess = spawn(process.execPath, [tsxCli, 'watch', serverFile], {
-          cwd: apiCwd,
-          stdio: 'inherit'
-        });
+      // Check if backend is already listening
+      let isReady = await checkPortOpen(targetPort);
+      
+      // If not yet ready (e.g. during concurrent npm run dev startup), wait up to maxWaitMs
+      while (!isReady && (Date.now() - startTime) < maxWaitMs) {
+        await new Promise(r => setTimeout(r, pollIntervalMs));
+        isReady = await checkPortOpen(targetPort);
+      }
 
-        const cleanup = () => {
-          try {
-            apiProcess.kill();
-          } catch {}
-        };
-
-        server.httpServer?.on('close', cleanup);
-        process.on('exit', cleanup);
-        process.on('SIGINT', cleanup);
-        process.on('SIGTERM', cleanup);
+      if (isReady) {
+        // eslint-disable-next-line no-console
+        console.log(`\x1b[32m[vite]\x1b[0m ✓ RTR Wholesale API backend is ready on port ${targetPort} (http://127.0.0.1:${targetPort})`);
+      } else {
+        // eslint-disable-next-line no-console
+        console.log(`\x1b[33m[vite]\x1b[0m ⚠ RTR Wholesale API backend not detected on port ${targetPort}. Running in frontend mode.`);
+        // eslint-disable-next-line no-console
+        console.log(`\x1b[36m[vite]\x1b[0m ℹ Tip: To start both backend API and frontend together, run: npm run dev (or npm start)`);
       }
     }
   };
 }
 
 export default defineConfig({
-  plugins: [react(), apiServerDevPlugin()],
+  plugins: [react(), apiReadinessPlugin()],
   resolve: {
     alias: {
       '@crimpston/shared': path.resolve(currentDir, '../../packages/shared/src/index.ts')
     }
   },
   build: {
+    sourcemap: false,
     chunkSizeWarningLimit: 600,
     rollupOptions: {
       output: {
         manualChunks(id: string) {
           if (id.includes('node_modules')) {
-            if (id.includes('react') || id.includes('react-dom') || id.includes('react-router')) {
+            if (
+              id.includes('react') || 
+              id.includes('react-dom') || 
+              id.includes('react-router') || 
+              id.includes('scheduler')
+            ) {
               return 'vendor-react';
             }
             if (id.includes('@supabase')) {
               return 'vendor-supabase';
-            }
-            if (id.includes('@tanstack')) {
-              return 'vendor-query';
             }
             if (id.includes('lucide-react')) {
               return 'vendor-icons';
@@ -92,17 +100,26 @@ export default defineConfig({
     port: 5173,
     proxy: {
       '/api': {
-        target: process.env.API_TARGET_URL || 'http://127.0.0.1:4000',
+        target: process.env.API_TARGET_URL || process.env.API_BASE_URL || 'http://127.0.0.1:4000',
         changeOrigin: true,
         secure: false,
         configure: (proxy) => {
-          proxy.on('error', (_err, _req, res) => {
+          proxy.on('error', (err, req, res) => {
+            const isConnRefused = (err as any)?.code === 'ECONNREFUSED';
+            const sanitizedUrl = req.url ? req.url.split('?')[0] : '';
+            // eslint-disable-next-line no-console
+            console.warn(`[vite proxy] Target 127.0.0.1:4000 unreachable for ${req.method} ${sanitizedUrl} (${(err as any)?.code || err.message})`);
             if (res && !res.headersSent && typeof (res as any).writeHead === 'function') {
-              (res as any).writeHead(503, { 'Content-Type': 'application/json' });
+              (res as any).writeHead(503, { 
+                'Content-Type': 'application/json',
+                'Retry-After': '1'
+              });
               res.end(JSON.stringify({
                 valid: false,
-                error: 'Backend API Service Unavailable',
-                message: 'The RTR Wholesale backend service is currently unreachable on port 4000.'
+                error: isConnRefused ? 'BACKEND_CONNECTION_REFUSED' : 'BACKEND_SERVICE_UNAVAILABLE',
+                message: isConnRefused
+                  ? 'Unable to connect to RTR API at 127.0.0.1:4000. Ensure the backend server is running.'
+                  : 'The RTR Wholesale backend service is currently unreachable on port 4000.'
               }));
             }
           });

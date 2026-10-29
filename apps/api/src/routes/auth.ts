@@ -18,7 +18,7 @@ const supabaseAnon = createClient(config.SUPABASE_URL, config.SUPABASE_ANON_KEY,
   }
 });
 
-const supabaseAdmin = createClient(config.SUPABASE_URL, config.SUPABASE_SERVICE_ROLE_KEY, {
+export const supabaseAdmin = createClient(config.SUPABASE_URL, config.SUPABASE_SERVICE_ROLE_KEY, {
   auth: {
     persistSession: false,
     autoRefreshToken: false
@@ -30,11 +30,13 @@ export const RECOVERY_CONFIRMATION_MSG = "If an account matches the information 
 export const OWNER_ONLY_ACCESS_MSG = "Access restricted to Business Owner only.";
 
 // Verified system username mappings for the authorized business owner and demo account
+export const configuredOwnerEmail = (process.env.OWNER_EMAIL || 'vinov042007@gmail.com').trim().toLowerCase();
+
 const VERIFIED_USERNAME_MAP: Record<string, string> = {
-  'owner': 'owner@rtrmobiles.com',
-  'vino': 'owner@rtrmobiles.com',
-  'rtrowner': 'owner@rtrmobiles.com',
-  'rtrmobiles': 'owner@rtrmobiles.com',
+  'owner': configuredOwnerEmail,
+  'vino': configuredOwnerEmail,
+  'rtrowner': configuredOwnerEmail,
+  'rtrmobiles': configuredOwnerEmail,
   'demo-owner': 'demo-owner@rtrmobiles.com'
 };
 
@@ -44,13 +46,24 @@ const VERIFIED_USERNAME_MAP: Record<string, string> = {
  */
 export async function resolveIdentifierToEmail(identifier: string): Promise<string | null> {
   const clean = identifier.trim().toLowerCase();
-  if (clean.includes('@')) {
-    return clean;
-  }
 
   // 1. Check verified owner username map
   if (VERIFIED_USERNAME_MAP[clean]) {
     return VERIFIED_USERNAME_MAP[clean];
+  }
+
+  // 2. Map known alias emails directly to the authoritative owner email
+  if (
+    clean === 'owner@rtrmobiles.com' ||
+    clean === 'vinov042007@gmail.com' ||
+    clean === 'vinoth42007@gmail.com' ||
+    clean === configuredOwnerEmail
+  ) {
+    return configuredOwnerEmail;
+  }
+
+  if (clean.includes('@')) {
+    return clean;
   }
 
   // 2. Query profiles table
@@ -107,13 +120,21 @@ authRouter.post('/login', authRateLimiter, async (req: Request, res: Response) =
     // Completely isolated from live owner accounts and Supabase database
     const configuredDemoUser = (process.env.DEMO_USERNAME || DEMO_USERNAME).trim().toLowerCase();
     const configuredDemoPass = process.env.DEMO_PASSWORD || DEMO_PASSWORD_PLACEHOLDER;
-    const isDemoEnabled = process.env.DEMO_ENABLED !== 'false';
+    const isDemoEnabled = process.env.NODE_ENV !== 'production' && process.env.DEMO_ENABLED !== 'false';
 
     if (cleanUser === configuredDemoUser || cleanUser === 'demo-owner@rtrmobiles.com') {
       if (!isDemoEnabled) {
+        logSecurityEvent({
+          action: 'DEMO_LOGIN_BLOCKED',
+          category: 'auth_login',
+          status: 'BLOCKED',
+          statusCode: 403,
+          correlationId: (req.headers['x-correlation-id'] as string),
+          errorCategory: 'demo_disabled'
+        });
         return res.status(403).json({
           success: false,
-          message: 'Demo access is currently disabled by administrator.'
+          message: 'Demo access is disabled in production.'
         });
       }
 
@@ -127,9 +148,10 @@ authRouter.post('/login', authRateLimiter, async (req: Request, res: Response) =
         if (!authError && authData.session && authData.user) {
           logSecurityEvent({
             action: 'DEMO_LOGIN',
-            actorId: authData.user.id,
+            category: 'auth_login',
             status: 'SUCCESS',
-            ip: req.ip
+            statusCode: 200,
+            correlationId: (req.headers['x-correlation-id'] as string)
           });
 
           return res.status(200).json({
@@ -150,17 +172,21 @@ authRouter.post('/login', authRateLimiter, async (req: Request, res: Response) =
             }
           });
         }
-      } catch (err) {
-        console.warn('[Demo Supabase Auth Error]', err);
+      } catch {
+        logger.warn('Demo authentication service error', {
+          correlationId: (req.headers['x-correlation-id'] as string)
+        });
       }
 
       // 2. If password does not match configured demo password, reject with 401
       if (password !== configuredDemoPass) {
         logSecurityEvent({
           action: 'DEMO_LOGIN',
+          category: 'auth_login',
           status: 'FAILURE',
-          ip: req.ip,
-          details: { reason: 'Incorrect credentials' }
+          statusCode: 401,
+          correlationId: (req.headers['x-correlation-id'] as string),
+          errorCategory: 'invalid_credentials'
         });
         return res.status(401).json({
           success: false,
@@ -169,6 +195,14 @@ authRouter.post('/login', authRateLimiter, async (req: Request, res: Response) =
       }
 
       // 3. Fallback isolated sandbox session if Supabase Auth is offline
+      logSecurityEvent({
+        action: 'DEMO_LOGIN',
+        category: 'auth_login',
+        status: 'SUCCESS',
+        statusCode: 200,
+        correlationId: (req.headers['x-correlation-id'] as string)
+      });
+
       const demoToken = `demo-session-${crypto.randomUUID()}`;
       return res.status(200).json({
         success: true,
@@ -236,9 +270,11 @@ authRouter.post('/login', authRateLimiter, async (req: Request, res: Response) =
     if (error || !data.user || !data.session) {
       logSecurityEvent({
         action: 'OWNER_LOGIN',
+        category: 'auth_login',
         status: 'FAILURE',
-        ip: req.ip,
-        details: { identifier: username }
+        statusCode: 401,
+        correlationId: (req.headers['x-correlation-id'] as string),
+        errorCategory: 'invalid_credentials'
       });
       return res.status(401).json({
         success: false,
@@ -256,10 +292,11 @@ authRouter.post('/login', authRateLimiter, async (req: Request, res: Response) =
     if (!membership || membership.role !== 'owner' || !membership.is_active) {
       logSecurityEvent({
         action: 'EMPLOYEE_LOGIN_BLOCKED',
-        actorId: data.user.id,
+        category: 'auth_login',
         status: 'BLOCKED',
-        ip: req.ip,
-        details: { role: membership?.role || 'none' }
+        statusCode: 403,
+        correlationId: (req.headers['x-correlation-id'] as string),
+        errorCategory: 'unauthorized_role'
       });
       return res.status(403).json({
         success: false,
@@ -269,9 +306,10 @@ authRouter.post('/login', authRateLimiter, async (req: Request, res: Response) =
 
     logSecurityEvent({
       action: 'OWNER_LOGIN',
-      actorId: data.user.id,
+      category: 'auth_login',
       status: 'SUCCESS',
-      ip: req.ip
+      statusCode: 200,
+      correlationId: (req.headers['x-correlation-id'] as string)
     });
 
     return res.status(200).json({
@@ -291,7 +329,10 @@ authRouter.post('/login', authRateLimiter, async (req: Request, res: Response) =
       }
     });
   } catch (err: any) {
-    console.error('[Auth Service Error]', err);
+    logger.error('Authentication service failure during login', { 
+      correlationId: (req.headers['x-correlation-id'] as string),
+      path: req.path
+    });
     return res.status(503).json({
       success: false,
       message: "Unable to connect to authentication service. Please check your connection and try again."
@@ -330,12 +371,16 @@ authRouter.post('/forgot-password', passwordRecoveryRateLimiter, async (req: Req
     if (targetEmail) {
       let isOwner = false;
 
-      // 1. Direct check against known owner emails
+      // 1. Direct check against known owner emails & aliases
       if (
         cleanId === 'owner' || 
         cleanId === 'vino' || 
+        cleanId === 'rtrowner' ||
+        cleanId === 'rtrmobiles' ||
+        targetEmail === configuredOwnerEmail ||
         targetEmail === 'owner@rtrmobiles.com' || 
-        targetEmail === 'vinoth42007@gmail.com'
+        targetEmail === 'vinoth42007@gmail.com' ||
+        targetEmail === 'vinov042007@gmail.com'
       ) {
         isOwner = true;
       }
@@ -384,51 +429,79 @@ authRouter.post('/forgot-password', passwordRecoveryRateLimiter, async (req: Req
 
       if (isOwner) {
         const defaultOrigin = config.CORS_ORIGIN || 'http://localhost:5173';
-        const redirectUrl = redirectTo && (redirectTo.startsWith('http://') || redirectTo.startsWith('https://'))
-          ? redirectTo
-          : `${defaultOrigin}/reset-password`;
+        let redirectUrl = `${defaultOrigin}/reset-password`;
+
+        if (typeof redirectTo === 'string' && redirectTo.trim()) {
+          try {
+            const parsedRedirect = new URL(redirectTo);
+            const isLocal = ['localhost', '127.0.0.1'].includes(parsedRedirect.hostname);
+            const isConfiguredOrigin = parsedRedirect.origin === config.CORS_ORIGIN;
+            const isApprovedDomain = parsedRedirect.hostname.endsWith('.vercel.app') || 
+                                     parsedRedirect.hostname === 'rtrmobiles.com' ||
+                                     parsedRedirect.hostname.endsWith('.rtrmobiles.com');
+
+            // Strictly allow only verified origins and paths matching /reset-password
+            if ((isLocal || isConfiguredOrigin || isApprovedDomain) && parsedRedirect.pathname === '/reset-password') {
+              redirectUrl = parsedRedirect.href;
+            }
+          } catch {
+            // Malformed URL falls back safely to defaultOrigin/reset-password
+          }
+        }
 
         const { error } = await supabaseAdmin.auth.resetPasswordForEmail(targetEmail, {
           redirectTo: redirectUrl
         });
 
-        let directLink: string | undefined;
-        try {
-          const { data: linkData } = await supabaseAdmin.auth.admin.generateLink({
-            type: 'recovery',
-            email: targetEmail,
-            options: { redirectTo: redirectUrl }
-          });
-          directLink = linkData?.properties?.action_link;
-          if (directLink) {
-            logger.info(`[Password Recovery Link Generated] Link for ${targetEmail}: ${directLink}`);
-          }
-        } catch {
-          // ignore
-        }
-
         if (error) {
-          logger.warn(`[Password Recovery Info] Reset requested for ${targetEmail}: ${error.message}`);
-        } else {
-          logSecurityEvent({
-            action: 'PASSWORD_RECOVERY_REQUESTED',
-            status: 'SUCCESS',
-            ip: req.ip,
-            details: { targetEmail }
+          logger.error('Password recovery request failed with provider', {
+            correlationId: (req.headers['x-correlation-id'] as string),
+            errorCategory: 'provider_error',
+            status: error.status,
+            code: (error as any).code,
+            message: error.message
+          });
+
+          if (
+            error.status === 429 || 
+            (error as any).code === 'over_email_send_rate_limit' || 
+            error.message.toLowerCase().includes('rate limit')
+          ) {
+            return res.status(429).json({
+              success: false,
+              message: 'Email delivery rate limit exceeded. Please wait a few minutes before requesting another reset link, or configure custom SMTP in Supabase.'
+            });
+          }
+
+          return res.status(503).json({
+            success: false,
+            message: 'Unable to deliver password reset email at this time. Please try again later.'
           });
         }
 
-        if ((config.NODE_ENV === 'development' || config.NODE_ENV === 'test') && directLink) {
-          return res.status(200).json({
-            success: true,
-            message: RECOVERY_CONFIRMATION_MSG,
-            devRecoveryLink: directLink
-          });
-        }
+        logSecurityEvent({
+          action: 'PASSWORD_RECOVERY_REQUESTED',
+          category: 'auth_recovery',
+          status: 'SUCCESS',
+          statusCode: 200,
+          correlationId: (req.headers['x-correlation-id'] as string)
+        });
+
+        return res.status(200).json({
+          success: true,
+          message: RECOVERY_CONFIRMATION_MSG
+        });
       }
     }
-  } catch (err) {
-    console.error('[Password Recovery Error]', err);
+  } catch (err: any) {
+    logger.error('Password recovery service error', {
+      correlationId: (req.headers['x-correlation-id'] as string),
+      message: err?.message
+    });
+    return res.status(500).json({
+      success: false,
+      message: 'Internal server error processing password recovery.'
+    });
   }
 
   // Never reveal whether a user or email exists
@@ -472,7 +545,21 @@ authRouter.post('/reset-password', async (req: Request, res: Response) => {
       });
     }
 
-    // 2. Update user's password in Supabase Auth using Admin client
+    // 2. Role authorization guard: verify account is an active Business Owner
+    const { data: membership } = await supabaseAdmin
+      .from('business_memberships')
+      .select('role, is_active')
+      .eq('user_id', user.id)
+      .maybeSingle();
+
+    if (membership && (membership.role !== 'owner' || !membership.is_active)) {
+      return res.status(403).json({
+        success: false,
+        message: 'Access restricted to Business Owner only.'
+      });
+    }
+
+    // 3. Update user's password in Supabase Auth using Admin client
     const { error: updateError } = await supabaseAdmin.auth.admin.updateUserById(user.id, {
       password: password
     });
@@ -480,30 +567,34 @@ authRouter.post('/reset-password', async (req: Request, res: Response) => {
     if (updateError) {
       logSecurityEvent({
         action: 'PASSWORD_RESET',
-        actorId: user.id,
+        category: 'auth_recovery',
         status: 'FAILURE',
-        ip: req.ip,
-        details: { error: updateError.message }
+        statusCode: 500,
+        correlationId: (req.headers['x-correlation-id'] as string),
+        errorCategory: 'update_failed'
       });
       return res.status(500).json({
         success: false,
-        message: updateError.message || 'Failed to update password.'
+        message: 'Failed to update password. Please try again or request a new recovery link.'
       });
     }
 
     logSecurityEvent({
       action: 'PASSWORD_RESET',
-      actorId: user.id,
+      category: 'auth_recovery',
       status: 'SUCCESS',
-      ip: req.ip
+      statusCode: 200,
+      correlationId: (req.headers['x-correlation-id'] as string)
     });
 
     return res.status(200).json({
       success: true,
       message: 'Password reset successfully. You may now sign in with your new password.'
     });
-  } catch (err: any) {
-    console.error('[Reset Password Error]', err);
+  } catch {
+    logger.error('Password reset handler error', {
+      correlationId: (req.headers['x-correlation-id'] as string)
+    });
     return res.status(500).json({
       success: false,
       message: 'Internal server error during password reset.'
@@ -586,8 +677,11 @@ authRouter.get('/verify-session', async (req: Request, res: Response) => {
         role: 'owner'
       }
     });
-  } catch (err: any) {
-    logger.warn('Session verification caught exception', { message: err?.message });
+  } catch {
+    logger.warn('Session verification caught exception', {
+      correlationId: (req.headers['x-correlation-id'] as string),
+      errorCategory: 'verification_failed'
+    });
     return res.status(401).json({ valid: false, message: 'Session verification failed.' });
   }
 });

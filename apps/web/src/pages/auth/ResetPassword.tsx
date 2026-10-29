@@ -40,12 +40,24 @@ export const ResetPassword: React.FC<ResetPasswordProps> = ({
           return;
         }
 
-        // 1. Check for error parameters in URL (e.g. expired link from Supabase)
-        const urlParams = new URLSearchParams(window.location.search);
-        const errorDesc = urlParams.get('error_description') || urlParams.get('error');
+        // Parse both query parameters (?code=...) and hash fragment parameters (#access_token=...)
+        const searchParams = new URLSearchParams(window.location.search);
+        const hashStr = window.location.hash.startsWith('#') ? window.location.hash.slice(1) : window.location.hash;
+        const hashParams = new URLSearchParams(hashStr);
+
+        // 1. Check for error parameters in either URL query or hash fragment (e.g. expired link from Supabase)
+        const errorDesc = hashParams.get('error_description') ||
+                          searchParams.get('error_description') ||
+                          hashParams.get('error') ||
+                          searchParams.get('error');
         if (errorDesc) {
           if (isMounted) {
-            setErrorMsg(decodeURIComponent(errorDesc).replace(/\+/g, ' '));
+            const decoded = decodeURIComponent(errorDesc).replace(/\+/g, ' ');
+            setErrorMsg(
+              decoded.toLowerCase().includes('expired') || decoded.toLowerCase().includes('invalid')
+                ? 'The password reset link is invalid or has expired. Please request a new recovery link.'
+                : decoded
+            );
             setHasValidRecoverySession(false);
             setIsVerifyingSession(false);
           }
@@ -53,11 +65,13 @@ export const ResetPassword: React.FC<ResetPasswordProps> = ({
         }
 
         // 2. Handle PKCE authorization code in query string: ?code=...
-        const code = urlParams.get('code');
+        const code = searchParams.get('code');
         if (code) {
           const { data, error } = await supabase.auth.exchangeCodeForSession(code);
           if (error) {
-            console.warn('[Recovery PKCE Exchange Error]', error.message);
+            if (process.env.NODE_ENV !== 'production') {
+              console.warn('[Recovery Session Error]', 'PKCE exchange was unsuccessful');
+            }
             if (isMounted) {
               setErrorMsg(error.message || 'The password reset link is invalid or has expired.');
               setHasValidRecoverySession(false);
@@ -77,15 +91,17 @@ export const ResetPassword: React.FC<ResetPasswordProps> = ({
         }
 
         // 3. Handle Token Hash / OTP query string: ?token_hash=...&type=recovery
-        const tokenHash = urlParams.get('token_hash');
-        const type = urlParams.get('type');
+        const tokenHash = searchParams.get('token_hash');
+        const type = searchParams.get('type') || hashParams.get('type');
         if (tokenHash && type === 'recovery') {
           const { data, error } = await supabase.auth.verifyOtp({
             token_hash: tokenHash,
             type: 'recovery'
           });
           if (error) {
-            console.warn('[Recovery OTP Verification Error]', error.message);
+            if (process.env.NODE_ENV !== 'production') {
+              console.warn('[Recovery Session Error]', 'OTP token hash verification was unsuccessful');
+            }
             if (isMounted) {
               setErrorMsg(error.message || 'The password reset link is invalid or has expired.');
               setHasValidRecoverySession(false);
@@ -103,11 +119,27 @@ export const ResetPassword: React.FC<ResetPasswordProps> = ({
           }
         }
 
-        // 4. Check URL hash fragment (Implicit flow): #access_token=...&type=recovery
-        const hash = window.location.hash || '';
-        if (hash.includes('access_token=') || hash.includes('type=recovery')) {
-          const { data: { session } } = await supabase.auth.getSession();
-          if (session) {
+        // 4. Handle URL hash fragment tokens (Implicit flow): #access_token=...&refresh_token=...
+        const accessToken = hashParams.get('access_token');
+        const refreshToken = hashParams.get('refresh_token');
+        if (accessToken && refreshToken) {
+          const { data, error } = await supabase.auth.setSession({
+            access_token: accessToken,
+            refresh_token: refreshToken
+          });
+          if (error) {
+            if (process.env.NODE_ENV !== 'production') {
+              console.warn('[Recovery Session Error]', 'Session initialization was unsuccessful');
+            }
+            if (isMounted) {
+              setErrorMsg(error.message || 'The password reset link is invalid or has expired.');
+              setHasValidRecoverySession(false);
+              setIsVerifyingSession(false);
+            }
+            return;
+          }
+          if (data.session) {
+            window.history.replaceState({}, document.title, window.location.pathname);
             if (isMounted) {
               setHasValidRecoverySession(true);
               setIsVerifyingSession(false);
@@ -116,7 +148,7 @@ export const ResetPassword: React.FC<ResetPasswordProps> = ({
           }
         }
 
-        // 5. Check existing active Supabase session
+        // 5. Check existing active Supabase session (e.g. on page refresh after session set)
         const { data: { session } } = await supabase.auth.getSession();
         if (session?.user) {
           if (isMounted) {
@@ -181,6 +213,8 @@ export const ResetPassword: React.FC<ResetPasswordProps> = ({
     setIsLoading(true);
     try {
       await updatePassword(password);
+      setPassword('');
+      setConfirmPassword('');
       setIsSuccess(true);
     } catch (err: any) {
       setErrorMsg(err?.message || 'Failed to update password. Your recovery link may have expired.');
@@ -192,8 +226,15 @@ export const ResetPassword: React.FC<ResetPasswordProps> = ({
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col justify-center py-12 px-4 sm:px-6 lg:px-8 animate-fade-in">
       <div className="sm:mx-auto sm:w-full sm:max-w-md text-center">
-        <div className="w-14 h-14 rounded-2xl bg-[#0F172A] text-white flex items-center justify-center font-black text-xl mx-auto shadow-md border border-slate-700 tracking-tight">
-          RTR
+        <div className="w-20 h-16 sm:w-24 sm:h-20 rounded-2xl bg-[#0C1E38] p-2 flex items-center justify-center mx-auto shadow-md border border-slate-700/60 tracking-tight">
+          <img
+            src="/rtr-logo.png"
+            alt="RTR Mobiles logo"
+            className="w-full h-full object-contain drop-shadow-sm"
+            width="96"
+            height="80"
+            loading="eager"
+          />
         </div>
         <h1 className="mt-4 text-2xl sm:text-3xl font-extrabold tracking-tight text-slate-900">
           Create New Password
@@ -204,7 +245,7 @@ export const ResetPassword: React.FC<ResetPasswordProps> = ({
       </div>
 
       <div className="mt-8 sm:mx-auto sm:w-full sm:max-w-md">
-        <div className="bg-white py-8 px-6 sm:px-10 shadow-sm border border-slate-200/90 rounded-2xl">
+        <div className="bg-white py-6 sm:py-8 px-4 sm:px-10 shadow-sm border border-slate-200/90 rounded-2xl">
           {isVerifyingSession ? (
             <div className="py-8 text-center space-y-3">
               <div className="w-8 h-8 border-3 border-blue-600/30 border-t-blue-600 rounded-full animate-spin mx-auto" />

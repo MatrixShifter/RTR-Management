@@ -8,6 +8,8 @@ import { standardRateLimiter } from './middleware/rateLimiter.js';
 import { errorHandler } from './middleware/errorHandler.js';
 import { authRouter } from './routes/auth.js';
 import { recordsRouter } from './routes/records.js';
+import { shopsRouter } from './routes/shops.js';
+import { productsRouter } from './routes/products.js';
 import { type HealthResponse, type DatabaseStorageHealth, evaluateStorageHealth } from '@crimpston/shared';
 
 export const app = express();
@@ -66,8 +68,42 @@ app.use((req, res, next) => {
   next();
 });
 
+// Production-Safe HTTP Access Logging:
+// - Sanitizes query parameters containing sensitive tokens or credentials
+// - Omits authorization headers, cookies, request bodies, and personal identifiers
+// - Suppresses repetitive routine polls (GET /api/auth/verify-session) when successful
 if (config.NODE_ENV !== 'test') {
-  app.use(morgan(':method :url :status :res[content-length] - :response-time ms'));
+  morgan.token('clean-url', (req: express.Request) => {
+    const rawUrl = req.originalUrl || req.url || '';
+    try {
+      const parsed = new URL(rawUrl, 'http://localhost');
+      if (parsed.search) {
+        const params = new URLSearchParams(parsed.search);
+        for (const key of params.keys()) {
+          if (/token|key|secret|code|password|auth|jwt/i.test(key)) {
+            params.set(key, '[REDACTED]');
+          }
+        }
+        return `${parsed.pathname}?${params.toString()}`;
+      }
+      return parsed.pathname;
+    } catch {
+      return rawUrl.split('?')[0];
+    }
+  });
+
+  app.use(
+    morgan(':method :clean-url :status :res[content-length] - :response-time ms', {
+      skip: (req, res) => {
+        const url = req.originalUrl || req.url || '';
+        // Skip routine successful session verification polls to avoid terminal clutter
+        if ((url.startsWith('/api/auth/verify-session') || url.startsWith('/api/health')) && res.statusCode < 400) {
+          return true;
+        }
+        return false;
+      }
+    })
+  );
 }
 
 // Request parsers & rate limiting (100kb limit)
@@ -112,6 +148,10 @@ app.use(['/api/auth', '/auth'], authRouter);
 
 // Business Records routes (Protected Business Owner Ledger)
 app.use(['/api/records', '/records'], recordsRouter);
+
+// Catalog routes (Shops & Products management)
+app.use(['/api/shops', '/shops'], shopsRouter);
+app.use(['/api/products', '/products'], productsRouter);
 
 // Centralized error handling
 app.use(errorHandler);

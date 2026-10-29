@@ -5,7 +5,8 @@ import {
   Calendar, 
   CheckCircle2, 
   Clock, 
-  IndianRupee 
+  IndianRupee,
+  Trash2 
 } from 'lucide-react';
 import type { BusinessRecord } from '../services/db.js';
 
@@ -14,6 +15,7 @@ export interface RecordDetailsModalProps {
   onClose: () => void;
   record: BusinessRecord | null;
   onToggleDelivery?: (record: BusinessRecord) => void;
+  onDelete?: (record: BusinessRecord) => void;
   // Preserved for backwards compatibility with existing caller interfaces
   onEdit?: (record: BusinessRecord) => void;
   onSettlePayment?: (record: BusinessRecord) => void;
@@ -24,7 +26,8 @@ export const RecordDetailsModal: React.FC<RecordDetailsModalProps> = ({
   isOpen = true,
   onClose,
   record,
-  onToggleDelivery
+  onToggleDelivery,
+  onDelete
 }) => {
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -69,11 +72,11 @@ export const RecordDetailsModal: React.FC<RecordDetailsModalProps> = ({
       aria-labelledby="record-details-title"
     >
       <div 
-        className="relative w-full max-w-md bg-white rounded-2xl shadow-xl border border-[#DCE4EC] overflow-hidden text-left"
+        className="relative w-full max-w-md bg-white rounded-2xl shadow-xl border border-[#DCE4EC] overflow-hidden text-left flex flex-col max-h-[90vh]"
         onClick={e => e.stopPropagation()}
       >
         {/* Header */}
-        <div className="flex items-center justify-between px-5 py-4 border-b border-[#E2E8F0] bg-[#F8FAFC]">
+        <div className="flex items-center justify-between px-5 py-4 border-b border-[#E2E8F0] bg-[#F8FAFC] flex-shrink-0">
           <div className="flex items-center gap-2.5 min-w-0">
             <h2 id="record-details-title" className="text-base sm:text-lg font-bold text-[#102A4C] truncate">
               Record Details
@@ -101,7 +104,7 @@ export const RecordDetailsModal: React.FC<RecordDetailsModalProps> = ({
         </div>
 
         {/* Record Information: Exactly the 4 simplified workflow fields */}
-        <div className="p-5 sm:p-6 space-y-4">
+        <div className="p-5 sm:p-6 space-y-4 overflow-y-auto flex-1">
           <div className="divide-y divide-[#E2E8F0] border border-[#E2E8F0] rounded-xl overflow-hidden bg-white shadow-2xs">
             {/* Field 1: Date */}
             <div className="flex items-center justify-between p-3.5 bg-[#F8FAFC]">
@@ -169,7 +172,20 @@ export const RecordDetailsModal: React.FC<RecordDetailsModalProps> = ({
         </div>
 
         {/* Footer Actions */}
-        <div className="flex items-center justify-end px-5 py-3.5 bg-slate-50 border-t border-[#E2E8F0]">
+        <div className="flex items-center justify-between px-5 py-3.5 bg-slate-50 border-t border-[#E2E8F0] flex-shrink-0">
+          {onDelete ? (
+            <button
+              type="button"
+              onClick={() => {
+                onClose();
+                onDelete(record);
+              }}
+              className="min-h-[40px] px-3 py-2 text-xs sm:text-sm font-semibold text-rose-600 hover:text-rose-700 hover:bg-rose-50 rounded-xl transition-colors cursor-pointer inline-flex items-center gap-1.5"
+            >
+              <Trash2 className="w-4 h-4 text-rose-500" />
+              <span>Delete Record</span>
+            </button>
+          ) : <div />}
           <button
             type="button"
             onClick={onClose}

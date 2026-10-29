@@ -1,6 +1,6 @@
 import { supabase, isSupabaseConfigured } from '../lib/supabase.js';
 import { DEMO_USERNAME, DEMO_PASSWORD_PLACEHOLDER } from '@crimpston/shared';
-import { setDemoMode } from './db.js';
+import { setDemoMode } from './demoMode.js';
 
 export { DEMO_USERNAME, DEMO_PASSWORD_PLACEHOLDER };
 
@@ -18,48 +18,18 @@ export const RECOVERY_CONFIRMATION_MSG = "If an account matches the information 
 export const NETWORK_ERROR_MSG = "Unable to connect to authentication service. Please check your connection and try again.";
 export const OWNER_ONLY_ACCESS_MSG = "Access restricted to Business Owner only.";
 
-const STORAGE_REMEMBER_KEY = 'rtr_remembered_username';
-let inMemoryRememberedUsername = '';
+export { getRememberedUsername, setRememberedUsername } from './rememberUsername.js';
 
-/**
- * Get remembered username if previously saved
- */
-export function getRememberedUsername(): string {
-  try {
-    if (typeof localStorage !== 'undefined') {
-      const stored = localStorage.getItem(STORAGE_REMEMBER_KEY);
-      if (stored) return stored;
-    }
-  } catch {
-    // fallback to in-memory
-  }
-  return inMemoryRememberedUsername;
-}
-
-/**
- * Save or clear remembered username
- */
-export function setRememberedUsername(username: string, remember: boolean): void {
-  const val = remember ? username.trim() : '';
-  inMemoryRememberedUsername = val;
-  try {
-    if (typeof localStorage !== 'undefined') {
-      if (val) {
-        localStorage.setItem(STORAGE_REMEMBER_KEY, val);
-      } else {
-        localStorage.removeItem(STORAGE_REMEMBER_KEY);
-      }
-    }
-  } catch {
-    // ignore
-  }
-}
+const configuredOwnerEmail = (import.meta.env?.VITE_OWNER_EMAIL || 'vinov042007@gmail.com').trim().toLowerCase();
 
 export const VERIFIED_USERNAME_MAP: Record<string, string> = {
-  'owner': 'owner@rtrmobiles.com',
-  'vino': 'owner@rtrmobiles.com',
-  'rtrowner': 'owner@rtrmobiles.com',
-  'rtrmobiles': 'owner@rtrmobiles.com',
+  'owner': configuredOwnerEmail,
+  'vino': configuredOwnerEmail,
+  'rtrowner': configuredOwnerEmail,
+  'rtrmobiles': configuredOwnerEmail,
+  'owner@rtrmobiles.com': configuredOwnerEmail,
+  'vinoth42007@gmail.com': configuredOwnerEmail,
+  'vinov042007@gmail.com': configuredOwnerEmail,
   'demo-owner': 'demo-owner@rtrmobiles.com'
 };
 
@@ -151,11 +121,10 @@ export async function signIn(username: string, password: string): Promise<AuthUs
           authError?.message?.toLowerCase().includes('network') ||
           (authError as any)?.name === 'AuthRetryableFetchError'
         ) {
-          // If offline and attempting demo account with placeholder password
-          if (
-            (cleanUsername.toLowerCase() === DEMO_USERNAME.toLowerCase() || email === 'demo-owner@rtrmobiles.com') &&
-            password === DEMO_PASSWORD_PLACEHOLDER
-          ) {
+          throw new Error(NETWORK_ERROR_MSG);
+        }
+        if (cleanUsername.toLowerCase() === DEMO_USERNAME.toLowerCase() || cleanUsername.toLowerCase() === 'demo-owner@rtrmobiles.com') {
+          if (password === DEMO_PASSWORD_PLACEHOLDER) {
             setDemoMode(true);
             return {
               id: 'deae5634-055a-4045-a6ac-fc00ed9e247a',
@@ -166,7 +135,6 @@ export async function signIn(username: string, password: string): Promise<AuthUs
               isDemo: true
             };
           }
-          throw new Error(NETWORK_ERROR_MSG);
         }
         throw new Error(INCORRECT_CREDENTIALS_MSG);
       }
@@ -258,12 +226,18 @@ export async function requestPasswordReset(identifier: string): Promise<string> 
       throw new Error(data.message || 'Email rate limit exceeded. Please wait a minute before requesting another reset link.');
     }
 
-    if (res.status >= 400 && res.status < 500) {
+    if (res.status >= 400) {
       const data = await res.json().catch(() => ({}));
       throw new Error(data.message || 'Unable to submit password recovery request.');
     }
   } catch (err: any) {
-    if (err.message && (err.message.includes('rate limit') || err.message.includes('wait') || err.message.includes('Unable to submit'))) {
+    if (err.message && (
+      err.message.includes('rate limit') || 
+      err.message.includes('wait') || 
+      err.message.includes('Unable') ||
+      err.message.includes('deliver') ||
+      err.message.includes('exceeded')
+    )) {
       throw err;
     }
 
@@ -304,43 +278,50 @@ export async function updatePassword(newPassword: string): Promise<void> {
   const { data: { session } } = await supabase.auth.getSession();
   const token = session?.access_token;
 
-  // 1. Client-side password update
-  const { error: clientError } = await supabase.auth.updateUser({
-    password: newPassword
-  });
+  if (!token) {
+    throw new Error('No active recovery session found. Please request a new recovery link.');
+  }
 
-  if (clientError) {
-    // If client-side failed, try server-side endpoint with token if available
-    if (token) {
-      const res = await fetch('/api/auth/reset-password', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`
-        },
-        body: JSON.stringify({ password: newPassword })
-      });
-      if (!res.ok) {
-        const errData = await res.json().catch(() => ({}));
-        throw new Error(errData.message || clientError.message || 'Failed to update password. Recovery link may have expired.');
-      }
-    } else {
-      throw new Error(clientError.message || 'Failed to update password. Recovery session expired.');
-    }
-  } else if (token) {
-    // Sync backend audit if token is present
-    fetch('/api/auth/reset-password', {
+  // 1. Primary: Update password via secure backend API endpoint (verifies owner role and emits security audit event)
+  try {
+    const res = await fetch('/api/auth/reset-password', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${token}`
       },
       body: JSON.stringify({ password: newPassword })
-    }).catch(() => {});
+    });
+
+    if (res.ok) {
+      // 2. Sign out of recovery session so subsequent logins strictly require new credentials
+      await supabase.auth.signOut().catch(() => {});
+      try {
+        localStorage.removeItem('rtr_current_user');
+        localStorage.removeItem('rtr_session_expiry');
+      } catch {}
+      return;
+    }
+
+    if (res.status === 400 || res.status === 401 || res.status === 403) {
+      const errData = await res.json().catch(() => ({}));
+      throw new Error(errData.message || 'Failed to update password. Recovery session may have expired.');
+    }
+  } catch (err: any) {
+    if (err.message && (err.message.includes('expired') || err.message.includes('at least 8 characters') || err.message.includes('restricted'))) {
+      throw err;
+    }
   }
 
-  // 2. CRITICAL: Safely sign out of the recovery session so that stale tokens
-  // do not prevent the user from logging in freshly with their new password.
+  // 2. Fallback: Direct Supabase client update if API server is unreachable
+  const { error: clientError } = await supabase.auth.updateUser({
+    password: newPassword
+  });
+
+  if (clientError) {
+    throw new Error(clientError.message || 'Failed to update password. Recovery session expired.');
+  }
+
   await supabase.auth.signOut().catch(() => {});
   try {
     localStorage.removeItem('rtr_current_user');

@@ -936,7 +936,7 @@ describe('OwnerDashboard Component — Modern UI & Simple Delivery/Pending Manag
       }
     ];
 
-    it('renders full-width search input with placeholder "Search products..." below heading', () => {
+    it('renders full-width search input with placeholder "Search by shop or product..." below heading', () => {
       const html = renderToString(
         <MemoryRouter>
           <OwnerDashboard
@@ -947,8 +947,8 @@ describe('OwnerDashboard Component — Modern UI & Simple Delivery/Pending Manag
         </MemoryRouter>
       );
 
-      expect(html).toContain('placeholder="Search products..."');
-      expect(html).toContain('aria-label="Search products"');
+      expect(html).toContain('placeholder="Search by shop or product..."');
+      expect(html).toContain('aria-label="Search by shop or product"');
       expect(html).toContain('Braided Lightning Cable 2m');
       expect(html).toContain('Fast GaN Charger 65W');
       expect(html).toContain('17,000');
@@ -1052,6 +1052,1243 @@ describe('OwnerDashboard Component — Modern UI & Simple Delivery/Pending Manag
       );
 
       expect(html).toContain('—');
+    });
+
+    it('renders delete/action icon button on records without introducing a 6th table header column', () => {
+      const html = renderToString(
+        <MemoryRouter>
+          <OwnerDashboard
+            initialLoading={false}
+            initialShops={[shopSample]}
+            initialRecords={mockRecords}
+          />
+        </MemoryRouter>
+      );
+
+      // Verify actions button is rendered inside the row for each product
+      expect(html).toContain('aria-label="Actions for Braided Lightning Cable 2m"');
+      expect(html).toContain('aria-label="Actions for Fast GaN Charger 65W"');
+
+      // Verify the <thead> has strictly exactly 5 <th> elements, NOT 6
+      const theadMatch = html.match(/<thead[\s\S]*?<\/thead>/);
+      expect(theadMatch).toBeTruthy();
+      const theadHtml = theadMatch![0];
+      const thCount = (theadHtml.match(/<th[\s>]/g) || []).length;
+      expect(thCount).toBe(5);
+    });
+
+    it('persists delivery updates and handles record deletion cleanly via db service', async () => {
+      // Create a test delivery in demo storage
+      const testRec: db.SaveBusinessRecordInput = {
+        date: '2026-10-26',
+        shopName: 'Supreme Mobiles',
+        productName: '9H Glass Screen Guard',
+        unitPrice: 150,
+        quantity: 10,
+        deliveryStatus: 'pending'
+      };
+
+      const saved = await db.saveBusinessRecord(testRec);
+      expect(saved.deliveryStatus).toBe('pending');
+
+      // Update delivery status via updateDeliveryStatus
+      const updateResult = await db.updateDeliveryStatus(saved.deliveryId, 'delivered');
+      expect(updateResult.success).toBe(true);
+      expect(updateResult.status).toBe('delivered');
+
+      const recordsAfterDelivery = await db.getBusinessRecords();
+      const updatedRec = recordsAfterDelivery.find(r => r.deliveryId === saved.deliveryId);
+      expect(updatedRec?.deliveryStatus).toBe('delivered');
+
+      // Uncheck / return to pending
+      const pendingResult = await db.updateDeliveryStatus(saved.deliveryId, 'pending');
+      expect(pendingResult.success).toBe(true);
+      expect(pendingResult.status).toBe('pending');
+
+      const recordsAfterPending = await db.getBusinessRecords();
+      const pendingRec = recordsAfterPending.find(r => r.deliveryId === saved.deliveryId);
+      expect(pendingRec?.deliveryStatus).toBe('pending');
+
+      // Delete business record via deleteBusinessRecord
+      await db.deleteBusinessRecord(saved.deliveryId);
+      const recordsAfterDelete = await db.getBusinessRecords();
+      const deletedRec = recordsAfterDelete.find(r => r.deliveryId === saved.deliveryId);
+      expect(deletedRec).toBeUndefined();
+
+      // Ensure catalog shop and product were NOT deleted
+      const shops = await db.getShops();
+      expect(shops.some(s => s.name === 'Supreme Mobiles')).toBe(true);
+    });
+  });
+
+  describe('Delivery Checkbox Complete Lifecycle Suite', () => {
+    const shopSample: db.Shop = {
+      id: 'shop-cycle',
+      name: 'RTR Lifecycle Hub',
+      code: 'RTR-LC',
+      address: 'Cycle Rd',
+      phone: '9998887770',
+      isActive: true,
+      assignedEmployees: []
+    };
+
+    it('renders empty pending section and empty delivered section gracefully', () => {
+      // Only delivered records: pending section has 0 rows
+      const onlyDelivered: db.BusinessRecord[] = [{
+        id: 'rec-deliv-only',
+        deliveryId: 'deliv-deliv-only',
+        date: '2026-10-26',
+        shopId: shopSample.id,
+        shopName: shopSample.name,
+        productId: 'prod-deliv-only',
+        productName: 'Delivered Only Earphones',
+        quantity: 2,
+        unitPrice: 500,
+        totalAmount: 1000,
+        deliveryStatus: 'delivered',
+        pendingAmount: 0,
+        createdAt: '2026-10-26T10:00:00Z'
+      }];
+
+      const html = renderToString(
+        <MemoryRouter>
+          <OwnerDashboard
+            initialLoading={false}
+            initialShops={[shopSample]}
+            initialRecords={onlyDelivered}
+          />
+        </MemoryRouter>
+      );
+
+      // Separator and delivered row render cleanly
+      expect(html).toContain('Delivered Items');
+      expect(html).toContain('Delivered Only Earphones');
+      expect(html).toContain('aria-checked="true"');
+    });
+
+    it('renders only pending records when no delivered items exist (separator is omitted)', () => {
+      const onlyPending: db.BusinessRecord[] = [{
+        id: 'rec-pend-only',
+        deliveryId: 'deliv-pend-only',
+        date: '2026-10-26',
+        shopId: shopSample.id,
+        shopName: shopSample.name,
+        productId: 'prod-pend-only',
+        productName: 'Pending Only Cable',
+        quantity: 1,
+        unitPrice: 200,
+        totalAmount: 200,
+        deliveryStatus: 'pending',
+        pendingAmount: 200,
+        createdAt: '2026-10-26T10:00:00Z'
+      }];
+
+      const html = renderToString(
+        <MemoryRouter>
+          <OwnerDashboard
+            initialLoading={false}
+            initialShops={[shopSample]}
+            initialRecords={onlyPending}
+          />
+        </MemoryRouter>
+      );
+
+      expect(html).toContain('Pending Only Cable');
+      expect(html).toContain('aria-checked="false"');
+      // Delivered separator is omitted when 0 delivered rows exist
+      expect(html).not.toContain('Delivered Items (moved to bottom)');
+    });
+
+    it('normalizes various delivery status inputs strictly into "delivered" or "pending"', () => {
+      expect(db.isDelivered('delivered')).toBe(true);
+      expect(db.isDelivered('Delivered')).toBe(true);
+      expect(db.isDelivered('completed')).toBe(true);
+      expect(db.isDelivered(true)).toBe(true);
+      expect(db.isDelivered('true')).toBe(true);
+
+      expect(db.isDelivered('pending')).toBe(false);
+      expect(db.isDelivered('false')).toBe(false);
+      expect(db.isDelivered(false)).toBe(false);
+      expect(db.isDelivered(null)).toBe(false);
+      expect(db.isDelivered(undefined)).toBe(false);
+      expect(db.isDelivered('')).toBe(false);
+
+      expect(db.normalizeDeliveryStatus('delivered')).toBe('delivered');
+      expect(db.normalizeDeliveryStatus('pending')).toBe('pending');
+      expect(db.normalizeDeliveryStatus('')).toBe('pending');
+      expect(db.normalizeDeliveryStatus(null)).toBe('pending');
+    });
+
+    it('persists delivery toggle through server API/storage and survives reload', async () => {
+      // 1. Save new business record (defaults to pending)
+      const record = await db.saveBusinessRecord({
+        date: '2026-10-27',
+        shopName: 'Galaxy Mobiles',
+        productName: 'Type-C OTG Adapter',
+        unitPrice: 80,
+        quantity: 5,
+        deliveryStatus: 'pending'
+      });
+
+      expect(record.deliveryStatus).toBe('pending');
+
+      // 2. Mark as delivered
+      const markResult = await db.updateDeliveryStatus(record.deliveryId, 'delivered');
+      expect(markResult.success).toBe(true);
+      expect(markResult.status).toBe('delivered');
+
+      // 3. Confirm reload reads delivered status
+      const reloadedRecords = await db.getBusinessRecords();
+      const foundDelivered = reloadedRecords.find(r => r.deliveryId === record.deliveryId);
+      expect(foundDelivered).toBeDefined();
+      expect(foundDelivered?.deliveryStatus).toBe('delivered');
+
+      // 4. Mark back as pending (unchecked)
+      const pendingResult = await db.updateDeliveryStatus(record.deliveryId, 'pending');
+      expect(pendingResult.success).toBe(true);
+      expect(pendingResult.status).toBe('pending');
+
+      // 5. Confirm reload reads pending status
+      const finalRecords = await db.getBusinessRecords();
+      const foundPending = finalRecords.find(r => r.deliveryId === record.deliveryId);
+      expect(foundPending).toBeDefined();
+      expect(foundPending?.deliveryStatus).toBe('pending');
+    });
+  });
+
+  describe('Search Functionality End-to-End Suite', () => {
+    const testShops: db.Shop[] = [
+      { id: 'shop-wer', name: 'werwer Mobile Hub', code: 'W-01', address: 'Market St', phone: '9988776655', isActive: true, assignedEmployees: [] },
+      { id: 'shop-apex', name: 'Apex Cellular', code: 'A-01', address: 'Gandhi Rd', phone: '9988776656', isActive: true, assignedEmployees: [] },
+      { id: 'shop-supreme', name: 'Supreme Mobiles', code: 'S-01', address: 'Anna Salai', phone: '9988776657', isActive: true, assignedEmployees: [] }
+    ];
+
+    const testRecords: db.BusinessRecord[] = [
+      {
+        id: 'rec-wer-1',
+        deliveryId: 'deliv-wer-1',
+        date: '2026-10-26',
+        shopId: 'shop-wer',
+        shopName: 'werwer Mobile Hub',
+        productId: 'prod-glass',
+        productName: '9H Edge-to-Edge Tempered Glass',
+        quantity: 10,
+        unitPrice: 120,
+        totalAmount: 1200,
+        deliveryStatus: 'pending',
+        pendingAmount: 1200,
+        createdAt: '2026-10-26T10:00:00Z'
+      },
+      {
+        id: 'rec-apex-1',
+        deliveryId: 'deliv-apex-1',
+        date: '2026-10-25',
+        shopId: 'shop-apex',
+        shopName: 'Apex Cellular',
+        productId: 'prod-case',
+        productName: 'Shockproof Matte Silicone Case',
+        quantity: 5,
+        unitPrice: 180,
+        totalAmount: 900,
+        deliveryStatus: 'pending',
+        pendingAmount: 900,
+        createdAt: '2026-10-25T10:00:00Z'
+      },
+      {
+        id: 'rec-supreme-1',
+        deliveryId: 'deliv-supreme-1',
+        date: '2026-10-24',
+        shopId: 'shop-supreme',
+        shopName: 'Supreme Mobiles',
+        productId: 'prod-charger',
+        productName: '65W GaN Fast Charger',
+        quantity: 2,
+        unitPrice: 850,
+        totalAmount: 1700,
+        deliveryStatus: 'delivered',
+        pendingAmount: 0,
+        createdAt: '2026-10-24T10:00:00Z'
+      }
+    ];
+
+    it('displays all records when search query is empty', () => {
+      const html = renderToString(
+        <MemoryRouter>
+          <OwnerDashboard
+            initialLoading={false}
+            initialShops={testShops}
+            initialRecords={testRecords}
+            initialSearchQuery=""
+          />
+        </MemoryRouter>
+      );
+
+      expect(html).toContain('werwer Mobile Hub');
+      expect(html).toContain('Apex Cellular');
+      expect(html).toContain('Supreme Mobiles');
+      expect(html).toContain('9H Edge-to-Edge Tempered Glass');
+      expect(html).toContain('Shockproof Matte Silicone Case');
+      expect(html).toContain('65W GaN Fast Charger');
+    });
+
+    it('searches by partial shop name (e.g. "wer" finds shop named "werwer")', () => {
+      const html = renderToString(
+        <MemoryRouter>
+          <OwnerDashboard
+            initialLoading={false}
+            initialShops={testShops}
+            initialRecords={testRecords}
+            initialSearchQuery="wer"
+          />
+        </MemoryRouter>
+      );
+
+      expect(html).toContain('werwer Mobile Hub');
+      expect(html).not.toContain('Apex Cellular');
+      expect(html).not.toContain('Supreme Mobiles');
+    });
+
+    it('searches by complete shop name', () => {
+      const html = renderToString(
+        <MemoryRouter>
+          <OwnerDashboard
+            initialLoading={false}
+            initialShops={testShops}
+            initialRecords={testRecords}
+            initialSearchQuery="Apex Cellular"
+          />
+        </MemoryRouter>
+      );
+
+      expect(html).toContain('Apex Cellular');
+      expect(html).toContain('Shockproof Matte Silicone Case');
+      expect(html).not.toContain('werwer Mobile Hub');
+      expect(html).not.toContain('Supreme Mobiles');
+    });
+
+    it('searches by partial product name (e.g. "case" finds "Shockproof Matte Silicone Case")', () => {
+      const html = renderToString(
+        <MemoryRouter>
+          <OwnerDashboard
+            initialLoading={false}
+            initialShops={testShops}
+            initialRecords={testRecords}
+            initialSearchQuery="case"
+          />
+        </MemoryRouter>
+      );
+
+      expect(html).toContain('Shockproof Matte Silicone Case');
+      expect(html).toContain('Apex Cellular');
+      expect(html).not.toContain('9H Edge-to-Edge Tempered Glass');
+      expect(html).not.toContain('65W GaN Fast Charger');
+    });
+
+    it('searches by complete product name', () => {
+      const html = renderToString(
+        <MemoryRouter>
+          <OwnerDashboard
+            initialLoading={false}
+            initialShops={testShops}
+            initialRecords={testRecords}
+            initialSearchQuery="65W GaN Fast Charger"
+          />
+        </MemoryRouter>
+      );
+
+      expect(html).toContain('65W GaN Fast Charger');
+      expect(html).toContain('Supreme Mobiles');
+      expect(html).not.toContain('werwer Mobile Hub');
+      expect(html).not.toContain('Apex Cellular');
+    });
+
+    it('performs case-insensitive matching (e.g. "CASE" and "cAsE" find lowercase "case")', () => {
+      const htmlUpper = renderToString(
+        <MemoryRouter>
+          <OwnerDashboard
+            initialLoading={false}
+            initialShops={testShops}
+            initialRecords={testRecords}
+            initialSearchQuery="CASE"
+          />
+        </MemoryRouter>
+      );
+
+      expect(htmlUpper).toContain('Shockproof Matte Silicone Case');
+
+      const htmlMixed = renderToString(
+        <MemoryRouter>
+          <OwnerDashboard
+            initialLoading={false}
+            initialShops={testShops}
+            initialRecords={testRecords}
+            initialSearchQuery="aPeX"
+          />
+        </MemoryRouter>
+      );
+
+      expect(htmlMixed).toContain('Apex Cellular');
+    });
+
+    it('ignores leading and trailing whitespace in the query', () => {
+      const html = renderToString(
+        <MemoryRouter>
+          <OwnerDashboard
+            initialLoading={false}
+            initialShops={testShops}
+            initialRecords={testRecords}
+            initialSearchQuery="   wer   "
+          />
+        </MemoryRouter>
+      );
+
+      expect(html).toContain('werwer Mobile Hub');
+      expect(html).not.toContain('Apex Cellular');
+    });
+
+    it('displays clear "No records found for [query]" empty state when no matches exist', () => {
+      const html = renderToString(
+        <MemoryRouter>
+          <OwnerDashboard
+            initialLoading={false}
+            initialShops={testShops}
+            initialRecords={testRecords}
+            initialSearchQuery="nonexistentxyz123"
+          />
+        </MemoryRouter>
+      );
+
+      expect(html).toContain('No records found for');
+      expect(html).toContain('nonexistentxyz123');
+      expect(html).toContain('No records found');
+      expect(html).not.toContain('werwer Mobile Hub');
+      expect(html).not.toContain('Apex Cellular');
+    });
+
+    it('filters records in both Pending and Delivered sections, preserving separator', () => {
+      // 1 pending record for Apex and 1 delivered record for Apex
+      const dualRecords: db.BusinessRecord[] = [
+        {
+          id: 'rec-apex-pending',
+          deliveryId: 'deliv-apex-pending',
+          date: '2026-10-26',
+          shopId: 'shop-apex',
+          shopName: 'Apex Cellular',
+          productId: 'prod-glass',
+          productName: '9H Glass Guard',
+          quantity: 1,
+          unitPrice: 100,
+          totalAmount: 100,
+          deliveryStatus: 'pending',
+          pendingAmount: 100,
+          createdAt: '2026-10-26T10:00:00Z'
+        },
+        {
+          id: 'rec-apex-delivered',
+          deliveryId: 'deliv-apex-delivered',
+          date: '2026-10-25',
+          shopId: 'shop-apex',
+          shopName: 'Apex Cellular',
+          productId: 'prod-case',
+          productName: 'Apex Protective Case',
+          quantity: 1,
+          unitPrice: 200,
+          totalAmount: 200,
+          deliveryStatus: 'delivered',
+          pendingAmount: 0,
+          createdAt: '2026-10-25T10:00:00Z'
+        },
+        {
+          id: 'rec-other',
+          deliveryId: 'deliv-other',
+          date: '2026-10-24',
+          shopId: 'shop-other',
+          shopName: 'Other Unrelated Shop',
+          productId: 'prod-cable',
+          productName: 'Unrelated Cable',
+          quantity: 1,
+          unitPrice: 50,
+          totalAmount: 50,
+          deliveryStatus: 'pending',
+          pendingAmount: 50,
+          createdAt: '2026-10-24T10:00:00Z'
+        }
+      ];
+
+      const html = renderToString(
+        <MemoryRouter>
+          <OwnerDashboard
+            initialLoading={false}
+            initialShops={testShops}
+            initialRecords={dualRecords}
+            initialSearchQuery="Apex"
+          />
+        </MemoryRouter>
+      );
+
+      // Both pending and delivered items for Apex are present
+      expect(html).toContain('9H Glass Guard');
+      expect(html).toContain('Apex Protective Case');
+      // Delivered separator is present
+      expect(html).toContain('Delivered Items');
+      // Unrelated items are filtered out
+      expect(html).not.toContain('Other Unrelated Shop');
+      expect(html).not.toContain('Unrelated Cable');
+    });
+
+    it('safely resolves shop name from shop relation when record.shopName is empty', () => {
+      const recordWithEmptyShopName: db.BusinessRecord = {
+        id: 'rec-empty-shopname',
+        deliveryId: 'deliv-empty-shopname',
+        date: '2026-10-26',
+        shopId: 'shop-apex',
+        shopName: '',
+        productId: 'prod-glass',
+        productName: '9H Tempered Glass',
+        quantity: 5,
+        unitPrice: 100,
+        totalAmount: 500,
+        deliveryStatus: 'pending',
+        pendingAmount: 500,
+        createdAt: '2026-10-26T10:00:00Z'
+      };
+
+      const html = renderToString(
+        <MemoryRouter>
+          <OwnerDashboard
+            initialLoading={false}
+            initialShops={testShops}
+            initialRecords={[recordWithEmptyShopName]}
+            initialSearchQuery="Apex"
+          />
+        </MemoryRouter>
+      );
+
+      // Matched via shop relation resolution
+      expect(html).toContain('9H Tempered Glass');
+    });
+
+    it('handles pagination bounds safely when filtering from a higher page', () => {
+      const html = renderToString(
+        <MemoryRouter>
+          <OwnerDashboard
+            initialLoading={false}
+            initialShops={testShops}
+            initialRecords={testRecords}
+            initialSearchQuery="wer"
+            initialCurrentPage={5}
+          />
+        </MemoryRouter>
+      );
+
+      // Does not slice out-of-bounds: safely clamps effectivePage to 1
+      expect(html).toContain('werwer Mobile Hub');
+      expect(html).toMatch(/Showing[\s\S]*?1[\s\S]*?to[\s\S]*?1[\s\S]*?of[\s\S]*?1[\s\S]*?records/);
+    });
+  });
+
+  describe('Delivery Status Stability & Mobile Responsiveness Regression Suite', () => {
+    it('ensures normalizeDeliveryStatus never silently defaults null or undefined to delivered', () => {
+      expect(db.normalizeDeliveryStatus(null)).toBe('pending');
+      expect(db.normalizeDeliveryStatus(undefined)).toBe('pending');
+      expect(db.normalizeDeliveryStatus('')).toBe('pending');
+      expect(db.normalizeDeliveryStatus('unknown_status')).toBe('pending');
+      expect(db.normalizeDeliveryStatus('cancelled')).toBe('pending');
+      expect(db.normalizeDeliveryStatus('delivered')).toBe('delivered');
+      expect(db.normalizeDeliveryStatus('pending')).toBe('pending');
+    });
+
+    it('ensures loading, viewing, searching, and sorting never alter delivery status', () => {
+      const recordsToTest: db.BusinessRecord[] = [
+        {
+          id: 'test-pending-1',
+          deliveryId: 'deliv-test-1',
+          date: '2026-10-28',
+          shopId: 'shop-1',
+          shopName: 'Supreme Mobiles',
+          productId: 'prod-1',
+          productName: 'Tempered Glass Pro',
+          quantity: 10,
+          unitPrice: 100,
+          totalAmount: 1000,
+          deliveryStatus: 'pending',
+          pendingAmount: 1000,
+          createdAt: '2026-10-28T10:00:00Z'
+        },
+        {
+          id: 'test-delivered-1',
+          deliveryId: 'deliv-test-2',
+          date: '2026-10-27',
+          shopId: 'shop-2',
+          shopName: 'Galaxy Mobiles',
+          productId: 'prod-2',
+          productName: 'Fast Cable 65W',
+          quantity: 5,
+          unitPrice: 200,
+          totalAmount: 1000,
+          deliveryStatus: 'delivered',
+          pendingAmount: 0,
+          createdAt: '2026-10-27T10:00:00Z'
+        }
+      ];
+
+      // Initial render: pending has aria-checked="false", delivered has aria-checked="true"
+      const html1 = renderToString(
+        <MemoryRouter>
+          <OwnerDashboard
+            initialLoading={false}
+            initialShops={[]}
+            initialRecords={recordsToTest}
+          />
+        </MemoryRouter>
+      );
+
+      expect(html1).toContain('aria-checked="false"');
+      expect(html1).toContain('aria-checked="true"');
+
+      // Search filtering preserves statuses without flipping
+      const htmlSearch = renderToString(
+        <MemoryRouter>
+          <OwnerDashboard
+            initialLoading={false}
+            initialShops={[]}
+            initialRecords={recordsToTest}
+            initialSearchQuery="Glass"
+          />
+        </MemoryRouter>
+      );
+      expect(htmlSearch).toContain('aria-checked="false"');
+      expect(htmlSearch).toContain('Tempered Glass Pro');
+      expect(htmlSearch).not.toContain('Fast Cable 65W');
+    });
+
+    it('renders all 5 columns without artificial min-w-[500px] table clipping', () => {
+      const mockRecord: db.BusinessRecord = {
+        id: 'rec-mobile-test',
+        deliveryId: 'deliv-mobile-test',
+        date: '2026-10-28',
+        shopId: 'shop-1',
+        shopName: 'RTR Anna Nagar',
+        productId: 'prod-1',
+        productName: 'Fast Charger 20W',
+        quantity: 10,
+        unitPrice: 250,
+        totalAmount: 2500,
+        deliveryStatus: 'pending',
+        pendingAmount: 2500,
+        createdAt: '2026-10-28T10:00:00Z'
+      };
+
+      const html = renderToString(
+        <MemoryRouter>
+          <OwnerDashboard
+            initialLoading={false}
+            initialShops={[]}
+            initialRecords={[mockRecord]}
+          />
+        </MemoryRouter>
+      );
+
+      // Eliminates artificial min-w-[500px] that clipped the 5th column on mobile
+      expect(html).not.toContain('min-w-[500px]');
+      expect(html).toContain('overflow-x-auto');
+      expect(html).toContain('touch-pan-x');
+
+      // All 5 visible columns rendered in order
+      expect(html).toContain('Date');
+      expect(html).toContain('Shop Name');
+      expect(html).toContain('Product');
+      expect(html).toContain('Amount (₹)');
+      expect(html).toContain('Delivery');
+
+      // Mobile touch targets configured: min-h-[44px] for primary actions
+      expect(html).toContain('min-h-[44px]');
+      // Delivery checkbox expanded touch target
+      expect(html).toContain('-inset-2.5 sm:-inset-1.5');
+    });
+
+    it('one pending record becomes delivered and moves to Delivered Items', () => {
+      const singlePendingRecord: db.BusinessRecord = {
+        id: 'rec-single-1',
+        deliveryId: 'deliv-single-1',
+        shopId: 'shop-s1',
+        productId: 'prod-s1',
+        date: '2026-10-29',
+        shopName: 'Supreme Mobiles',
+        productName: 'Single Pending Product',
+        quantity: 1,
+        unitPrice: 500,
+        totalAmount: 500,
+        deliveryStatus: 'pending',
+        pendingAmount: 500,
+        createdAt: '2026-10-29T10:00:00Z'
+      };
+
+      // When pending: rendered without delivered separator
+      const htmlPending = renderToString(
+        <MemoryRouter>
+          <OwnerDashboard
+            initialLoading={false}
+            initialShops={[]}
+            initialRecords={[singlePendingRecord]}
+          />
+        </MemoryRouter>
+      );
+      expect(htmlPending).toContain('Single Pending Product');
+      expect(htmlPending).toContain('aria-checked="false"');
+      expect(htmlPending).not.toContain('Delivered Items');
+
+      // When delivered: Pending group becomes empty, Delivered Items separator appears above record
+      const singleDeliveredRecord: db.BusinessRecord = {
+        ...singlePendingRecord,
+        deliveryStatus: 'delivered'
+      };
+      const htmlDelivered = renderToString(
+        <MemoryRouter>
+          <OwnerDashboard
+            initialLoading={false}
+            initialShops={[]}
+            initialRecords={[singleDeliveredRecord]}
+          />
+        </MemoryRouter>
+      );
+      expect(htmlDelivered).toContain('Delivered Items');
+      expect(htmlDelivered).toContain('Single Pending Product');
+      expect(htmlDelivered).toContain('aria-checked="true"');
+      const sepIndex = htmlDelivered.indexOf('Delivered Items');
+      const recIndex = htmlDelivered.indexOf('Single Pending Product');
+      expect(sepIndex).toBeLessThan(recIndex);
+    });
+
+    it('multiple pending records: one becomes delivered and moves below all pending records', () => {
+      const records: db.BusinessRecord[] = [
+        {
+          id: 'rec-p1',
+          deliveryId: 'deliv-p1',
+          shopId: 'shop-p1',
+          productId: 'prod-p1',
+          date: '2026-10-29',
+          shopName: 'Shop A',
+          productName: 'Product A (Pending)',
+          quantity: 1,
+          unitPrice: 100,
+          totalAmount: 100,
+          deliveryStatus: 'pending',
+          pendingAmount: 100,
+          createdAt: '2026-10-29T10:00:00Z'
+        },
+        {
+          id: 'rec-p2',
+          deliveryId: 'deliv-p2',
+          shopId: 'shop-p2',
+          productId: 'prod-p2',
+          date: '2026-10-28',
+          shopName: 'Shop B',
+          productName: 'Product B (Delivered)',
+          quantity: 1,
+          unitPrice: 200,
+          totalAmount: 200,
+          deliveryStatus: 'delivered',
+          pendingAmount: 200,
+          createdAt: '2026-10-28T10:00:00Z'
+        },
+        {
+          id: 'rec-p3',
+          deliveryId: 'deliv-p3',
+          shopId: 'shop-p3',
+          productId: 'prod-p3',
+          date: '2026-10-27',
+          shopName: 'Shop C',
+          productName: 'Product C (Pending)',
+          quantity: 1,
+          unitPrice: 300,
+          totalAmount: 300,
+          deliveryStatus: 'pending',
+          pendingAmount: 300,
+          createdAt: '2026-10-27T10:00:00Z'
+        }
+      ];
+
+      const html = renderToString(
+        <MemoryRouter>
+          <OwnerDashboard
+            initialLoading={false}
+            initialShops={[]}
+            initialRecords={records}
+          />
+        </MemoryRouter>
+      );
+
+      const pAIndex = html.indexOf('Product A (Pending)');
+      const pCIndex = html.indexOf('Product C (Pending)');
+      const sepIndex = html.indexOf('Delivered Items');
+      const pBIndex = html.indexOf('Product B (Delivered)');
+
+      // Both pending records are above the Delivered Items separator
+      expect(pAIndex).toBeLessThan(sepIndex);
+      expect(pCIndex).toBeLessThan(sepIndex);
+      // Delivered record is below the Delivered Items separator
+      expect(sepIndex).toBeLessThan(pBIndex);
+    });
+
+    it('multiple delivered records are sorted newest date first within Delivered Items', () => {
+      const records: db.BusinessRecord[] = [
+        {
+          id: 'rec-d-old',
+          deliveryId: 'deliv-d-old',
+          shopId: 'shop-old',
+          productId: 'prod-old',
+          date: '2026-10-20',
+          shopName: 'Shop Old',
+          productName: 'Older Delivered Item',
+          quantity: 1,
+          unitPrice: 100,
+          totalAmount: 100,
+          deliveryStatus: 'delivered',
+          pendingAmount: 0,
+          createdAt: '2026-10-20T10:00:00Z'
+        },
+        {
+          id: 'rec-d-new',
+          deliveryId: 'deliv-d-new',
+          shopId: 'shop-new',
+          productId: 'prod-new',
+          date: '2026-10-29',
+          shopName: 'Shop New',
+          productName: 'Newer Delivered Item',
+          quantity: 1,
+          unitPrice: 200,
+          totalAmount: 200,
+          deliveryStatus: 'delivered',
+          pendingAmount: 0,
+          createdAt: '2026-10-29T10:00:00Z'
+        }
+      ];
+
+      const html = renderToString(
+        <MemoryRouter>
+          <OwnerDashboard
+            initialLoading={false}
+            initialShops={[]}
+            initialRecords={records}
+          />
+        </MemoryRouter>
+      );
+
+      const newIndex = html.indexOf('Newer Delivered Item');
+      const oldIndex = html.indexOf('Older Delivered Item');
+      expect(newIndex).toBeLessThan(oldIndex);
+    });
+
+    it('no pending records: the delivered group still displays correctly with separator', () => {
+      const records: db.BusinessRecord[] = [
+        {
+          id: 'rec-d1',
+          deliveryId: 'deliv-d1',
+          shopId: 'shop-d1',
+          productId: 'prod-d1',
+          date: '2026-10-29',
+          shopName: 'Shop Delivered',
+          productName: 'Delivered Product 1',
+          quantity: 2,
+          unitPrice: 150,
+          totalAmount: 300,
+          deliveryStatus: 'delivered',
+          pendingAmount: 0,
+          createdAt: '2026-10-29T10:00:00Z'
+        }
+      ];
+
+      const html = renderToString(
+        <MemoryRouter>
+          <OwnerDashboard
+            initialLoading={false}
+            initialShops={[]}
+            initialRecords={records}
+          />
+        </MemoryRouter>
+      );
+
+      expect(html).toContain('Delivered Items');
+      expect(html).toContain('Delivered Product 1');
+      expect(html).toContain('aria-checked="true"');
+      expect(html).not.toContain('aria-checked="false"');
+    });
+
+    it('persists delivery update across reload and keeps record in Delivered Items', async () => {
+      // Create and save record
+      const saved = await db.saveBusinessRecord({
+        date: '2026-10-29',
+        shopName: 'Reload Test Shop',
+        productName: 'Reload Test Earbuds',
+        quantity: 4,
+        unitPrice: 250,
+        deliveryStatus: 'pending'
+      });
+      expect(db.isDelivered(saved)).toBe(false);
+
+      // Update to delivered
+      const updateRes = await db.updateDeliveryStatus(saved.deliveryId, 'delivered');
+      expect(updateRes.success).toBe(true);
+      expect(updateRes.status).toBe('delivered');
+
+      // Reload records from db service
+      const reloaded = await db.getBusinessRecords();
+      const match = reloaded.find(r => r.deliveryId === saved.deliveryId);
+      expect(match).toBeDefined();
+      expect(db.isDelivered(match)).toBe(true);
+
+      // Render reloaded records in dashboard
+      const html = renderToString(
+        <MemoryRouter>
+          <OwnerDashboard
+            initialLoading={false}
+            initialShops={[]}
+            initialRecords={reloaded}
+          />
+        </MemoryRouter>
+      );
+      expect(html).toContain('Delivered Items');
+      expect(html).toContain('Reload Test Earbuds');
+    });
+
+    it('preserves grouping with search filtering and pagination', () => {
+      const records: db.BusinessRecord[] = [
+        {
+          id: 'rec-srch-1',
+          deliveryId: 'deliv-srch-1',
+          shopId: 'shop-srch-1',
+          productId: 'prod-srch-1',
+          date: '2026-10-29',
+          shopName: 'Supreme Alpha',
+          productName: 'Alpha Charger',
+          quantity: 1,
+          unitPrice: 300,
+          totalAmount: 300,
+          deliveryStatus: 'pending',
+          pendingAmount: 300,
+          createdAt: '2026-10-29T10:00:00Z'
+        },
+        {
+          id: 'rec-srch-2',
+          deliveryId: 'deliv-srch-2',
+          shopId: 'shop-srch-2',
+          productId: 'prod-srch-2',
+          date: '2026-10-28',
+          shopName: 'Supreme Beta',
+          productName: 'Beta Charger',
+          quantity: 1,
+          unitPrice: 350,
+          totalAmount: 350,
+          deliveryStatus: 'delivered',
+          pendingAmount: 0,
+          createdAt: '2026-10-28T10:00:00Z'
+        },
+        {
+          id: 'rec-srch-3',
+          deliveryId: 'deliv-srch-3',
+          shopId: 'shop-srch-3',
+          productId: 'prod-srch-3',
+          date: '2026-10-27',
+          shopName: 'Other Shop',
+          productName: 'Gamma Cable',
+          quantity: 1,
+          unitPrice: 100,
+          totalAmount: 100,
+          deliveryStatus: 'pending',
+          pendingAmount: 100,
+          createdAt: '2026-10-27T10:00:00Z'
+        }
+      ];
+
+      const html = renderToString(
+        <MemoryRouter>
+          <OwnerDashboard
+            initialLoading={false}
+            initialShops={[]}
+            initialRecords={records}
+            initialSearchQuery="Supreme"
+          />
+        </MemoryRouter>
+      );
+
+      // Filtered to Supreme only
+      expect(html).toContain('Alpha Charger');
+      expect(html).toContain('Beta Charger');
+      expect(html).not.toContain('Gamma Cable');
+
+      // Grouping preserved: Alpha is pending, Beta is delivered under separator
+      const alphaIdx = html.indexOf('Alpha Charger');
+      const sepIdx = html.indexOf('Delivered Items');
+      const betaIdx = html.indexOf('Beta Charger');
+      expect(alphaIdx).toBeLessThan(sepIdx);
+      expect(sepIdx).toBeLessThan(betaIdx);
+    });
+
+    it('reliably handles failed delivery status updates without corrupting local state or false movement', async () => {
+      const spy = vi.spyOn(db, 'updateDeliveryStatus').mockRejectedValue(new Error('Failed to update delivery status on the server. Restored previous state.'));
+
+      try {
+        await expect(db.updateDeliveryStatus('test-fail-id', 'delivered')).rejects.toThrow('Failed to update delivery status');
+      } finally {
+        spy.mockRestore();
+      }
+    });
+  });
+
+  describe('Reactive CRUD Operations Without Full-Page Reload Suite', () => {
+    const dummyShop: db.Shop = { id: 'shop-1', name: 'Supreme Mobiles', code: 'SUP', address: 'Main Rd', phone: '9999999999', isActive: true, assignedEmployees: [] };
+
+    it('adds a record and immediately updates UI without unmounting to skeleton', async () => {
+      // 1. Initial authoritative records state
+      const initial: db.BusinessRecord[] = [
+        {
+          id: 'rec-1',
+          deliveryId: 'deliv-1',
+          date: '2026-10-29',
+          shopId: 'shop-1',
+          shopName: 'Supreme Mobiles',
+          productId: 'prod-1',
+          productName: 'Tempered Glass',
+          quantity: 10,
+          unitPrice: 50,
+          totalAmount: 500,
+          deliveryStatus: 'pending',
+          pendingAmount: 500,
+          createdAt: '2026-10-29T10:00:00Z'
+        }
+      ];
+
+      // Render initial state
+      const htmlBefore = renderToString(
+        <MemoryRouter>
+          <OwnerDashboard
+            initialLoading={false}
+            initialShops={[dummyShop]}
+            initialRecords={initial}
+          />
+        </MemoryRouter>
+      );
+      expect(htmlBefore).toContain('Tempered Glass');
+      expect(htmlBefore).not.toContain('animate-pulse');
+      expect(htmlBefore).toMatch(/Showing[\s\S]*?1[\s\S]*?to[\s\S]*?1[\s\S]*?of[\s\S]*?1[\s\S]*?records/);
+
+      // 2. Simulate reactive add record response returned from saveBusinessRecord
+      const newRecord: db.BusinessRecord = {
+        id: 'rec-2',
+        deliveryId: 'deliv-2',
+        date: '2026-10-29',
+        shopId: 'shop-1',
+        shopName: 'Supreme Mobiles',
+        productId: 'prod-2',
+        productName: 'Fast Charging Adapter',
+        quantity: 5,
+        unitPrice: 200,
+        totalAmount: 1000,
+        deliveryStatus: 'pending',
+        pendingAmount: 1000,
+        createdAt: '2026-10-29T10:05:00Z'
+      };
+
+      const updatedRecords = [newRecord, ...initial];
+      const htmlAfter = renderToString(
+        <MemoryRouter>
+          <OwnerDashboard
+            initialLoading={false}
+            initialShops={[dummyShop]}
+            initialRecords={updatedRecords}
+          />
+        </MemoryRouter>
+      );
+
+      // 3. New record appears immediately and total count increments reactively without skeleton
+      expect(htmlAfter).toContain('Fast Charging Adapter');
+      expect(htmlAfter).toContain('Tempered Glass');
+      expect(htmlAfter).toMatch(/Showing[\s\S]*?1[\s\S]*?to[\s\S]*?2[\s\S]*?of[\s\S]*?2[\s\S]*?records/);
+      expect(htmlAfter).not.toContain('animate-pulse');
+    });
+
+    it('deletes a record and updates counts reactively without reloading page', async () => {
+      const records: db.BusinessRecord[] = [
+        {
+          id: 'rec-del-1',
+          deliveryId: 'deliv-del-1',
+          date: '2026-10-29',
+          shopId: 'shop-1',
+          shopName: 'Supreme Mobiles',
+          productId: 'prod-1',
+          productName: 'Silicone Case',
+          quantity: 2,
+          unitPrice: 150,
+          totalAmount: 300,
+          deliveryStatus: 'pending',
+          pendingAmount: 300,
+          createdAt: '2026-10-29T10:00:00Z'
+        },
+        {
+          id: 'rec-del-2',
+          deliveryId: 'deliv-del-2',
+          date: '2026-10-28',
+          shopId: 'shop-1',
+          shopName: 'Supreme Mobiles',
+          productId: 'prod-2',
+          productName: 'Braided Cable',
+          quantity: 4,
+          unitPrice: 100,
+          totalAmount: 400,
+          deliveryStatus: 'delivered',
+          pendingAmount: 0,
+          createdAt: '2026-10-28T10:00:00Z'
+        }
+      ];
+
+      const htmlInitial = renderToString(
+        <MemoryRouter>
+          <OwnerDashboard initialLoading={false} initialRecords={records} />
+        </MemoryRouter>
+      );
+      expect(htmlInitial).toContain('Silicone Case');
+      expect(htmlInitial).toContain('Braided Cable');
+      expect(htmlInitial).toMatch(/Showing[\s\S]*?1[\s\S]*?to[\s\S]*?2[\s\S]*?of[\s\S]*?2[\s\S]*?records/);
+
+      // Optimistically remove rec-del-1
+      const remaining = records.filter(r => r.id !== 'rec-del-1');
+      const htmlDeleted = renderToString(
+        <MemoryRouter>
+          <OwnerDashboard initialLoading={false} initialRecords={remaining} />
+        </MemoryRouter>
+      );
+
+      expect(htmlDeleted).not.toContain('Silicone Case');
+      expect(htmlDeleted).toContain('Braided Cable');
+      expect(htmlDeleted).toMatch(/Showing[\s\S]*?1[\s\S]*?to[\s\S]*?1[\s\S]*?of[\s\S]*?1[\s\S]*?records/);
+      expect(htmlDeleted).not.toContain('animate-pulse');
+    });
+
+    it('moves record from pending to delivered section immediately without full page reload', () => {
+      const pendingRecord: db.BusinessRecord = {
+        id: 'rec-toggle-1',
+        deliveryId: 'deliv-toggle-1',
+        date: '2026-10-29',
+        shopId: 'shop-1',
+        shopName: 'Supreme Mobiles',
+        productId: 'prod-1',
+        productName: 'Wireless Earbuds',
+        quantity: 1,
+        unitPrice: 899,
+        totalAmount: 899,
+        deliveryStatus: 'pending',
+        pendingAmount: 899,
+        createdAt: '2026-10-29T10:00:00Z'
+      };
+
+      // Before toggle: 1 pending, 0 delivered (separator not shown)
+      const htmlBefore = renderToString(
+        <MemoryRouter>
+          <OwnerDashboard initialLoading={false} initialRecords={[pendingRecord]} />
+        </MemoryRouter>
+      );
+      expect(htmlBefore).toContain('Wireless Earbuds');
+      expect(htmlBefore).not.toContain('Delivered Items');
+
+      // After toggle: status becomes delivered, moves to Delivered Items group under separator
+      const deliveredRecord: db.BusinessRecord = {
+        ...pendingRecord,
+        deliveryStatus: 'delivered'
+      };
+
+      const htmlAfter = renderToString(
+        <MemoryRouter>
+          <OwnerDashboard initialLoading={false} initialRecords={[deliveredRecord]} />
+        </MemoryRouter>
+      );
+      expect(htmlAfter).toContain('Wireless Earbuds');
+      expect(htmlAfter).toContain('Delivered Items');
+      expect(htmlAfter).not.toContain('animate-pulse');
+    });
+
+    it('safely retains previous records state when mutation API fails', async () => {
+      const records: db.BusinessRecord[] = [
+        {
+          id: 'rec-fail-1',
+          deliveryId: 'deliv-fail-1',
+          date: '2026-10-29',
+          shopId: 'shop-1',
+          shopName: 'Supreme Mobiles',
+          productId: 'prod-1',
+          productName: 'Armor Glass',
+          quantity: 1,
+          unitPrice: 199,
+          totalAmount: 199,
+          deliveryStatus: 'pending',
+          pendingAmount: 199,
+          createdAt: '2026-10-29T10:00:00Z'
+        }
+      ];
+
+      const deleteSpy = vi.spyOn(db, 'deleteBusinessRecord').mockRejectedValue(new Error('Server communication error'));
+
+      try {
+        await expect(db.deleteBusinessRecord('deliv-fail-1')).rejects.toThrow('Server communication error');
+        // Authoritative records state remains intact on error
+        const html = renderToString(
+          <MemoryRouter>
+            <OwnerDashboard initialLoading={false} initialRecords={records} />
+          </MemoryRouter>
+        );
+        expect(html).toContain('Armor Glass');
+      } finally {
+        deleteSpy.mockRestore();
+      }
+    });
+
+    it('dynamically recalculates search, pagination, and sorting from authoritative records state', () => {
+      const records: db.BusinessRecord[] = [
+        {
+          id: 'rec-dyn-1',
+          deliveryId: 'deliv-dyn-1',
+          date: '2026-10-29',
+          shopId: 'shop-1',
+          shopName: 'City Center Hub',
+          productId: 'prod-1',
+          productName: 'Power Bank 10000mAh',
+          quantity: 1,
+          unitPrice: 999,
+          totalAmount: 999,
+          deliveryStatus: 'pending',
+          pendingAmount: 999,
+          createdAt: '2026-10-29T10:00:00Z'
+        },
+        {
+          id: 'rec-dyn-2',
+          deliveryId: 'deliv-dyn-2',
+          date: '2026-10-28',
+          shopId: 'shop-2',
+          shopName: 'Metro Telecom',
+          productId: 'prod-2',
+          productName: 'USB-C OTG Adapter',
+          quantity: 2,
+          unitPrice: 99,
+          totalAmount: 198,
+          deliveryStatus: 'delivered',
+          pendingAmount: 0,
+          createdAt: '2026-10-28T10:00:00Z'
+        }
+      ];
+
+      // Search matches only "Power Bank"
+      const htmlSearch = renderToString(
+        <MemoryRouter>
+          <OwnerDashboard
+            initialLoading={false}
+            initialRecords={records}
+            initialSearchQuery="Power Bank"
+          />
+        </MemoryRouter>
+      );
+      expect(htmlSearch).toContain('Power Bank 10000mAh');
+      expect(htmlSearch).not.toContain('USB-C OTG Adapter');
+      expect(htmlSearch).toMatch(/Showing[\s\S]*?1[\s\S]*?to[\s\S]*?1[\s\S]*?of[\s\S]*?1[\s\S]*?records/);
     });
   });
 });
