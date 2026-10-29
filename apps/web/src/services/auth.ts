@@ -112,17 +112,7 @@ export async function signIn(username: string, password: string): Promise<AuthUs
       });
 
       if (authError || !authData.user) {
-        // Differentiate auth errors:
-        if (authError?.status === 429 || authError?.message?.toLowerCase().includes('rate limit')) {
-          throw new Error('Too many login attempts. Please wait a moment and try again.');
-        }
-        if (
-          authError?.message === 'Failed to fetch' || 
-          authError?.message?.toLowerCase().includes('network') ||
-          (authError as any)?.name === 'AuthRetryableFetchError'
-        ) {
-          throw new Error(NETWORK_ERROR_MSG);
-        }
+        // Demo account sandbox check: completely isolated from network and Supabase
         if (cleanUsername.toLowerCase() === DEMO_USERNAME.toLowerCase() || cleanUsername.toLowerCase() === 'demo-owner@rtrmobiles.com') {
           if (password === DEMO_PASSWORD_PLACEHOLDER) {
             setDemoMode(true);
@@ -135,6 +125,19 @@ export async function signIn(username: string, password: string): Promise<AuthUs
               isDemo: true
             };
           }
+          throw new Error(INCORRECT_CREDENTIALS_MSG);
+        }
+
+        // Differentiate auth errors:
+        if (authError?.status === 429 || authError?.message?.toLowerCase().includes('rate limit')) {
+          throw new Error('Too many login attempts. Please wait a moment and try again.');
+        }
+        if (
+          authError?.message === 'Failed to fetch' || 
+          authError?.message?.toLowerCase().includes('network') ||
+          (authError as any)?.name === 'AuthRetryableFetchError'
+        ) {
+          throw new Error(NETWORK_ERROR_MSG);
         }
         throw new Error(INCORRECT_CREDENTIALS_MSG);
       }
@@ -226,12 +229,17 @@ export async function requestPasswordReset(identifier: string): Promise<string> 
       throw new Error(data.message || 'Email rate limit exceeded. Please wait a minute before requesting another reset link.');
     }
 
+    if (res.status === 404 || res.status >= 500) {
+      // Backend endpoint not deployed on host or server error; fall through to direct Supabase recovery
+      throw new Error('BACKEND_UNAVAILABLE');
+    }
+
     if (res.status >= 400) {
       const data = await res.json().catch(() => ({}));
       throw new Error(data.message || 'Unable to submit password recovery request.');
     }
   } catch (err: any) {
-    if (err.message && (
+    if (err.message !== 'BACKEND_UNAVAILABLE' && err.message && (
       err.message.includes('rate limit') || 
       err.message.includes('wait') || 
       err.message.includes('Unable') ||
@@ -303,7 +311,9 @@ export async function updatePassword(newPassword: string): Promise<void> {
       return;
     }
 
-    if (res.status === 400 || res.status === 401 || res.status === 403) {
+    if (res.status === 404 || res.status >= 500) {
+      // Backend endpoint not deployed or server error; fall through to direct Supabase update
+    } else if (res.status === 400 || res.status === 401 || res.status === 403) {
       const errData = await res.json().catch(() => ({}));
       throw new Error(errData.message || 'Failed to update password. Recovery session may have expired.');
     }

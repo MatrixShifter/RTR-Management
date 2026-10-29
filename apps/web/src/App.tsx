@@ -157,7 +157,6 @@ export const AppContent: React.FC = () => {
           // Bounded retry loop for server-side token verification (up to 3 attempts total)
           // Gracefully absorbs brief startup latency between Vite and API server without failing
           const MAX_ATTEMPTS = 3;
-          let lastStatus = 0;
 
           for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
             if (attempt > 1) {
@@ -174,7 +173,6 @@ export const AppContent: React.FC = () => {
                 signal: controller.signal
               });
               clearTimeout(timeoutId);
-              lastStatus = res.status;
 
               if (res.ok) {
                 const data = await res.json();
@@ -205,6 +203,10 @@ export const AppContent: React.FC = () => {
                 setCurrentUser(null);
                 setBootstrapError(null);
                 return;
+              } else if (res.status === 404) {
+                // Backend API route not hosted on static deployment (e.g. Vercel without serverless route)
+                // Proceed immediately to direct Supabase session validation
+                break;
               } else {
                 // 502, 503, or temporary server error: retry if attempts remain
                 if (attempt < MAX_ATTEMPTS) {
@@ -220,12 +222,66 @@ export const AppContent: React.FC = () => {
             }
           }
 
-          // If all bounded retries failed, report clear recoverable error without destroying session
+          // Direct Supabase authorization fallback if backend verification is unavailable/offline
+          if (isSupabaseConfigured && supabase) {
+            try {
+              if (isDemoAccount) {
+                setDemoMode(true);
+                lastVerifiedTokenRef.current = session.access_token;
+                const userState: UserState = {
+                  id: session.user.id,
+                  email: session.user.email || 'demo-owner@rtrmobiles.com',
+                  name: session.user.user_metadata?.full_name || 'Demo Owner (Sandbox)',
+                  role: 'demo',
+                  isDemo: true
+                };
+                setCurrentUser(userState);
+                setBootstrapError(null);
+                localStorage.setItem(STORAGE_USER_KEY, JSON.stringify(userState));
+                localStorage.setItem(STORAGE_EXPIRY_KEY, String(Date.now() + SESSION_TTL_MS));
+                return;
+              }
+
+              const { data: membership, error: membershipErr } = await supabase
+                .from('business_memberships')
+                .select('role')
+                .eq('user_id', session.user.id)
+                .maybeSingle();
+
+              if (!membershipErr && membership?.role === 'owner') {
+                setDemoMode(false);
+                lastVerifiedTokenRef.current = session.access_token;
+                const userState: UserState = {
+                  id: session.user.id,
+                  email: session.user.email || '',
+                  name: session.user.user_metadata?.full_name || 'Business Owner',
+                  role: 'owner',
+                  isDemo: false
+                };
+                setCurrentUser(userState);
+                setBootstrapError(null);
+                localStorage.setItem(STORAGE_USER_KEY, JSON.stringify(userState));
+                localStorage.setItem(STORAGE_EXPIRY_KEY, String(Date.now() + SESSION_TTL_MS));
+                return;
+              } else if (membership && membership.role !== 'owner') {
+                // Found membership but not owner: access restricted
+                lastVerifiedTokenRef.current = null;
+                await supabase.auth.signOut().catch(() => {});
+                localStorage.removeItem(STORAGE_USER_KEY);
+                localStorage.removeItem(STORAGE_EXPIRY_KEY);
+                setCurrentUser(null);
+                setBootstrapError('Access restricted to Business Owner only.');
+                return;
+              }
+            } catch (fallbackErr) {
+              console.warn('Direct Supabase session verification fallback failed:', fallbackErr);
+            }
+          }
+
+          // If both backend and direct Supabase verification failed:
           lastVerifiedTokenRef.current = null;
           setBootstrapError(
-            lastStatus === 503 
-              ? 'Backend authentication service is temporarily unavailable on port 4000. Please verify that the API server is running.'
-              : 'Unable to connect to backend authentication server on port 4000. Please check that the API server is running.'
+            'Unable to connect to authentication service. Please check your connection and try again.'
           );
           return;
         }
@@ -461,38 +517,38 @@ export const AppContent: React.FC = () => {
       />
 
       {/* 2. Protected Workspace Routes (Owner Only) */}
-      {currentUser ? (
-        <Route
-          element={
+      <Route
+        element={
+          currentUser ? (
             <WorkspaceLayout
               currentUser={currentUser}
               isOnline={isOnline}
               onSignOut={handleSignOut}
             />
-          }
-        >
-          <Route path="/" element={<OwnerDashboard />} />
-          <Route path="/records" element={<OwnerDashboard />} />
-          <Route path="/settings" element={<SettingsPage currentUser={currentUser} isOnline={isOnline} onSignOut={handleSignOut} />} />
-          <Route path="/management" element={<SettingsPage currentUser={currentUser} isOnline={isOnline} onSignOut={handleSignOut} />} />
-          {/* Cleanly redirect legacy navigation links back to central Records ledger */}
-          <Route path="/shops" element={<Navigate to="/records" replace />} />
-          <Route path="/catalog" element={<Navigate to="/records" replace />} />
-          <Route path="/products" element={<Navigate to="/records" replace />} />
-          <Route path="/analytics" element={<Navigate to="/records" replace />} />
-          <Route path="/reports" element={<Navigate to="/records" replace />} />
-          <Route path="/deliveries" element={<Navigate to="/records" replace />} />
-          <Route path="/stock-ledger" element={<Navigate to="/records" replace />} />
-          <Route path="/payments" element={<Navigate to="/records" replace />} />
-          {/* Redirect legacy employee links to records */}
-          <Route path="/employee" element={<Navigate to="/records" replace />} />
-          {/* Fallback for unknown routes within authenticated workspace */}
-          <Route path="*" element={<NotFound />} />
-        </Route>
-      ) : (
-        /* If unauthenticated, redirect any unknown / protected route to /login */
-        <Route path="*" element={<Navigate to="/login" replace />} />
-      )}
+          ) : (
+            <Navigate to="/login" replace />
+          )
+        }
+      >
+        <Route path="/" element={<OwnerDashboard />} />
+        <Route path="/records" element={<OwnerDashboard />} />
+        <Route path="/settings" element={<SettingsPage currentUser={currentUser!} isOnline={isOnline} onSignOut={handleSignOut} />} />
+        <Route path="/management" element={<SettingsPage currentUser={currentUser!} isOnline={isOnline} onSignOut={handleSignOut} />} />
+        {/* Cleanly redirect legacy navigation links back to central Records ledger */}
+        <Route path="/shops" element={<Navigate to="/records" replace />} />
+        <Route path="/catalog" element={<Navigate to="/records" replace />} />
+        <Route path="/products" element={<Navigate to="/records" replace />} />
+        <Route path="/analytics" element={<Navigate to="/records" replace />} />
+        <Route path="/reports" element={<Navigate to="/records" replace />} />
+        <Route path="/deliveries" element={<Navigate to="/records" replace />} />
+        <Route path="/stock-ledger" element={<Navigate to="/records" replace />} />
+        <Route path="/payments" element={<Navigate to="/records" replace />} />
+        {/* Redirect legacy employee links to records */}
+        <Route path="/employee" element={<Navigate to="/records" replace />} />
+      </Route>
+
+      {/* 3. Global Catch-All Route for Unmatched URLs */}
+      <Route path="*" element={<NotFound isAuthenticated={Boolean(currentUser)} />} />
     </Routes>
   );
 };

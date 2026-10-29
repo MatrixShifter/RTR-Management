@@ -70,19 +70,39 @@ describe('SPA Fallback Routing & Vercel Deployment Configuration', () => {
 
     expect(html).toContain('Error 404');
     expect(html).toContain('Page Not Found');
+    expect(html).toContain("The page you&#x27;re looking for doesn&#x27;t exist or may have been moved.");
+    expect(html).toContain('Go to Dashboard');
+    expect(html).toContain('Go Back');
     expect(html).toContain('Back to Records');
+    expect(html).toContain('RTR Mobiles');
   });
 
   it('renders owner return path on NotFound and does not include employee actions', () => {
     const html = renderToString(
       <MemoryRouter initialEntries={['/unknown-employee-path']}>
-        <NotFound />
+        <NotFound isAuthenticated={true} />
       </MemoryRouter>
     );
 
     expect(html).toContain('Error 404');
-    expect(html).toContain('Back to Records');
+    expect(html).toContain('Go to Dashboard');
+    expect(html).toContain('Go Back');
+    expect(html).toContain('Workspace Active');
     expect(html).not.toContain('Back to Daily Report');
     expect(html).not.toContain('Daily Report');
+  });
+
+  it('renders clean unauthenticated state on NotFound without workspace active badge', () => {
+    const html = renderToString(
+      <MemoryRouter initialEntries={['/random-unauthenticated-path']}>
+        <NotFound isAuthenticated={false} />
+      </MemoryRouter>
+    );
+
+    expect(html).toContain('Error 404');
+    expect(html).toContain('Page Not Found');
+    expect(html).toContain('Go to Dashboard');
+    expect(html).toContain('Go Back');
+    expect(html).not.toContain('Workspace Active');
   });
 });
