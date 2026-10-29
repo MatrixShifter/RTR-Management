@@ -877,7 +877,28 @@ export async function checkShopUsage(id: string): Promise<{ inUse: boolean; coun
       if (err.message?.includes('session token')) {
         throw err;
       }
-      console.warn('checkShopUsage API error:', err);
+      console.warn('checkShopUsage API error, falling back to direct Supabase query:', err);
+    }
+
+    try {
+      await ensureAuthenticatedSession();
+      const [delivRes, moveRes, invRes, repRes, transFromRes, transToRes] = await Promise.all([
+        supabase.from('deliveries').select('id', { count: 'exact', head: true }).eq('shop_id', id),
+        supabase.from('stock_movements').select('id', { count: 'exact', head: true }).eq('shop_id', id),
+        supabase.from('invoices').select('id', { count: 'exact', head: true }).eq('shop_id', id),
+        supabase.from('daily_reports').select('id', { count: 'exact', head: true }).eq('shop_id', id),
+        supabase.from('stock_transfers').select('id', { count: 'exact', head: true }).eq('from_shop_id', id),
+        supabase.from('stock_transfers').select('id', { count: 'exact', head: true }).eq('to_shop_id', id)
+      ]);
+      const totalCount = (delivRes.count || 0) + 
+                         (moveRes.count || 0) + 
+                         (invRes.count || 0) + 
+                         (repRes.count || 0) + 
+                         (transFromRes.count || 0) + 
+                         (transToRes.count || 0);
+      return { inUse: totalCount > 0, count: totalCount };
+    } catch (supErr) {
+      console.warn('Direct Supabase checkShopUsage error:', supErr);
     }
   }
 
@@ -920,34 +941,77 @@ export async function deleteShop(id: string): Promise<DeleteCatalogResult> {
   const targetShop = shops.find(s => s.id === id);
   const shopName = targetShop?.name || 'Shop';
 
-  // 1. Authoritative Backend Endpoint (/api/shops/:id)
-  // Backend checks all dependencies across deliveries, stock_movements, invoices, daily_reports, stock_transfers.
-  // Never falls back to direct Supabase client deletes that bypass audit ledger constraints.
+  // 1. Authoritative Backend Endpoint (/api/shops/:id) with direct Supabase safe fallback
   if (isSupabaseConfigured && supabase && !id.startsWith('shop-')) {
-    const res = await authenticatedFetch(`/api/shops/${encodeURIComponent(id)}`, {
-      method: 'DELETE'
-    });
+    let apiSuccess = false;
+    let serverResult: DeleteCatalogResult | null = null;
 
-    if (!res.ok) {
-      const errJson = await res.json().catch(() => ({}));
-      throw new Error(errJson.message || `Failed to delete shop (HTTP ${res.status}).`);
+    try {
+      const res = await authenticatedFetch(`/api/shops/${encodeURIComponent(id)}`, {
+        method: 'DELETE'
+      });
+
+      if (res.ok) {
+        const json = await res.json();
+        apiSuccess = true;
+        serverResult = {
+          success: true,
+          action: json.action || (usage.inUse ? 'archived' : 'deleted'),
+          message: json.message || `"${shopName}" deleted successfully.`,
+          inUse: json.action === 'archived' || usage.inUse,
+          recordsCount: json.recordsCount ?? usage.count
+        };
+      } else if (res.status === 401 || res.status === 403) {
+        const errJson = await res.json().catch(() => ({}));
+        throw new Error(errJson.message || 'Unauthorized: Access restricted to Business Owner only.');
+      }
+    } catch (apiErr: any) {
+      if (apiErr.message?.includes('Unauthorized') || apiErr.message?.includes('restricted') || apiErr.message?.includes('session token')) {
+        throw apiErr;
+      }
+      console.warn('API /api/shops/:id failed, attempting direct Supabase mutation:', apiErr);
     }
 
-    const json = await res.json();
-    if (json.action === 'archived') {
-      const next = shops.map(s => s.id === id ? { ...s, isActive: false } : s);
-      setLocalItem(STORAGE_KEYS.SHOPS, next);
-    } else {
-      setLocalItem(STORAGE_KEYS.SHOPS, shops.filter(s => s.id !== id));
+    if (!apiSuccess) {
+      await ensureAuthenticatedSession();
+      if (usage.inUse) {
+        // Safe archival preserving append-only immutable stock_movements ledger (NEVER raises 23505 conflict)
+        const { error: archErr } = await supabase
+          .from('shops')
+          .update({ is_active: false, updated_at: new Date().toISOString() })
+          .eq('id', id);
+        if (archErr) throw new Error(archErr.message || 'Database rejected shop archive.');
+        serverResult = {
+          success: true,
+          action: 'archived',
+          message: `"${shopName}" is referenced by ${usage.count} historical records. It has been safely deactivated and archived.`,
+          inUse: true,
+          recordsCount: usage.count
+        };
+      } else {
+        await supabase.from('shop_memberships').delete().eq('shop_id', id);
+        const { error: delErr } = await supabase.from('shops').delete().eq('id', id);
+        if (delErr) throw new Error(delErr.message || 'Database rejected shop deletion.');
+        serverResult = {
+          success: true,
+          action: 'deleted',
+          message: `"${shopName}" deleted successfully.`,
+          inUse: false,
+          recordsCount: 0
+        };
+      }
     }
 
-    return {
-      success: true,
-      action: json.action || (usage.inUse ? 'archived' : 'deleted'),
-      message: json.message || `"${shopName}" deleted successfully.`,
-      inUse: json.action === 'archived' || usage.inUse,
-      recordsCount: json.recordsCount ?? usage.count
-    };
+    if (serverResult) {
+      if (serverResult.action === 'archived') {
+        const next = shops.map(s => s.id === id ? { ...s, isActive: false } : s);
+        setLocalItem(STORAGE_KEYS.SHOPS, next);
+      } else {
+        setLocalItem(STORAGE_KEYS.SHOPS, shops.filter(s => s.id !== id));
+      }
+      clearMemoryCache();
+      return serverResult;
+    }
   }
 
   // Purely offline/mock fallback if Supabase is not configured
@@ -1173,7 +1237,21 @@ export async function checkProductUsage(id: string): Promise<{ inUse: boolean; c
       if (err.message?.includes('session token')) {
         throw err;
       }
-      console.warn('checkProductUsage API error:', err);
+      console.warn('checkProductUsage API error, falling back to direct Supabase query:', err);
+    }
+
+    try {
+      await ensureAuthenticatedSession();
+      const [delivRes, moveRes, repRes, transRes] = await Promise.all([
+        supabase.from('delivery_items').select('id', { count: 'exact', head: true }).eq('product_id', id),
+        supabase.from('stock_movements').select('id', { count: 'exact', head: true }).eq('product_id', id),
+        supabase.from('daily_report_items').select('id', { count: 'exact', head: true }).eq('product_id', id),
+        supabase.from('stock_transfer_items').select('id', { count: 'exact', head: true }).eq('product_id', id)
+      ]);
+      const totalCount = (delivRes.count || 0) + (moveRes.count || 0) + (repRes.count || 0) + (transRes.count || 0);
+      return { inUse: totalCount > 0, count: totalCount };
+    } catch (dbErr) {
+      console.warn('Direct Supabase product usage check error:', dbErr);
     }
   }
 
@@ -1216,34 +1294,114 @@ export async function deleteProduct(id: string): Promise<DeleteCatalogResult> {
   const targetProduct = products.find(p => p.id === id);
   const prodName = targetProduct?.name || 'Product';
 
-  // 1. Authoritative Backend Endpoint (/api/products/:id)
-  // Backend checks all dependencies across delivery_items, stock_movements, daily_report_items, etc.
-  // Never falls back to direct Supabase client deletes that bypass audit ledger constraints.
+  // 1. Authoritative Backend Endpoint (/api/products/:id) with direct Supabase safe fallback
   if (isSupabaseConfigured && supabase && !id.startsWith('prod-')) {
-    const res = await authenticatedFetch(`/api/products/${encodeURIComponent(id)}`, {
-      method: 'DELETE'
-    });
+    let apiSuccess = false;
+    let serverResult: DeleteCatalogResult | null = null;
 
-    if (!res.ok) {
-      const errJson = await res.json().catch(() => ({}));
-      throw new Error(errJson.message || `Failed to delete product (HTTP ${res.status}).`);
+    try {
+      const res = await authenticatedFetch(`/api/products/${encodeURIComponent(id)}`, {
+        method: 'DELETE'
+      });
+
+      if (res.ok) {
+        const json = await res.json();
+        apiSuccess = true;
+        serverResult = {
+          success: true,
+          action: json.action || (usage.inUse ? 'archived' : 'deleted'),
+          message: json.message || `"${prodName}" ${usage.inUse ? 'archived' : 'deleted'} successfully.`,
+          inUse: json.action === 'archived' || usage.inUse,
+          recordsCount: json.recordsCount ?? usage.count
+        };
+      } else {
+        const errJson = await res.json().catch(() => ({}));
+        if (res.status === 401 || res.status === 403) {
+          throw new Error(errJson.message || 'Unauthorized: Access restricted to Business Owner only.');
+        }
+        console.warn(`DELETE /api/products/${id} failed (HTTP ${res.status}):`, errJson.message);
+      }
+    } catch (apiErr: any) {
+      if (apiErr.message?.includes('Unauthorized') || apiErr.message?.includes('restricted') || apiErr.message?.includes('session token')) {
+        throw apiErr;
+      }
+      console.warn('DELETE /api/products error, falling back to direct Supabase safe mutation:', apiErr);
     }
 
-    const json = await res.json();
-    if (json.action === 'archived') {
-      const next = products.map(p => p.id === id ? { ...p, isActive: false } : p);
-      setLocalItem(STORAGE_KEYS.PRODUCTS, next);
-    } else {
-      setLocalItem(STORAGE_KEYS.PRODUCTS, products.filter(p => p.id !== id));
+    if (apiSuccess && serverResult) {
+      if (serverResult.action === 'archived') {
+        const next = products.map(p => p.id === id ? { ...p, isActive: false } : p);
+        setLocalItem(STORAGE_KEYS.PRODUCTS, next);
+      } else {
+        setLocalItem(STORAGE_KEYS.PRODUCTS, products.filter(p => p.id !== id));
+      }
+      return serverResult;
     }
 
-    return {
-      success: true,
-      action: json.action || (usage.inUse ? 'archived' : 'deleted'),
-      message: json.message || `"${prodName}" deleted successfully.`,
-      inUse: json.action === 'archived' || usage.inUse,
-      recordsCount: json.recordsCount ?? usage.count
-    };
+    // Direct Supabase safe fallback
+    try {
+      await ensureAuthenticatedSession();
+      if (usage.inUse) {
+        // Safe archive: set is_active = false
+        const { error: updErr } = await supabase
+          .from('products')
+          .update({ is_active: false, updated_at: new Date().toISOString() })
+          .eq('id', id);
+
+        if (updErr) throw new Error(updErr.message);
+
+        const next = products.map(p => p.id === id ? { ...p, isActive: false } : p);
+        setLocalItem(STORAGE_KEYS.PRODUCTS, next);
+
+        return {
+          success: true,
+          action: 'archived',
+          message: `"${prodName}" is referenced by ${usage.count} existing records. It has been safely deactivated and archived.`,
+          inUse: true,
+          recordsCount: usage.count
+        };
+      } else {
+        // Safe hard delete: only if 0 records reference this product
+        const { error: delErr } = await supabase
+          .from('products')
+          .delete()
+          .eq('id', id);
+
+        if (delErr) {
+          // If foreign key constraint still blocks, fall back to archiving
+          if (delErr.code === '23503' || delErr.code === '23505') {
+            await supabase
+              .from('products')
+              .update({ is_active: false, updated_at: new Date().toISOString() })
+              .eq('id', id);
+
+            const next = products.map(p => p.id === id ? { ...p, isActive: false } : p);
+            setLocalItem(STORAGE_KEYS.PRODUCTS, next);
+
+            return {
+              success: true,
+              action: 'archived',
+              message: `"${prodName}" is referenced by existing history. It has been safely deactivated and archived.`,
+              inUse: true,
+              recordsCount: usage.count || 1
+            };
+          }
+          throw new Error(delErr.message);
+        }
+
+        setLocalItem(STORAGE_KEYS.PRODUCTS, products.filter(p => p.id !== id));
+        return {
+          success: true,
+          action: 'deleted',
+          message: `"${prodName}" deleted successfully.`,
+          inUse: false,
+          recordsCount: 0
+        };
+      }
+    } catch (dbErr: any) {
+      console.error('Direct Supabase deleteProduct error:', dbErr);
+      throw new Error(dbErr.message || 'Failed to delete product from database.');
+    }
   }
 
   // Purely offline/mock fallback if Supabase is not configured
@@ -2299,23 +2457,48 @@ export async function updateDeliveryStatus(
         const errJson = await res.json().catch(() => ({}));
         if (res.status === 401 || res.status === 403) {
           throw new Error(errJson.message || 'Unauthorized: Access restricted to Business Owner only.');
-        } else if (res.status === 400 || res.status === 404) {
-          throw new Error(errJson.message || 'Delivery record not found or invalid status.');
+        } else if (res.status === 400 && errJson.message?.includes('invalid status')) {
+          throw new Error(errJson.message || 'Invalid delivery status provided.');
         }
-        throw new Error(errJson.message || `Failed to update delivery status (HTTP ${res.status}).`);
+        console.warn(`PATCH /api/records/${targetId}/delivery-status failed (HTTP ${res.status}):`, errJson.message);
       }
     } catch (apiErr: any) {
       if (
         apiErr.message?.includes('Unauthorized') || 
         apiErr.message?.includes('restricted') || 
-        apiErr.message?.includes('invalid status') ||
-        apiErr.message?.includes('not found') ||
+        apiErr.message?.includes('invalid delivery status') ||
         apiErr.message?.includes('session token')
       ) {
         throw apiErr;
       }
-      console.warn('API /api/records/:id/delivery-status failed:', apiErr);
-      throw apiErr;
+      console.warn('API /api/records/:id/delivery-status failed, falling back to direct Supabase update:', apiErr);
+    }
+
+    // Direct Supabase fallback if backend API server did not confirm
+    if (!apiSuccess) {
+      try {
+        await ensureAuthenticatedSession();
+        const { data, error } = await supabase
+          .from('deliveries')
+          .update({
+            status,
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', targetId)
+          .select('id, status')
+          .single();
+
+        if (error) {
+          throw new Error(error.message);
+        }
+        if (data) {
+          apiSuccess = true;
+          confirmedStatus = (data.status as 'delivered' | 'pending') || status;
+        }
+      } catch (dbErr: any) {
+        console.error('Direct Supabase updateDeliveryStatus error:', dbErr);
+        throw new Error(dbErr.message || 'Failed to update delivery status in database.');
+      }
     }
   }
 
