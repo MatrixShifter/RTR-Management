@@ -390,8 +390,17 @@ recordsRouter.delete('/:id', requireOwnerAuth, businessMutationRateLimiter, asyn
     // NOTE: stock_movements is an append-only immutable audit ledger protected by
     // database triggers (prevent_immutable_mutation) and RLS. Historical audit entries
     // must never be deleted.
+    const { data: relInvoices } = await supabaseAdmin
+      .from('invoices')
+      .select('id')
+      .eq('delivery_id', targetId);
+
+    if (relInvoices && relInvoices.length > 0) {
+      const invIds = relInvoices.map(i => i.id);
+      await supabaseAdmin.from('payments').delete().in('invoice_id', invIds);
+      await supabaseAdmin.from('invoices').delete().in('id', invIds);
+    }
     await supabaseAdmin.from('payments').delete().eq('delivery_id', targetId);
-    await supabaseAdmin.from('invoices').delete().eq('delivery_id', targetId);
     await supabaseAdmin.from('delivery_items').delete().eq('delivery_id', targetId);
     const { error: delErr } = await supabaseAdmin.from('deliveries').delete().eq('id', targetId);
 

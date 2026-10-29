@@ -455,10 +455,10 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
 
   /**
    * Confirmed record deletion handler:
-   * - Uses actual delivery ID.
-   * - Optimistically updates UI.
-   * - Safely calls deleteBusinessRecord without deleting catalog shops or products.
-   * - Reverts on error.
+   * - Shows confirmation dialog before execution.
+   * - Disables duplicate submissions while isDeleting is true.
+   * - Calls deleteBusinessRecord and removes the row from the UI ONLY after the server confirms success.
+   * - Keeps row visible and shows truthful, actionable error on failure.
    */
   const handleConfirmDelete = async () => {
     if (!recordToDelete || isDeleting) return;
@@ -466,31 +466,33 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
     const targetDeliveryId = target.deliveryId || target.id;
     setIsDeleting(true);
 
-    const previousRecords = [...records];
-    // Immediate reactive removal from client records collection
-    setRecords(prev => prev.filter(r => r.id !== target.id && r.deliveryId !== targetDeliveryId));
-    recentlyDeletedIdsRef.current.set(targetDeliveryId, Date.now());
-    recentlyDeletedIdsRef.current.set(target.id, Date.now());
-
     try {
       await deleteBusinessRecord(targetDeliveryId);
+      // Remove row from client records collection ONLY after server/database confirms success
+      setRecords(prev => prev.filter(r => r.id !== target.id && r.deliveryId !== targetDeliveryId));
+      recentlyDeletedIdsRef.current.set(targetDeliveryId, Date.now());
+      recentlyDeletedIdsRef.current.set(target.id, Date.now());
       setRecordToDelete(null);
       setToastMessage(`Record for ${target.productName} deleted successfully.`);
       setTimeout(() => setToastMessage(null), 3000);
       // Silent background reconciliation (no page reload, no UI flash)
       loadData({ silent: true });
     } catch (err: any) {
-      // Safe rollback on deletion error
-      setRecords(previousRecords);
-      recentlyDeletedIdsRef.current.delete(targetDeliveryId);
-      recentlyDeletedIdsRef.current.delete(target.id);
+      // Row remains visible; show truthful, actionable error
       if (isDatabaseCapacityError(err)) {
         setCapacityAlert({
           title: DATABASE_STORAGE_FULL_TITLE,
           message: DATABASE_STORAGE_FULL_MESSAGE
         });
+      } else if (err?.message?.includes('immutable') || err?.message?.includes('23505') || err?.code === '23505') {
+        setError('Cannot delete record because historical stock movements or audit logs depend on it. Please mark the record as cancelled instead.');
+      } else if (err?.message?.includes('session token') || err?.message?.includes('Unauthorized')) {
+        setError('Session expired or unauthorized. Please re-authenticate as Business Owner.');
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent('rtr:session-expired'));
+        }
       } else {
-        setError(err?.message || 'Failed to delete record. Restored previous state.');
+        setError(err?.message || 'Failed to delete record. Please try again.');
       }
     } finally {
       setIsDeleting(false);

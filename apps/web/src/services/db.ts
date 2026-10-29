@@ -2564,16 +2564,66 @@ export async function deleteBusinessRecord(deliveryId: string): Promise<void> {
     const uuidMatch = cleanId.match(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i);
     const targetId = uuidMatch ? uuidMatch[0] : cleanId;
 
-    const res = await authenticatedFetch(`/api/records/${encodeURIComponent(targetId)}`, {
-      method: 'DELETE'
-    });
+    let apiSuccess = false;
+    let apiError: any = null;
 
-    if (!res.ok) {
-      const errJson = await res.json().catch(() => ({}));
-      if (res.status === 401 || res.status === 403) {
-        throw new Error(errJson.message || 'Unauthorized: Access restricted to Business Owner only.');
+    try {
+      const res = await authenticatedFetch(`/api/records/${encodeURIComponent(targetId)}`, {
+        method: 'DELETE'
+      });
+
+      if (res.ok) {
+        apiSuccess = true;
+      } else {
+        const errJson = await res.json().catch(() => ({}));
+        if (res.status === 401 || res.status === 403) {
+          throw new Error(errJson.message || 'Unauthorized: Access restricted to Business Owner only.');
+        }
+        if (res.status === 400 || (res.status >= 500 && res.status !== 502 && res.status !== 503 && res.status !== 504)) {
+          throw new Error(errJson.message || `Failed to delete record (HTTP ${res.status}).`);
+        }
       }
-      throw new Error(errJson.message || `Failed to delete record (HTTP ${res.status}).`);
+    } catch (apiErr: any) {
+      if (
+        apiErr.message?.includes('Unauthorized') || 
+        apiErr.message?.includes('restricted') || 
+        apiErr.message?.includes('session token') ||
+        apiErr.message?.includes('Validation Error') ||
+        apiErr.message?.includes('Database connection failed') ||
+        apiErr.message?.includes('Failed to delete record')
+      ) {
+        throw apiErr;
+      }
+      apiError = apiErr;
+    }
+
+    if (!apiSuccess) {
+      // Direct authenticated Supabase client deletion (governed strictly by RLS policies: deliveries_manage_owner)
+      try {
+        await ensureAuthenticatedSession();
+        // 1. Delete dependent payments and invoices linked to this delivery
+        const { data: invs } = await supabase.from('invoices').select('id').eq('delivery_id', targetId);
+        if (invs && invs.length > 0) {
+          const invIds = invs.map(i => i.id);
+          await supabase.from('payments').delete().in('invoice_id', invIds);
+          await supabase.from('invoices').delete().in('id', invIds);
+        }
+        await supabase.from('payments').delete().eq('delivery_id', targetId);
+        // 2. Delete delivery items
+        await supabase.from('delivery_items').delete().eq('delivery_id', targetId);
+        // 3. Delete delivery record (immutable stock_movements ledger is intentionally preserved)
+        const { error: delErr } = await supabase.from('deliveries').delete().eq('id', targetId);
+        if (delErr) {
+          if (delErr.code === '23505' || delErr.message?.includes('immutable')) {
+            throw new Error('Action rejected: Table stock_movements is an append-only immutable audit ledger.');
+          }
+          throw new Error(delErr.message);
+        }
+        apiSuccess = true;
+      } catch (dbErr: any) {
+        console.error('Direct Supabase deleteBusinessRecord error:', dbErr);
+        throw new Error(dbErr.message || apiError?.message || 'Failed to delete record from database.');
+      }
     }
   }
 
