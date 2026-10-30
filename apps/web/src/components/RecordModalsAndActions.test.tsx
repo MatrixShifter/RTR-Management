@@ -25,7 +25,7 @@ describe('Record Action Components (Menu & Modals)', () => {
   };
 
   describe('RecordActionsMenu', () => {
-    it('renders all 4 actions when pending balance is positive', () => {
+    it('renders exactly the 3 required actions: View Details, Edit Record, Delete Record', () => {
       const html = renderToString(
         <RecordActionsMenu
           record={mockRecord}
@@ -43,24 +43,26 @@ describe('Record Action Components (Menu & Modals)', () => {
           onClose={() => {}}
           onViewDetails={() => {}}
           onEdit={() => {}}
-          onRecordPayment={() => {}}
           onDelete={() => {}}
         />
       );
 
+      // Verify the 3 required actions
       expect(html).toContain('View Details');
       expect(html).toContain('Edit Record');
-      expect(html).toContain('Record Payment');
       expect(html).toContain('Delete Record');
+
+      // Strictly verify Record Payment is NOT present
+      expect(html).not.toContain('Record Payment');
     });
 
-    it('hides Record Payment when pending amount is 0', () => {
+    it('does not render Record Payment even when pending balance is positive or zero', () => {
       const settledRecord: BusinessRecord = {
         ...mockRecord,
         pendingAmount: 0
       };
 
-      const html = renderToString(
+      const htmlSettled = renderToString(
         <RecordActionsMenu
           record={settledRecord}
           anchorRect={{
@@ -77,15 +79,14 @@ describe('Record Action Components (Menu & Modals)', () => {
           onClose={() => {}}
           onViewDetails={() => {}}
           onEdit={() => {}}
-          onRecordPayment={() => {}}
           onDelete={() => {}}
         />
       );
 
-      expect(html).toContain('View Details');
-      expect(html).toContain('Edit Record');
-      expect(html).not.toContain('Record Payment');
-      expect(html).toContain('Delete Record');
+      expect(htmlSettled).not.toContain('Record Payment');
+      expect(htmlSettled).toContain('View Details');
+      expect(htmlSettled).toContain('Edit Record');
+      expect(htmlSettled).toContain('Delete Record');
     });
   });
 

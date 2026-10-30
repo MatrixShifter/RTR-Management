@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Eye, Edit2, CreditCard, Trash2 } from 'lucide-react';
+import { Eye, Edit2, Trash2 } from 'lucide-react';
 import type { BusinessRecord } from '../services/db.js';
 
 export interface RecordActionsMenuProps {
@@ -10,9 +10,11 @@ export interface RecordActionsMenuProps {
   onView?: (record: BusinessRecord) => void;
   onViewDetails?: (record: BusinessRecord) => void;
   onEdit: (record: BusinessRecord) => void;
-  onSettlePayment?: (record: BusinessRecord) => void;
-  onRecordPayment?: (record: BusinessRecord) => void;
   onDelete: (record: BusinessRecord) => void;
+  /** @deprecated Payment recording has been removed from the records context menu */
+  onSettlePayment?: (record: BusinessRecord) => void;
+  /** @deprecated Payment recording has been removed from the records context menu */
+  onRecordPayment?: (record: BusinessRecord) => void;
 }
 
 export const RecordActionsMenu: React.FC<RecordActionsMenuProps> = ({
@@ -22,14 +24,10 @@ export const RecordActionsMenu: React.FC<RecordActionsMenuProps> = ({
   onView,
   onViewDetails,
   onEdit,
-  onSettlePayment,
-  onRecordPayment,
   onDelete
 }) => {
   const handleView = onViewDetails || onView;
-  const handleSettle = onRecordPayment || onSettlePayment;
   const menuRef = useRef<HTMLDivElement>(null);
-  const pendingAmt = Number(record.pendingAmount) || 0;
   const [coords, setCoords] = useState<{ top: number; left: number; openUpward: boolean }>({
     top: 0,
     left: 0,
@@ -41,7 +39,7 @@ export const RecordActionsMenu: React.FC<RecordActionsMenuProps> = ({
     if (!anchorRect) return;
 
     const menuWidth = 175;
-    const menuHeight = pendingAmt > 0 ? 155 : 118;
+    const menuHeight = 118;
     const padding = 8;
 
     const spaceBelow = window.innerHeight - anchorRect.bottom;
@@ -59,7 +57,7 @@ export const RecordActionsMenu: React.FC<RecordActionsMenuProps> = ({
     }
 
     setCoords({ top, left, openUpward });
-  }, [anchorRect, pendingAmt]);
+  }, [anchorRect]);
 
   // Close handlers on outside click, Escape key, scroll, resize
   useEffect(() => {
@@ -147,25 +145,9 @@ export const RecordActionsMenu: React.FC<RecordActionsMenuProps> = ({
         <span>Edit Record</span>
       </button>
 
-      {/* 3. Record Payment (Active when pending balance > 0) */}
-      {pendingAmt > 0 && (
-        <button
-          type="button"
-          role="menuitem"
-          onClick={() => {
-            onClose();
-            if (handleSettle) handleSettle(record);
-          }}
-          className="w-full flex items-center gap-2.5 px-3.5 py-2 hover:bg-emerald-50 text-emerald-700 transition-colors cursor-pointer text-left focus:bg-emerald-50 focus:outline-none"
-        >
-          <CreditCard className="w-3.5 h-3.5 text-emerald-600 flex-shrink-0" />
-          <span>Record Payment</span>
-        </button>
-      )}
-
       <div className="border-t border-[#EAF2FA] my-1" />
 
-      {/* 4. Delete Record */}
+      {/* 3. Delete Record */}
       <button
         type="button"
         role="menuitem"

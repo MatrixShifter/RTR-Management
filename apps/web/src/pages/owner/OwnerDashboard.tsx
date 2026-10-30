@@ -1676,7 +1676,6 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
           onClose={() => setActiveMenu(null)}
           onViewDetails={handleViewRecord}
           onEdit={handleEditRecord}
-          onRecordPayment={(rec) => setSettlingRecord(rec)}
           onDelete={(rec) => {
             setActiveMenu(null);
             setRecordToDelete(rec);
