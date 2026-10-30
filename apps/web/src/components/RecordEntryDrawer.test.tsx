@@ -35,7 +35,7 @@ describe('RecordEntryDrawer Component & Catalog Management Suite', () => {
     { id: 'prod-archived', name: 'Legacy Phone Cover', sku: 'CVR-OLD', category: 'Mobile Cases', unitPrice: 99, minStock: 0, isActive: false }
   ];
 
-  it('renders only the 4 allowed fields in order: Date, Shop Name, Product, Unit Price (₹)', () => {
+  it('renders the allowed form fields including Date, Shop Name, Product, Unit Price and Customer Price (CP)', () => {
     const html = renderToString(
       <RecordEntryDrawer
         isOpen={true}
@@ -53,7 +53,8 @@ describe('RecordEntryDrawer Component & Catalog Management Suite', () => {
     expect(html).toContain('New Shop');
     expect(html).toContain('Product');
     expect(html).toContain('New Product');
-    expect(html).toContain('Unit Price (₹)');
+    expect(html).toContain('Unit Price');
+    expect(html).toContain('Customer Price (CP) (₹)');
     expect(html).toContain('Cancel');
     expect(html).toContain('Save Record');
 
@@ -339,4 +340,91 @@ describe('RecordEntryDrawer Component & Catalog Management Suite', () => {
       expect(archivedProd?.isActive).toBe(false);
     }, 15000);
   });
+  describe('Customer Price (CP) & Live Profit Calculation Suite', () => {
+    it('renders customer price input and displays positive live profit when CP > wholesale cost', () => {
+      const html = renderToString(
+        <RecordEntryDrawer
+          isOpen={true}
+          onClose={() => {}}
+          onSuccess={() => {}}
+          shops={mockShops}
+          products={mockProducts}
+          editingRecord={{
+            id: 'rec-cp-profit',
+            deliveryId: 'del-cp-profit',
+            date: '2026-10-30',
+            shopId: 'shop-1',
+            shopName: 'RTR Anna Nagar',
+            productId: 'prod-1',
+            productName: 'Tempered Glass 9D',
+            quantity: 1,
+            unitPrice: 45,
+            totalAmount: 45,
+            customerPrice: 80,
+            profit: 35,
+            deliveryStatus: 'delivered',
+            pendingAmount: 0,
+            notes: '',
+            createdAt: '2026-10-30T10:00:00Z'
+          }}
+        />
+      );
+
+      expect(html).toContain('Customer Price (CP) (₹)');
+      expect(html).toContain('Estimated Profit');
+      expect(html).toContain('+₹35');
+    });
+
+    it('displays loss warning when CP is less than wholesale cost', () => {
+      const html = renderToString(
+        <RecordEntryDrawer
+          isOpen={true}
+          onClose={() => {}}
+          onSuccess={() => {}}
+          shops={mockShops}
+          products={mockProducts}
+          editingRecord={{
+            id: 'rec-cp-loss',
+            deliveryId: 'del-cp-loss',
+            date: '2026-10-30',
+            shopId: 'shop-1',
+            shopName: 'RTR Anna Nagar',
+            productId: 'prod-2',
+            productName: 'Fast Charger 25W',
+            quantity: 1,
+            unitPrice: 250,
+            totalAmount: 250,
+            customerPrice: 200,
+            profit: -50,
+            deliveryStatus: 'delivered',
+            pendingAmount: 0,
+            notes: '',
+            createdAt: '2026-10-30T10:00:00Z'
+          }}
+        />
+      );
+
+      expect(html).toContain('Loss Warning (Selling Below Cost)');
+      expect(html).toContain('-₹50');
+    });
+
+    it('saves a business record with Customer Price and derives correct profit', async () => {
+      const saved = await saveBusinessRecord({
+        date: '2026-10-30',
+        shopName: 'RTR T Nagar',
+        productName: 'Fast Charger 25W',
+        quantity: 2,
+        unitPrice: 250,
+        customerPrice: 700,
+        deliveryStatus: 'delivered',
+        pendingAmount: 0
+      });
+
+      expect(saved).toBeDefined();
+      expect(saved.totalAmount).toBe(500); // 2 * 250
+      expect(saved.customerPrice).toBe(700);
+      expect(saved.profit).toBe(200); // 700 - 500
+    });
+  });
+
 });

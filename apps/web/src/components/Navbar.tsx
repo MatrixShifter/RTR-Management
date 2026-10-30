@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { 
   ClipboardList, 
+  FileSpreadsheet, 
   Settings, 
   LogOut, 
   Menu, 
@@ -73,17 +74,21 @@ export const Navbar: React.FC<NavbarProps> = ({
 
   // Primary navigation links for the simplified Records ledger workspace
   const primaryOwnerLinks = [
-    { label: 'Records', to: '/', icon: ClipboardList, alias: 'Records' }
+    { label: 'Records', to: '/', icon: ClipboardList, alias: 'Records' },
+    { label: 'Statements', to: '/statements', icon: FileSpreadsheet, alias: 'Reports' }
   ];
 
   const isCurrentActive = (to: string) => {
     if (to === '/' && (location.pathname === '/' || location.pathname === '/records')) return true;
+    if (to === '/statements' && (location.pathname === '/statements' || location.pathname === '/reports')) return true;
     if (to === '/settings' && (location.pathname === '/settings' || location.pathname === '/management')) return true;
     return location.pathname === to;
   };
 
   const activeTitle = location.pathname === '/' || location.pathname === '/records'
     ? 'Records'
+    : location.pathname === '/statements' || location.pathname === '/reports'
+    ? 'Statements'
     : location.pathname === '/settings' || location.pathname === '/management'
     ? 'Settings'
     : 'Wholesale Ledger';

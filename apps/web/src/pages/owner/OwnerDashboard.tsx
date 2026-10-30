@@ -1324,7 +1324,14 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
                               onClick={() => handleViewRecord(rec)}
                               className="text-left text-[#102A4C] hover:text-[#168BFF] font-medium transition-colors cursor-pointer flex-1"
                             >
-                              {rec.productName}
+                              <div>{rec.productName}</div>
+                              <div className="flex items-center gap-1.5 mt-0.5 text-[11px] text-slate-500 font-normal">
+                                <span>CP: <span className="font-medium text-slate-700">{rec.customerPrice !== undefined && rec.customerPrice !== null ? `₹${Number(rec.customerPrice).toLocaleString('en-IN')}` : 'Not Recorded'}</span></span>
+                                <span className="text-slate-300">•</span>
+                                <span>Profit: <span className={`font-medium ${rec.profit !== undefined && rec.profit !== null ? (rec.profit >= 0 ? 'text-emerald-700' : 'text-rose-600') : 'text-slate-400'}`}>
+                                  {rec.profit !== undefined && rec.profit !== null ? (rec.profit >= 0 ? `+₹${Number(rec.profit).toLocaleString('en-IN')}` : `-₹${Math.abs(Number(rec.profit)).toLocaleString('en-IN')}`) : 'Not Available'}
+                                </span></span>
+                              </div>
                             </button>
                             <button
                               type="button"
@@ -1420,7 +1427,14 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
                               onClick={() => handleViewRecord(rec)}
                               className="text-left text-[#102A4C] hover:text-[#168BFF] font-medium transition-colors cursor-pointer flex-1"
                             >
-                              {rec.productName}
+                              <div>{rec.productName}</div>
+                              <div className="flex items-center gap-1.5 mt-0.5 text-[11px] text-slate-500 font-normal">
+                                <span>CP: <span className="font-medium text-slate-700">{rec.customerPrice !== undefined && rec.customerPrice !== null ? `₹${Number(rec.customerPrice).toLocaleString('en-IN')}` : 'Not Recorded'}</span></span>
+                                <span className="text-slate-300">•</span>
+                                <span>Profit: <span className={`font-medium ${rec.profit !== undefined && rec.profit !== null ? (rec.profit >= 0 ? 'text-emerald-700' : 'text-rose-600') : 'text-slate-400'}`}>
+                                  {rec.profit !== undefined && rec.profit !== null ? (rec.profit >= 0 ? `+₹${Number(rec.profit).toLocaleString('en-IN')}` : `-₹${Math.abs(Number(rec.profit)).toLocaleString('en-IN')}`) : 'Not Available'}
+                                </span></span>
+                              </div>
                             </button>
                             <button
                               type="button"

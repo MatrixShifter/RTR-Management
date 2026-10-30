@@ -86,6 +86,9 @@ export const RecordEntryDrawer: React.FC<RecordEntryDrawerProps> = ({
   // Unit Price (₹)
   const [unitPrice, setUnitPrice] = useState<number | ''>(editingRecord?.unitPrice ?? '');
 
+  // Customer Price (CP) (₹)
+  const [customerPrice, setCustomerPrice] = useState<number | ''>(editingRecord?.customerPrice !== undefined && editingRecord?.customerPrice !== null ? editingRecord.customerPrice : '');
+
   // UI / Error state
   const [validationErrors, setValidationErrors] = useState<Record<string, string>>({});
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
@@ -122,6 +125,7 @@ export const RecordEntryDrawer: React.FC<RecordEntryDrawerProps> = ({
     setCustomProductName('');
 
     setUnitPrice('');
+    setCustomerPrice('');
     setValidationErrors({});
     setSubmitError(null);
     setCapacityError(null);
@@ -146,6 +150,7 @@ export const RecordEntryDrawer: React.FC<RecordEntryDrawerProps> = ({
       setCustomProductName(editingRecord.productName || '');
 
       setUnitPrice(editingRecord.unitPrice ?? 0);
+      setCustomerPrice(editingRecord.customerPrice !== undefined && editingRecord.customerPrice !== null ? editingRecord.customerPrice : '');
     } else {
       resetForm();
     }
@@ -178,7 +183,8 @@ export const RecordEntryDrawer: React.FC<RecordEntryDrawerProps> = ({
         date !== (editingRecord.date || todayStr) ||
         (selectedShopId || customShopName) !== (editingRecord.shopId || editingRecord.shopName || '') ||
         (selectedProductId || customProductName) !== (editingRecord.productId || editingRecord.productName || '') ||
-        String(unitPrice) !== String(editingRecord.unitPrice ?? '')
+        String(unitPrice) !== String(editingRecord.unitPrice ?? '') ||
+        String(customerPrice) !== String(editingRecord.customerPrice ?? '')
       );
     }
     return Boolean(
@@ -186,7 +192,8 @@ export const RecordEntryDrawer: React.FC<RecordEntryDrawerProps> = ({
       selectedShopId ||
       customProductName.trim() ||
       selectedProductId ||
-      unitPrice !== ''
+      unitPrice !== '' ||
+      customerPrice !== ''
     );
   };
 
@@ -273,6 +280,27 @@ export const RecordEntryDrawer: React.FC<RecordEntryDrawerProps> = ({
     setUnitPrice(isNaN(val) ? '' : Math.max(0, val));
   };
 
+  const handleCustomerPriceChange = (valStr: string) => {
+    if (valStr === '') {
+      setCustomerPrice('');
+      return;
+    }
+    const val = parseFloat(valStr);
+    setCustomerPrice(isNaN(val) ? '' : Math.max(0, val));
+  };
+
+  const currentAmount = useMemo(() => {
+    const rate = Number(unitPrice) || 0;
+    const qty = editingRecord?.quantity && editingRecord.quantity > 0 ? editingRecord.quantity : 1;
+    return qty * rate;
+  }, [unitPrice, editingRecord?.quantity]);
+
+  const liveProfit = useMemo(() => {
+    if (customerPrice === '' || unitPrice === '') return null;
+    const cp = Number(customerPrice) || 0;
+    return Math.round((cp - currentAmount) * 100) / 100;
+  }, [customerPrice, currentAmount, unitPrice]);
+
   // Validation strictly for Date, Shop Name, Product, Unit Price
   const validate = (): boolean => {
     const errors: Record<string, string> = {};
@@ -305,6 +333,10 @@ export const RecordEntryDrawer: React.FC<RecordEntryDrawerProps> = ({
       errors.unitPrice = 'Unit price must be 0 or greater.';
     }
 
+    if (customerPrice !== '' && (Number(customerPrice) < 0 || isNaN(Number(customerPrice)))) {
+      errors.customerPrice = 'Customer price cannot be negative.';
+    }
+
     setValidationErrors(errors);
     return Object.keys(errors).length === 0;
   };
@@ -324,6 +356,7 @@ export const RecordEntryDrawer: React.FC<RecordEntryDrawerProps> = ({
     const productName = chosenProduct ? chosenProduct.name : customProductName.trim();
 
     const rate = Number(unitPrice) || 0;
+    const cpVal = customerPrice === '' ? null : Number(customerPrice);
     // Single ledger item record: 1 unit where total amount = unit price
     const qty = editingRecord?.quantity && editingRecord.quantity > 0 ? editingRecord.quantity : 1;
     const total = qty * rate;
@@ -350,6 +383,7 @@ export const RecordEntryDrawer: React.FC<RecordEntryDrawerProps> = ({
           productName,
           quantity: qty,
           unitPrice: rate,
+          customerPrice: cpVal,
           deliveryStatus: status,
           pendingAmount: pending,
           notes: memo
@@ -365,6 +399,7 @@ export const RecordEntryDrawer: React.FC<RecordEntryDrawerProps> = ({
           productName,
           quantity: qty,
           unitPrice: rate,
+          customerPrice: cpVal,
           deliveryStatus: status,
           pendingAmount: pending,
           paidAmount: paid,
@@ -879,26 +914,76 @@ export const RecordEntryDrawer: React.FC<RecordEntryDrawerProps> = ({
               )}
             </div>
 
-            {/* 4. Unit Price (₹) — only price input */}
-            <div>
-              <label htmlFor="record-unit-price-input" className="block text-xs font-semibold text-slate-800 mb-1">
-                Unit Price (₹)
-              </label>
-              <input
-                id="record-unit-price-input"
-                type="number"
-                min={0}
-                step="any"
-                placeholder="e.g. 25.00"
-                value={unitPrice}
-                onChange={e => handleUnitPriceChange(e.target.value)}
-                required
-                className={`w-full rounded-xl border px-3.5 py-2 text-xs sm:text-sm text-slate-800 bg-white focus:outline-none focus:ring-2 focus:ring-[#168BFF] ${
-                  validationErrors.unitPrice ? 'border-rose-400 bg-rose-50/20' : 'border-slate-200'
-                }`}
-              />
-              {validationErrors.unitPrice && (
-                <p className="mt-1 text-xs text-rose-600 font-medium">{validationErrors.unitPrice}</p>
+            {/* 4. Unit Price & Customer Price with Live Profit Calculation */}
+            <div className="space-y-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label htmlFor="record-unit-price-input" className="block text-xs font-semibold text-slate-800 mb-1">
+                    Unit Price / Cost (₹)
+                  </label>
+                  <input
+                    id="record-unit-price-input"
+                    type="number"
+                    min={0}
+                    step="any"
+                    placeholder="e.g. 25.00"
+                    value={unitPrice}
+                    onChange={e => handleUnitPriceChange(e.target.value)}
+                    required
+                    className={`w-full rounded-xl border px-3.5 py-2 text-xs sm:text-sm text-slate-800 bg-white focus:outline-none focus:ring-2 focus:ring-[#168BFF] ${
+                      validationErrors.unitPrice ? 'border-rose-400 bg-rose-50/20' : 'border-slate-200'
+                    }`}
+                  />
+                  {validationErrors.unitPrice && (
+                    <p className="mt-1 text-xs text-rose-600 font-medium">{validationErrors.unitPrice}</p>
+                  )}
+                </div>
+
+                <div>
+                  <label htmlFor="record-customer-price-input" className="flex items-center justify-between text-xs font-semibold text-slate-800 mb-1">
+                    <span>Customer Price (CP) (₹)</span>
+                    <span className="text-[11px] font-normal text-slate-400">Total Selling</span>
+                  </label>
+                  <input
+                    id="record-customer-price-input"
+                    type="number"
+                    min={0}
+                    step="any"
+                    placeholder="e.g. 35.00"
+                    value={customerPrice}
+                    onChange={e => handleCustomerPriceChange(e.target.value)}
+                    className={`w-full rounded-xl border px-3.5 py-2 text-xs sm:text-sm text-slate-800 bg-white focus:outline-none focus:ring-2 focus:ring-[#168BFF] ${
+                      validationErrors.customerPrice ? 'border-rose-400 bg-rose-50/20' : 'border-slate-200'
+                    }`}
+                  />
+                  {validationErrors.customerPrice && (
+                    <p className="mt-1 text-xs text-rose-600 font-medium">{validationErrors.customerPrice}</p>
+                  )}
+                </div>
+              </div>
+
+              {/* Live Profit / Loss Calculation Indicator */}
+              {liveProfit !== null && (
+                <div 
+                  data-testid="live-profit-indicator"
+                  className={`p-2.5 rounded-xl border flex items-center justify-between text-xs sm:text-sm transition-all ${
+                    liveProfit >= 0 
+                      ? 'bg-emerald-50/90 border-emerald-200 text-emerald-900' 
+                      : 'bg-rose-50/90 border-rose-200 text-rose-900'
+                  }`}
+                >
+                  <div className="flex items-center gap-1.5 font-medium">
+                    {liveProfit >= 0 ? (
+                      <span className="w-2 h-2 rounded-full bg-emerald-500 inline-block"></span>
+                    ) : (
+                      <AlertTriangle className="w-3.5 h-3.5 text-rose-600 flex-shrink-0" />
+                    )}
+                    <span>{liveProfit >= 0 ? 'Estimated Profit' : 'Loss Warning (Selling Below Cost)'}</span>
+                  </div>
+                  <div className="font-bold tracking-tight text-xs sm:text-sm">
+                    {liveProfit >= 0 ? `+₹${liveProfit.toLocaleString('en-IN')}` : `-₹${Math.abs(liveProfit).toLocaleString('en-IN')}`}
+                  </div>
+                </div>
               )}
             </div>
           </form>

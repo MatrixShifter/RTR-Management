@@ -16,6 +16,7 @@ import { supabase, isSupabaseConfigured } from './lib/supabase.js';
 
 // Route-level code splitting & lazy loading for heavy workspace pages
 const OwnerDashboard = lazy(() => import('./pages/owner/OwnerDashboard.js').then(m => ({ default: m.OwnerDashboard })));
+const MonthlyShopStatement = lazy(() => import('./pages/owner/MonthlyShopStatement.js').then(m => ({ default: m.MonthlyShopStatement })));
 const SettingsPage = lazy(() => import('./pages/owner/Settings.js').then(m => ({ default: m.SettingsPage })));
 
 export interface UserState {
@@ -543,6 +544,8 @@ export const AppContent: React.FC = () => {
       >
         <Route path="/" element={<OwnerDashboard />} />
         <Route path="/records" element={<OwnerDashboard />} />
+        <Route path="/statements" element={<MonthlyShopStatement />} />
+        <Route path="/reports" element={<MonthlyShopStatement />} />
         <Route path="/settings" element={<SettingsPage currentUser={currentUser!} isOnline={isOnline} onSignOut={handleSignOut} />} />
         <Route path="/management" element={<SettingsPage currentUser={currentUser!} isOnline={isOnline} onSignOut={handleSignOut} />} />
         {/* Cleanly redirect legacy navigation links back to central Records ledger */}
@@ -550,7 +553,6 @@ export const AppContent: React.FC = () => {
         <Route path="/catalog" element={<Navigate to="/records" replace />} />
         <Route path="/products" element={<Navigate to="/records" replace />} />
         <Route path="/analytics" element={<Navigate to="/records" replace />} />
-        <Route path="/reports" element={<Navigate to="/records" replace />} />
         <Route path="/deliveries" element={<Navigate to="/records" replace />} />
         <Route path="/stock-ledger" element={<Navigate to="/records" replace />} />
         <Route path="/payments" element={<Navigate to="/records" replace />} />

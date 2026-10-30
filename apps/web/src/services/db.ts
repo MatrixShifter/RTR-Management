@@ -22,7 +22,8 @@ import {
   type RecordSortDirection,
   SaveBusinessRecordSchema,
   UpdateBusinessRecordSchema,
-  SettlePaymentSchema
+  SettlePaymentSchema,
+  calculateRecordProfit
 } from '@crimpston/shared';
 import { supabase, isSupabaseConfigured } from '../lib/supabase.js';
 import {
@@ -93,6 +94,8 @@ export interface DeliveryRecord {
   createdBy: string;
   items: DeliveryItemRecord[];
   pendingAmount?: number;
+  customerPrice?: number | null;
+  profit?: number | null;
   createdAt: string;
 }
 
@@ -108,6 +111,8 @@ export interface BusinessRecord {
   quantity: number;
   unitPrice: number;
   totalAmount: number;
+  customerPrice?: number | null;
+  profit?: number | null;
   deliveryStatus: 'delivered' | 'pending' | 'cancelled';
   pendingAmount: number;
   notes?: string;
@@ -122,6 +127,7 @@ export interface SaveBusinessRecordInput {
   productId?: string;
   quantity?: number;
   unitPrice: number;
+  customerPrice?: number | null;
   deliveryStatus?: 'delivered' | 'pending' | 'cancelled';
   pendingAmount?: number;
   paidAmount?: number;
@@ -1673,9 +1679,16 @@ export async function recordDelivery(input: Omit<DeliveryRecord, 'id' | 'created
       const pendingVal = input.pendingAmount !== undefined ? Number(input.pendingAmount) : computedItemsTotal;
       const paidVal = Math.max(0, computedItemsTotal - pendingVal);
 
+      const cpVal = input.customerPrice !== undefined && input.customerPrice !== null && !isNaN(Number(input.customerPrice))
+        ? Math.round(Number(input.customerPrice) * 100) / 100
+        : null;
+      const profitVal = calculateRecordProfit(computedItemsTotal, cpVal);
+
       const meta = {
         memo: input.notes || '',
         totalAmount: computedItemsTotal,
+        customerPrice: cpVal,
+        profit: profitVal,
         paidAmount: paidVal,
         pendingAmount: pendingVal,
         items: input.items.map(i => ({
@@ -1703,6 +1716,7 @@ export async function recordDelivery(input: Omit<DeliveryRecord, 'id' | 'created
             delivery_date: input.deliveryDate,
             status: input.status,
             total_amount: computedItemsTotal,
+            customer_price: cpVal,
             amount_paid: paidVal,
             payment_status: paymentStatus,
             notes: serializedNotes,
@@ -1716,7 +1730,7 @@ export async function recordDelivery(input: Omit<DeliveryRecord, 'id' | 'created
       delivErr = fullRes.error;
 
       // If Supabase rejected because columns aren't yet migrated in database, fallback to baseline
-      if (delivErr && (delivErr.message?.includes('total_amount') || delivErr.message?.includes('payment_status') || delivErr.code === '42703')) {
+      if (delivErr && (delivErr.message?.includes('total_amount') || delivErr.message?.includes('customer_price') || delivErr.message?.includes('payment_status') || delivErr.code === '42703')) {
         const baselineRes = await withTimeout(
           supabase
             .from('deliveries')
@@ -1821,6 +1835,8 @@ export async function recordDelivery(input: Omit<DeliveryRecord, 'id' | 'created
 
         const newDelivery: DeliveryRecord = {
           ...input,
+          customerPrice: cpVal,
+          profit: profitVal,
           id: delivData.id,
           createdAt: delivData.created_at
         };
@@ -1859,6 +1875,27 @@ export function mapViewRecordToBusinessRecord(row: any): BusinessRecord {
   const targetId = String(row.record_id || row.id || row.delivery_id || row.deliveryId);
   const deliveryId = String(row.delivery_id || row.deliveryId || targetId);
 
+  let rawCp = row.customer_price ?? row.customerPrice ?? null;
+  let parsedCp: number | null = rawCp !== null && rawCp !== undefined && rawCp !== '' && !isNaN(Number(rawCp)) ? Number(rawCp) : null;
+
+  // Fallback: Check if notes contains JSON metadata with customerPrice
+  if (parsedCp === null && row.notes && typeof row.notes === 'string' && row.notes.startsWith('{')) {
+    try {
+      const meta = JSON.parse(row.notes);
+      if (meta.customerPrice !== undefined && meta.customerPrice !== null && !isNaN(Number(meta.customerPrice))) {
+        parsedCp = Number(meta.customerPrice);
+      }
+    } catch {}
+  }
+
+  const totalAmount = Number(row.total_amount ?? row.totalAmount ?? 0);
+  let profit: number | null = null;
+  if (row.profit !== undefined && row.profit !== null && row.profit !== '' && !isNaN(Number(row.profit))) {
+    profit = Number(row.profit);
+  } else if (parsedCp !== null) {
+    profit = calculateRecordProfit(totalAmount, parsedCp);
+  }
+
   return {
     id: targetId,
     deliveryId,
@@ -1870,7 +1907,9 @@ export function mapViewRecordToBusinessRecord(row: any): BusinessRecord {
     productSku: row.product_sku || row.productSku || '',
     quantity: Number(row.quantity) || 1,
     unitPrice: Number(row.unit_price ?? row.unitPrice ?? 0),
-    totalAmount: Number(row.total_amount ?? row.totalAmount ?? 0),
+    totalAmount,
+    customerPrice: parsedCp,
+    profit,
     deliveryStatus,
     pendingAmount: Number(row.pending_amount ?? row.pendingAmount ?? 0),
     notes: row.notes || '',
@@ -1906,6 +1945,20 @@ function buildBusinessRecordsFromDeliveries(
       ? Number(deliv.pendingAmount) 
       : (inv ? Number(inv.outstanding_amount) : 0);
 
+    let metaCp: number | null = null;
+    try {
+      if (deliv.notes && deliv.notes.startsWith('{')) {
+        const meta = JSON.parse(deliv.notes);
+        if (meta.customerPrice !== undefined && meta.customerPrice !== null) {
+          metaCp = Number(meta.customerPrice);
+        }
+      }
+    } catch {}
+
+    const resolvedCp = deliv.customerPrice !== undefined && deliv.customerPrice !== null
+      ? Number(deliv.customerPrice)
+      : metaCp;
+
     if (deliv.items && deliv.items.length > 0) {
       deliv.items.forEach((item, index) => {
         const prod = prodMap.get(item.productId);
@@ -1916,6 +1969,8 @@ function buildBusinessRecordsFromDeliveries(
         const totalAmount = qty * unitPrice;
         // For multi-item deliveries, attribute the delivery's pending balance to the first item line
         const itemPending = index === 0 ? pendingVal : 0;
+        const itemCp = index === 0 ? resolvedCp : null;
+        const itemProfit = itemCp !== null ? calculateRecordProfit(totalAmount, itemCp) : null;
 
         records.push({
           id: `${deliv.id}-${item.productId || index}`,
@@ -1929,6 +1984,8 @@ function buildBusinessRecordsFromDeliveries(
           quantity: qty,
           unitPrice,
           totalAmount,
+          customerPrice: itemCp,
+          profit: itemProfit,
           deliveryStatus: getAuthoritativeDeliveryStatus(deliv.status),
           pendingAmount: itemPending,
           notes: deliv.notes,
@@ -1953,6 +2010,7 @@ function buildBusinessRecordsFromDeliveries(
       } catch {}
 
       const totalAmount = fallbackQty * fallbackPrice;
+      const profit = resolvedCp !== null ? calculateRecordProfit(totalAmount, resolvedCp) : null;
 
       records.push({
         id: deliv.id,
@@ -1965,6 +2023,8 @@ function buildBusinessRecordsFromDeliveries(
         quantity: fallbackQty,
         unitPrice: fallbackPrice,
         totalAmount,
+        customerPrice: resolvedCp,
+        profit,
         deliveryStatus: getAuthoritativeDeliveryStatus(deliv.status),
         pendingAmount: pendingVal,
         notes: deliv.notes,
@@ -2221,12 +2281,15 @@ export async function saveBusinessRecord(input: SaveBusinessRecordInput): Promis
   pendingAmount = Math.max(0, pendingAmount);
 
   // Offline support: Queue pending sync operation and save local record in IndexedDB
-  if (!isDemoMode() && typeof navigator !== 'undefined' && !navigator.onLine) {
+  if (!isDemoMode() && typeof navigator !== 'undefined' && navigator.onLine === false) {
     const userId = await getCurrentUserId();
     const localId = `local_rec_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
     const localDelivId = `local_deliv_${Date.now()}`;
     const opId = `op_rec_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
 
+    const cpVal = input.customerPrice !== undefined && input.customerPrice !== null && !isNaN(Number(input.customerPrice))
+      ? Math.round(Number(input.customerPrice) * 100) / 100
+      : null;
     const localRecord: BusinessRecord = {
       id: localId,
       deliveryId: localDelivId,
@@ -2239,6 +2302,8 @@ export async function saveBusinessRecord(input: SaveBusinessRecordInput): Promis
       quantity: qty,
       unitPrice: rate,
       totalAmount,
+      customerPrice: cpVal,
+      profit: calculateRecordProfit(totalAmount, cpVal),
       deliveryStatus: input.deliveryStatus || 'pending',
       pendingAmount,
       notes: input.notes,
@@ -2272,6 +2337,7 @@ export async function saveBusinessRecord(input: SaveBusinessRecordInput): Promis
     status: input.deliveryStatus || 'pending',
     notes: input.notes || '',
     createdBy: 'Business Owner',
+    customerPrice: input.customerPrice ?? null,
     items: [{
       productId: targetProduct.id,
       productName: targetProduct.name,
@@ -2313,6 +2379,7 @@ export async function saveBusinessRecord(input: SaveBusinessRecordInput): Promis
     window.dispatchEvent(new CustomEvent('rtr_data_sync', { detail: { key: 'deliveries' } }));
   }
 
+  const resolvedCp = delivery.customerPrice ?? (input.customerPrice !== undefined && input.customerPrice !== null ? Number(input.customerPrice) : null);
   return {
     id: delivery.id,
     deliveryId: delivery.id,
@@ -2325,6 +2392,8 @@ export async function saveBusinessRecord(input: SaveBusinessRecordInput): Promis
     quantity: qty,
     unitPrice: rate,
     totalAmount,
+    customerPrice: resolvedCp,
+    profit: calculateRecordProfit(totalAmount, resolvedCp),
     deliveryStatus: input.deliveryStatus || 'pending',
     pendingAmount,
     notes: input.notes,
@@ -2388,6 +2457,11 @@ export async function updateBusinessRecord(input: UpdateBusinessRecordInput): Pr
     }
     const resolvedDeliveryId = idx >= 0 && deliveries[idx] ? deliveries[idx]!.id : input.deliveryId;
     const existingCreatedAt = idx >= 0 && deliveries[idx] ? deliveries[idx]!.createdAt : new Date().toISOString();
+    const cpVal = input.customerPrice !== undefined && input.customerPrice !== null && !isNaN(Number(input.customerPrice))
+      ? Math.round(Number(input.customerPrice) * 100) / 100
+      : null;
+    const profitVal = calculateRecordProfit(totalAmount, cpVal);
+
     const updatedDelivery: DeliveryRecord = {
       id: resolvedDeliveryId,
       shopId: targetShop.id,
@@ -2397,6 +2471,8 @@ export async function updateBusinessRecord(input: UpdateBusinessRecordInput): Pr
       notes: JSON.stringify({
         memo: input.notes || '',
         totalAmount,
+        customerPrice: cpVal,
+        profit: profitVal,
         paidAmount: Math.max(0, totalAmount - pendingAmount),
         pendingAmount,
         items: [{
@@ -2407,6 +2483,8 @@ export async function updateBusinessRecord(input: UpdateBusinessRecordInput): Pr
         }]
       }),
       createdBy: 'demo-owner',
+      customerPrice: cpVal,
+      profit: profitVal,
       items: [{
         productId: targetProduct.id,
         productName: targetProduct.name,
@@ -2437,6 +2515,8 @@ export async function updateBusinessRecord(input: UpdateBusinessRecordInput): Pr
       quantity: qty,
       unitPrice: rate,
       totalAmount,
+      customerPrice: cpVal,
+      profit: profitVal,
       deliveryStatus: input.deliveryStatus || 'pending',
       pendingAmount,
       notes: input.notes,
@@ -2447,9 +2527,17 @@ export async function updateBusinessRecord(input: UpdateBusinessRecordInput): Pr
   if (isSupabaseConfigured && supabase && !input.deliveryId.startsWith('deliv-')) {
     try {
       await ensureAuthenticatedSession();
+      const cpVal = input.customerPrice !== undefined && input.customerPrice !== null && !isNaN(Number(input.customerPrice))
+        ? Math.round(Number(input.customerPrice) * 100) / 100
+        : null;
+      const profitVal = calculateRecordProfit(totalAmount, cpVal);
+
       const meta = {
         memo: input.notes || '',
         pendingAmount,
+        totalAmount,
+        customerPrice: cpVal,
+        profit: profitVal,
         items: [{
           productId: targetProduct.id,
           productName: targetProduct.name,
@@ -2458,16 +2546,32 @@ export async function updateBusinessRecord(input: UpdateBusinessRecordInput): Pr
         }]
       };
 
-      const { error: updErr } = await supabase
+      let { error: updErr } = await supabase
         .from('deliveries')
         .update({
           shop_id: targetShop.id,
           delivery_date: input.date,
           status: input.deliveryStatus || 'pending',
+          total_amount: totalAmount,
+          customer_price: cpVal,
           notes: JSON.stringify(meta),
           updated_at: new Date().toISOString()
         })
         .eq('id', input.deliveryId);
+
+      if (updErr && (updErr.message?.includes('customer_price') || updErr.code === '42703')) {
+        const fallbackRes = await supabase
+          .from('deliveries')
+          .update({
+            shop_id: targetShop.id,
+            delivery_date: input.date,
+            status: input.deliveryStatus || 'pending',
+            notes: JSON.stringify(meta),
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', input.deliveryId);
+        updErr = fallbackRes.error;
+      }
 
       if (updErr && isDatabaseCapacityError(updErr)) {
         throw new DatabaseCapacityError(updErr.message, updErr.code);
@@ -2533,6 +2637,11 @@ export async function updateBusinessRecord(input: UpdateBusinessRecordInput): Pr
   }
   const resolvedDeliveryId = idx >= 0 && deliveries[idx] ? deliveries[idx]!.id : input.deliveryId;
   const existingCreatedAt = idx >= 0 && deliveries[idx] ? deliveries[idx]!.createdAt : new Date().toISOString();
+  const cpVal = input.customerPrice !== undefined && input.customerPrice !== null && !isNaN(Number(input.customerPrice))
+    ? Math.round(Number(input.customerPrice) * 100) / 100
+    : null;
+  const profitVal = calculateRecordProfit(totalAmount, cpVal);
+
   const updatedDelivery: DeliveryRecord = {
     id: resolvedDeliveryId,
     shopId: targetShop.id,
@@ -2541,6 +2650,8 @@ export async function updateBusinessRecord(input: UpdateBusinessRecordInput): Pr
     status: input.deliveryStatus || 'pending',
     notes: input.notes || '',
     createdBy: 'Business Owner',
+    customerPrice: cpVal,
+    profit: profitVal,
     items: [{
       productId: targetProduct.id,
       productName: targetProduct.name,
@@ -2592,6 +2703,8 @@ export async function updateBusinessRecord(input: UpdateBusinessRecordInput): Pr
     quantity: qty,
     unitPrice: rate,
     totalAmount,
+    customerPrice: cpVal,
+    profit: profitVal,
     deliveryStatus: input.deliveryStatus || 'pending',
     pendingAmount,
     notes: input.notes,

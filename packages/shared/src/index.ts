@@ -707,12 +707,25 @@ export const SaveBusinessRecordSchema = z.object({
   productId: z.string().optional().nullable(),
   quantity: z.number().int('Quantity must be an integer').positive('Quantity must be greater than zero').default(1),
   unitPrice: z.number().nonnegative('Unit price cannot be negative'),
+  customerPrice: z.number().nonnegative('Customer price cannot be negative').optional().nullable(),
   deliveryStatus: z.enum(['delivered', 'pending', 'cancelled']).default('pending'),
   pendingAmount: z.number().nonnegative('Pending amount cannot be negative').optional(),
   paidAmount: z.number().nonnegative('Paid amount cannot be negative').optional(),
   notes: z.string().max(1000).optional().nullable()
 });
 export type SaveBusinessRecordSchemaType = z.infer<typeof SaveBusinessRecordSchema>;
+
+/**
+ * Authoritative financial profit calculation for a wholesale record:
+ * Profit = Customer Price - Amount
+ * Returns null if Customer Price was not recorded (historical compatibility).
+ */
+export function calculateRecordProfit(amount: number, customerPrice?: number | null): number | null {
+  if (customerPrice === undefined || customerPrice === null || isNaN(Number(customerPrice))) {
+    return null;
+  }
+  return Math.round((Number(customerPrice) - Number(amount)) * 100) / 100;
+}
 
 export const UpdateBusinessRecordSchema = SaveBusinessRecordSchema.extend({
   deliveryId: z.string().min(1, 'Delivery ID is required')

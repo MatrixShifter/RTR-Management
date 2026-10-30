@@ -139,6 +139,38 @@ export const RecordDetailsModal: React.FC<RecordDetailsModalProps> = ({
               </span>
             </div>
 
+            {/* Field 3b: Customer Price (CP) */}
+            <div className="flex items-center justify-between p-3.5 bg-white">
+              <span className="text-xs font-semibold text-[#556982] flex items-center gap-1.5">
+                <IndianRupee className="w-4 h-4 text-[#102A4C]" />
+                <span>Customer Price (CP)</span>
+              </span>
+              <span className={`text-xs sm:text-sm font-bold tabular-nums ${
+                record.customerPrice !== undefined && record.customerPrice !== null ? 'text-[#102A4C]' : 'text-slate-400 font-normal italic'
+              }`}>
+                {record.customerPrice !== undefined && record.customerPrice !== null
+                  ? `₹${Number(record.customerPrice).toLocaleString('en-IN')}`
+                  : 'Not Recorded'}
+              </span>
+            </div>
+
+            {/* Field 3c: Calculated Profit */}
+            <div className="flex items-center justify-between p-3.5 bg-[#F8FAFC]">
+              <span className="text-xs font-semibold text-[#556982] flex items-center gap-1.5">
+                <IndianRupee className="w-4 h-4 text-emerald-600" />
+                <span>Calculated Profit</span>
+              </span>
+              <span className={`text-xs sm:text-sm font-bold tabular-nums ${
+                record.profit !== undefined && record.profit !== null
+                  ? (record.profit >= 0 ? 'text-emerald-700' : 'text-rose-600')
+                  : 'text-slate-400 font-normal italic'
+              }`}>
+                {record.profit !== undefined && record.profit !== null
+                  ? (record.profit >= 0 ? `+₹${record.profit.toLocaleString('en-IN')}` : `-₹${Math.abs(record.profit).toLocaleString('en-IN')}`)
+                  : 'Not Available'}
+              </span>
+            </div>
+
             {/* Field 4: Delivery */}
             <div className="flex items-center justify-between p-3.5 bg-white">
               <span className="text-xs font-semibold text-[#556982] flex items-center gap-1.5">
