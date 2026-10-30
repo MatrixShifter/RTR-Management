@@ -83,13 +83,22 @@ export function errorHandler(
 
     // 5. Sanitized Production-Safe Response
     // Server errors (5xx) NEVER expose raw exception details or SQL queries
+    const errorCode = isServerFault ? 'INTERNAL_SERVER_ERROR' : err.code || 'REQUEST_FAILED';
+    const errorMsg = isServerFault
+      ? 'An unexpected error occurred. Please try again or contact support.'
+      : err.message;
+
     res.status(statusCode).json({
+      success: false,
       error: isServerFault ? 'Internal Server Error' : err.name || 'Request Failed',
-      message: isServerFault
-        ? 'An unexpected error occurred. Please try again or contact support.'
-        : err.message,
-      code: isServerFault ? undefined : err.code,
-      correlationId
+      message: errorMsg,
+      code: errorCode,
+      correlationId,
+      errorDetails: {
+        code: errorCode,
+        message: errorMsg,
+        correlationId
+      }
     });
   } catch (fatalHandlerError) {
     // Failsafe catch in case logger or serialization fails

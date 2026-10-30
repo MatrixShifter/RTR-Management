@@ -3,11 +3,14 @@ import { Component, ErrorInfo, ReactNode } from 'react';
 interface Props {
   children: ReactNode;
   fallback?: ReactNode;
+  sectionTitle?: string;
+  onReset?: () => void;
 }
 
 interface State {
   hasError: boolean;
   referenceId: string | null;
+  retryCount: number;
 }
 
 /**
@@ -17,22 +20,20 @@ interface State {
  * - Completely hides raw exception messages, stack traces, component traces, internal file paths,
  *   and database details.
  * - Displays a clean, professional, non-sensitive error page with Try Again and Reload App actions.
- * - Displays an optional random reference ID (e.g. ref_...) for support diagnostics.
- * - Falls back to a self-contained layout with zero external context dependencies.
- * 
- * In development / developer console:
- * - Emits sanitized error and component trace to console.error without exposing tokens, passwords,
- *   or secrets.
+ * - Displays a random reference ID (e.g. ref_...) for support diagnostics.
+ * - Completely self-contained: works both inside and outside of React Router context.
+ * - Prevents infinite retry loops by tracking retry count.
  */
 export class ErrorBoundary extends Component<Props, State> {
   public override state: State = {
     hasError: false,
-    referenceId: null
+    referenceId: null,
+    retryCount: 0
   };
 
   public static getDerivedStateFromError(_error: Error): State {
     const referenceId = `ref_${Date.now().toString(36)}_${Math.random().toString(36).substring(2, 7)}`;
-    return { hasError: true, referenceId };
+    return { hasError: true, referenceId, retryCount: 0 };
   }
 
   public override componentDidCatch(error: Error, errorInfo: ErrorInfo) {
@@ -45,7 +46,7 @@ export class ErrorBoundary extends Component<Props, State> {
         // eslint-disable-next-line no-console
         console.error(`[Application Error] Reference ID: ${refId}`);
       } else {
-        // Preserve rich developer diagnostics in console during development without leaking secrets
+        // Developer diagnostics in console without leaking secrets
         // eslint-disable-next-line no-console
         console.error(`[Application Error] Reference ID: ${refId}`, {
           name: error?.name,
@@ -59,7 +60,22 @@ export class ErrorBoundary extends Component<Props, State> {
   }
 
   private handleReset = () => {
-    this.setState({ hasError: false, referenceId: null });
+    if (this.state.retryCount >= 3) {
+      if (typeof window !== 'undefined') {
+        window.location.reload();
+      }
+      return;
+    }
+
+    if (this.props.onReset) {
+      this.props.onReset();
+    }
+
+    this.setState(prev => ({
+      hasError: false,
+      referenceId: null,
+      retryCount: prev.retryCount + 1
+    }));
   };
 
   private handleReload = () => {
@@ -74,6 +90,44 @@ export class ErrorBoundary extends Component<Props, State> {
         return this.props.fallback;
       }
 
+      // If it's an isolated section error (e.g. within a panel or table)
+      if (this.props.sectionTitle) {
+        return (
+          <div 
+            role="alert" 
+            aria-live="assertive"
+            className="p-6 rounded-2xl bg-white border border-[#DCE4EC] shadow-xs text-center my-4 space-y-4"
+          >
+            <div className="w-12 h-12 rounded-xl bg-red-50 border border-red-100 flex items-center justify-center mx-auto text-red-600 font-bold">
+              !
+            </div>
+            <div>
+              <h2 className="text-base font-bold text-[#102A4C]">
+                Unable to load {this.props.sectionTitle}
+              </h2>
+              <p className="text-xs text-[#5A6E85] mt-1">
+                A rendering issue occurred in this section. Other parts of the workspace remain functional.
+              </p>
+            </div>
+            {this.state.referenceId && (
+              <span className="text-[11px] font-mono text-[#8A9BAE] bg-[#F1F5F9] px-2.5 py-1 rounded-md">
+                Ref: {this.state.referenceId}
+              </span>
+            )}
+            <div className="pt-2">
+              <button
+                type="button"
+                onClick={this.handleReset}
+                className="px-4 py-2 bg-[#168BFF] hover:bg-[#0E7BE5] text-white text-xs font-semibold rounded-xl transition-colors cursor-pointer"
+              >
+                Retry Section
+              </button>
+            </div>
+          </div>
+        );
+      }
+
+      // Self-contained full-screen fallback with zero router dependencies
       return (
         <div 
           role="alert" 

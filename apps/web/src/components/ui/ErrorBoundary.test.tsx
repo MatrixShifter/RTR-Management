@@ -80,7 +80,7 @@ describe('ErrorBoundary Component — Production-Safe Error Protection', () => {
     const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
 
     const boundary = new ErrorBoundary({ children: <div /> });
-    boundary.state = { hasError: true, referenceId: 'ref_test123' };
+    boundary.state = { hasError: true, referenceId: 'ref_test123', retryCount: 0 };
 
     const testError = new Error('Test rendering crash');
     const errorInfo = { componentStack: '\n    in CrashingComponent\n    in ErrorBoundary' };
@@ -99,7 +99,7 @@ describe('ErrorBoundary Component — Production-Safe Error Protection', () => {
     try {
       const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
       const boundary = new ErrorBoundary({ children: <div /> });
-      boundary.state = { hasError: true, referenceId: 'ref_prod_123' };
+      boundary.state = { hasError: true, referenceId: 'ref_prod_123', retryCount: 0 };
 
       const testError = new Error('Database password leak attempt');
       const errorInfo = { componentStack: '\n    in SecretComponent\n    in InternalApp' };

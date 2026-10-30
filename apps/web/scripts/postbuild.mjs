@@ -15,7 +15,9 @@ if (fs.existsSync(distDir)) {
       'reset-password.html',
       'login.html',
       'forgot-password.html',
-      'records.html'
+      'records.html',
+      'settings.html',
+      'error.html'
     ];
 
     targets.forEach(target => {

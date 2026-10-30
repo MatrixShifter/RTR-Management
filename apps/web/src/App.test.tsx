@@ -94,7 +94,8 @@ describe('SPA Fallback Routing & Vercel Deployment Configuration', () => {
 
     expect(html).toContain('Error 404');
     expect(html).toContain('Page Not Found');
-    expect(html).toContain("The page you&#x27;re looking for doesn&#x27;t exist or may have been moved.");
+    expect(html).toContain("The page you&#x27;re looking for doesn&#x27;t exist");
+    expect(html).toContain("no longer available");
     expect(html).toContain('Go to Dashboard');
     expect(html).toContain('Go Back');
     expect(html).toContain('Back to Records');

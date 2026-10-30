@@ -9,6 +9,7 @@ import { Login } from './pages/auth/Login.js';
 import { ForgotPassword } from './pages/auth/ForgotPassword.js';
 import { ResetPassword } from './pages/auth/ResetPassword.js';
 import { NotFound } from './pages/NotFound.js';
+import { StatusError } from './pages/StatusError.js';
 import { Navbar } from './components/Navbar.js';
 import { supabase, isSupabaseConfigured } from './lib/supabase.js';
 
@@ -554,7 +555,11 @@ export const AppContent: React.FC = () => {
         <Route path="/employee" element={<Navigate to="/records" replace />} />
       </Route>
 
-      {/* 3. Global Catch-All Route for Unmatched URLs */}
+      {/* 3. HTTP Status and Error Showcase Routes */}
+      <Route path="/error" element={<StatusError />} />
+      <Route path="/status/:code" element={<StatusError />} />
+
+      {/* 4. Global Catch-All Route for Unmatched URLs */}
       <Route path="*" element={<NotFound isAuthenticated={Boolean(currentUser)} />} />
     </Routes>
   );
