@@ -453,31 +453,36 @@ authRouter.post('/forgot-password', passwordRecoveryRateLimiter, async (req: Req
       }
 
       if (isOwner) {
-        const isProduction = config.NODE_ENV === 'production';
-        const defaultOrigin = isProduction 
-          ? 'https://rtr-management-cfn4.vercel.app' 
-          : (config.CORS_ORIGIN || 'http://localhost:5173');
-        let redirectUrl = `${defaultOrigin}/reset-password`;
+        const isProductionEnv = config.NODE_ENV === 'production' || process.env.VERCEL === '1' || process.env.NODE_ENV === 'production';
+        const reqOrigin = ((req.headers.origin as string) || (req.headers.referer as string) || '').toLowerCase();
+        const isProductionRequest = isProductionEnv || reqOrigin.includes('rtr-management-cfn4.vercel.app') || reqOrigin.includes('.vercel.app');
+
+        // Production destination strictly defaults to production URL
+        let redirectUrl = 'https://rtr-management-cfn4.vercel.app/reset-password';
 
         if (typeof redirectTo === 'string' && redirectTo.trim()) {
           try {
             const parsedRedirect = new URL(redirectTo);
             const isLocal = ['localhost', '127.0.0.1'].includes(parsedRedirect.hostname);
-            const isConfiguredOrigin = parsedRedirect.origin === config.CORS_ORIGIN;
-            const isApprovedDomain = parsedRedirect.hostname === 'rtr-management-cfn4.vercel.app' ||
-                                     parsedRedirect.hostname.endsWith('.vercel.app') || 
-                                     parsedRedirect.hostname === 'rtrmobiles.com' ||
-                                     parsedRedirect.hostname.endsWith('.rtrmobiles.com');
 
-            // Strictly allow verified origins; never allow localhost in production mode
-            if (isProduction && isLocal) {
+            if (isProductionRequest && isLocal) {
+              // Strictly forbid localhost in production
               redirectUrl = 'https://rtr-management-cfn4.vercel.app/reset-password';
-            } else if ((isLocal || isConfiguredOrigin || isApprovedDomain) && parsedRedirect.pathname === '/reset-password') {
+            } else if (isLocal && !isProductionRequest) {
+              redirectUrl = 'http://localhost:5173/reset-password';
+            } else if (
+              parsedRedirect.hostname === 'rtr-management-cfn4.vercel.app' ||
+              parsedRedirect.hostname.endsWith('.vercel.app') || 
+              parsedRedirect.hostname === 'rtrmobiles.com' ||
+              parsedRedirect.hostname.endsWith('.rtrmobiles.com')
+            ) {
               redirectUrl = parsedRedirect.href;
             }
           } catch {
-            // Malformed URL falls back safely to defaultOrigin/reset-password
+            redirectUrl = isProductionRequest ? 'https://rtr-management-cfn4.vercel.app/reset-password' : 'http://localhost:5173/reset-password';
           }
+        } else if (!isProductionRequest) {
+          redirectUrl = 'http://localhost:5173/reset-password';
         }
 
         const { error } = await supabaseAdmin.auth.resetPasswordForEmail(targetEmail, {

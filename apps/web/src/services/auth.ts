@@ -300,7 +300,7 @@ export async function requestPasswordReset(identifier: string): Promise<string> 
 }
 
 /**
- * Update password using current active recovery session.
+ * Update password using current active recovery session via authoritative Supabase Auth.
  * Safely signs out of the temporary recovery session upon completion to guarantee
  * that subsequent logins strictly authenticate with the new credentials.
  */
@@ -313,62 +313,22 @@ export async function updatePassword(newPassword: string): Promise<void> {
     throw new Error('Password must be at least 12 characters long.');
   }
 
-  // Retrieve current recovery access token
+  // 1. Verify that a valid authenticated session exists
   const { data: { session } } = await supabase.auth.getSession();
-  const token = session?.access_token;
-
-  if (!token) {
+  if (!session?.user) {
     throw new Error('No active recovery session found. Please request a new recovery link.');
   }
 
-  // 1. Primary: Update password via secure backend API endpoint (verifies owner role and emits security audit event)
-  try {
-    const res = await fetch('/api/auth/reset-password', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`
-      },
-      body: JSON.stringify({ password: newPassword })
-    });
-
-    if (res.ok) {
-      // 2. Sign out of recovery session so subsequent logins strictly require new credentials
-      await supabase.auth.signOut().catch(() => {});
-      try {
-        localStorage.removeItem('rtr_current_user');
-        localStorage.removeItem('rtr_session_expiry');
-      } catch {}
-      return;
-    }
-
-    if (res.status === 404 || res.status >= 500) {
-      // Backend endpoint not deployed or server error; fall through to direct Supabase update
-    } else if (res.status === 400 || res.status === 401 || res.status === 403) {
-      const errData = await res.json().catch(() => ({}));
-      throw new Error(errData.message || 'Failed to update password. Recovery session may have expired.');
-    }
-  } catch (err: any) {
-    if (err.message && (
-      err.message.includes('expired') || 
-      err.message.includes('at least 12 characters') || 
-      err.message.includes('at least 8 characters') || 
-      err.message.includes('restricted') ||
-      err.message.includes('too common')
-    )) {
-      throw err;
-    }
-  }
-
-  // 2. Fallback: Direct Supabase client update if API server is unreachable
-  const { error: clientError } = await supabase.auth.updateUser({
+  // 2. Authoritatively update password directly via Supabase Auth client using recovery session
+  const { error } = await supabase.auth.updateUser({
     password: newPassword
   });
 
-  if (clientError) {
-    throw new Error(clientError.message || 'Failed to update password. Recovery session expired.');
+  if (error) {
+    throw new Error(error.message || 'Failed to update password. Recovery session may have expired.');
   }
 
+  // 3. Invalidate temporary recovery session so normal login is required with new credentials
   await supabase.auth.signOut().catch(() => {});
   try {
     localStorage.removeItem('rtr_current_user');
