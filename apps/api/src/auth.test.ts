@@ -283,6 +283,41 @@ describe('Authentication API Endpoints (/api/auth)', { timeout: 25000 }, () => {
       expect(res.body.message).toContain('at least 8 characters');
     });
 
+    it('rejects password reset with weak or commonly compromised password (400)', async () => {
+      const loginRes = await request(app)
+        .post('/api/auth/login')
+        .send({ username: 'owner', password: 'password123' });
+
+      const token = loginRes.body.session.access_token;
+
+      const res = await request(app)
+        .post('/api/auth/reset-password')
+        .set('Authorization', `Bearer ${token}`)
+        .send({ password: '123456789012' });
+
+      expect(res.status).toBe(400);
+      expect(res.body.success).toBe(false);
+      expect(res.body.message).toContain('too common or easily guessed');
+    });
+
+    it('enforces 12-character minimum policy when strict policy header is supplied (400)', async () => {
+      const loginRes = await request(app)
+        .post('/api/auth/login')
+        .send({ username: 'owner', password: 'password123' });
+
+      const token = loginRes.body.session.access_token;
+
+      const res = await request(app)
+        .post('/api/auth/reset-password')
+        .set('Authorization', `Bearer ${token}`)
+        .set('X-Enforce-Policy', 'strict')
+        .send({ password: 'validEight8' }); // 11 characters
+
+      expect(res.status).toBe(400);
+      expect(res.body.success).toBe(false);
+      expect(res.body.message).toContain('at least 12 characters');
+    });
+
     it('ignores arbitrary targetUserId in body and only updates account tied to token', async () => {
       const loginRes = await request(app)
         .post('/api/auth/login')

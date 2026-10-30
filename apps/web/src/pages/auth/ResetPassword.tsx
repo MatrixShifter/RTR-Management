@@ -8,6 +8,47 @@ interface ResetPasswordProps {
   onNavigateToForgot?: () => void;
 }
 
+const COMMON_WEAK_PASSWORDS = new Set([
+  'password1234',
+  'password12345',
+  'password123456',
+  '123456789012',
+  '1234567890123',
+  'qwertyuiop12',
+  'admin12345678',
+  'rtrmobiles123'
+]);
+
+export function isWeakPassword(pass: string): boolean {
+  if (!pass) return true;
+  const clean = pass.toLowerCase().trim();
+  if (COMMON_WEAK_PASSWORDS.has(clean)) return true;
+  if (/^(.)\1+$/.test(pass)) return true;
+  if (clean.includes('123456789') || clean.includes('abcdefghi')) return true;
+  return false;
+}
+
+export function computePasswordStrength(pass: string): {
+  score: number;
+  label: string;
+  color: string;
+  barWidth: string;
+} {
+  if (!pass) return { score: 0, label: '', color: 'bg-slate-200', barWidth: '0%' };
+  let score = 0;
+  if (pass.length >= 12) score += 1;
+  if (pass.length >= 16) score += 1;
+  if (/[a-z]/.test(pass) && /[A-Z]/.test(pass)) score += 1;
+  if (/\d/.test(pass)) score += 1;
+  if (/[^a-zA-Z0-9]/.test(pass)) score += 1;
+  if (isWeakPassword(pass)) score = Math.min(score, 1);
+
+  if (score <= 1) return { score: 1, label: 'Weak', color: 'bg-rose-500', barWidth: '20%' };
+  if (score === 2) return { score: 2, label: 'Fair', color: 'bg-amber-500', barWidth: '40%' };
+  if (score === 3) return { score: 3, label: 'Good', color: 'bg-blue-500', barWidth: '70%' };
+  return { score: 4, label: 'Strong', color: 'bg-emerald-500', barWidth: '100%' };
+}
+
 export const ResetPassword: React.FC<ResetPasswordProps> = ({ 
   onNavigateToLogin, 
   onNavigateToForgot 
@@ -314,9 +355,14 @@ export const ResetPassword: React.FC<ResetPasswordProps> = ({
     e.preventDefault();
     setErrorMsg(null);
 
-    // Password requirements: minimum 8 characters
-    if (password.length < 8) {
-      setErrorMsg('Password must be at least 8 characters long.');
+    // Password requirements: minimum 12 characters as application policy
+    if (password.length < 12) {
+      setErrorMsg('Password must be at least 12 characters long.');
+      return;
+    }
+
+    if (isWeakPassword(password)) {
+      setErrorMsg('This password is too common or easily guessed. Please choose a stronger password.');
       return;
     }
 
@@ -554,7 +600,7 @@ export const ResetPassword: React.FC<ResetPasswordProps> = ({
                       setPassword(e.target.value);
                       if (errorMsg) setErrorMsg(null);
                     }}
-                    placeholder="Minimum 8 characters"
+                    placeholder="Minimum 12 characters"
                     required
                     disabled={isLoading}
                     autoFocus
@@ -570,6 +616,28 @@ export const ResetPassword: React.FC<ResetPasswordProps> = ({
                     {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                   </button>
                 </div>
+
+                {/* Password Strength Indicator */}
+                {password && (
+                  <div className="space-y-1.5 pt-1">
+                    <div className="flex items-center justify-between text-[11px]">
+                      <span className="text-slate-500 font-medium">Strength:</span>
+                      <span className={`font-semibold ${
+                        computePasswordStrength(password).score <= 1 ? 'text-rose-600' :
+                        computePasswordStrength(password).score === 2 ? 'text-amber-600' :
+                        computePasswordStrength(password).score === 3 ? 'text-blue-600' : 'text-emerald-600'
+                      }`}>
+                        {computePasswordStrength(password).label}
+                      </span>
+                    </div>
+                    <div className="h-1.5 w-full bg-slate-100 rounded-full overflow-hidden">
+                      <div 
+                        className={`h-full transition-all duration-300 ${computePasswordStrength(password).color}`} 
+                        style={{ width: computePasswordStrength(password).barWidth }} 
+                      />
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* 2. Confirm New Password */}
@@ -610,12 +678,16 @@ export const ResetPassword: React.FC<ResetPasswordProps> = ({
               {/* Requirement Hint */}
               <div className="text-[11px] text-slate-500 space-y-1 pt-1">
                 <p className="flex items-center gap-1.5">
-                  <span className={`inline-block w-1.5 h-1.5 rounded-full ${password.length >= 8 ? 'bg-emerald-500' : 'bg-slate-300'}`} />
-                  <span>Must be at least 8 characters long</span>
+                  <span className={`inline-block w-1.5 h-1.5 rounded-full ${password.length >= 12 ? 'bg-emerald-500' : 'bg-slate-300'}`} />
+                  <span>Must be at least 12 characters long</span>
                 </p>
                 <p className="flex items-center gap-1.5">
                   <span className={`inline-block w-1.5 h-1.5 rounded-full ${confirmPassword && password === confirmPassword ? 'bg-emerald-500' : 'bg-slate-300'}`} />
                   <span>Both passwords must match</span>
+                </p>
+                <p className="flex items-center gap-1.5">
+                  <span className={`inline-block w-1.5 h-1.5 rounded-full ${password.length >= 12 && !isWeakPassword(password) ? 'bg-emerald-500' : 'bg-slate-300'}`} />
+                  <span>Avoid common or easily guessed passwords</span>
                 </p>
               </div>
 
@@ -623,7 +695,7 @@ export const ResetPassword: React.FC<ResetPasswordProps> = ({
               <div className="pt-2 space-y-3">
                 <button
                   type="submit"
-                  disabled={isLoading || password.length < 8 || password !== confirmPassword}
+                  disabled={isLoading || password.length < 12 || password !== confirmPassword || isWeakPassword(password)}
                   className="w-full bg-[#2563EB] hover:bg-blue-700 disabled:bg-slate-300 disabled:cursor-not-allowed text-white py-2.5 px-4 rounded-xl text-xs sm:text-sm font-semibold flex items-center justify-center gap-2 shadow-xs transition-colors cursor-pointer"
                 >
                   {isLoading ? (

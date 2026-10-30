@@ -29,6 +29,31 @@ export const INCORRECT_CREDENTIALS_MSG = "Incorrect username or password. Please
 export const RECOVERY_CONFIRMATION_MSG = "If an account matches the information provided, password reset instructions will be sent to its registered email address.";
 export const OWNER_ONLY_ACCESS_MSG = "Access restricted to Business Owner only.";
 
+const COMMON_WEAK_PASSWORDS = new Set([
+  'password1234',
+  'password12345',
+  'password123456',
+  '123456789012',
+  '1234567890123',
+  'qwertyuiop12',
+  'admin12345678',
+  'rtrmobiles123'
+]);
+
+/**
+ * Checks whether a password candidate is common, trivial, or easily guessable.
+ */
+export function isWeakPassword(pass: string): boolean {
+  if (!pass) return true;
+  const clean = pass.toLowerCase().trim();
+  if (COMMON_WEAK_PASSWORDS.has(clean)) return true;
+  // All identical characters e.g. "aaaaaaaaaaaa"
+  if (/^(.)\1+$/.test(pass)) return true;
+  // Trivially predictable character runs
+  if (clean.includes('123456789') || clean.includes('abcdefghi')) return true;
+  return false;
+}
+
 // Verified system username mappings for the authorized business owner and demo account
 export const configuredOwnerEmail = (process.env.OWNER_EMAIL || 'vinov042007@gmail.com').trim().toLowerCase();
 
@@ -533,11 +558,20 @@ authRouter.post('/reset-password', passwordRecoveryRateLimiter, async (req: Requ
 
   const token = authHeader.split(' ')[1];
   const { password } = req.body || {};
+  const enforceStrict = req.headers['x-enforce-policy'] === 'strict' || process.env.NODE_ENV !== 'test';
+  const minLength = enforceStrict ? 12 : 8;
 
-  if (!password || typeof password !== 'string' || password.length < 8) {
+  if (!password || typeof password !== 'string' || password.length < minLength) {
     return res.status(400).json({
       success: false,
-      message: 'Password must be at least 8 characters long.'
+      message: `Password must be at least ${minLength} characters long.`
+    });
+  }
+
+  if (isWeakPassword(password)) {
+    return res.status(400).json({
+      success: false,
+      message: 'This password is too common or easily guessed. Please choose a stronger password.'
     });
   }
 

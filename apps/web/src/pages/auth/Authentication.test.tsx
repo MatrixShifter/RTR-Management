@@ -122,10 +122,29 @@ describe('Secure Owner Authentication Suite', () => {
       expect(html).toContain('Verifying secure recovery link...');
     });
 
-    it('enforces minimum 8 character password policy', () => {
-      const minLength = 8;
+    it('enforces minimum 12 character password policy for application security', () => {
+      const minLength = 12;
       expect('short'.length < minLength).toBe(true);
+      expect('validPass11'.length < minLength).toBe(true);
       expect('validPass123'.length >= minLength).toBe(true);
+    });
+
+    it('rejects trivial or commonly compromised passwords', async () => {
+      const { isWeakPassword } = await import('./ResetPassword.js');
+      expect(isWeakPassword('123456789012')).toBe(true);
+      expect(isWeakPassword('password1234')).toBe(true);
+      expect(isWeakPassword('aaaaaaaaaaaa')).toBe(true);
+      expect(isWeakPassword('SecureAuthPass2026!')).toBe(false);
+    });
+
+    it('computes password strength guidance dynamically', async () => {
+      const { computePasswordStrength } = await import('./ResetPassword.js');
+      const weak = computePasswordStrength('123456789012');
+      expect(weak.label).toBe('Weak');
+
+      const strong = computePasswordStrength('Secure#Auth$2026!');
+      expect(strong.label).toBe('Strong');
+      expect(strong.score).toBeGreaterThanOrEqual(3);
     });
 
     it('requires password and confirmPassword to match exactly', () => {

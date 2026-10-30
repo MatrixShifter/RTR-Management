@@ -309,6 +309,10 @@ export async function updatePassword(newPassword: string): Promise<void> {
     throw new Error('Authentication service is not configured.');
   }
 
+  if (!newPassword || newPassword.length < 12) {
+    throw new Error('Password must be at least 12 characters long.');
+  }
+
   // Retrieve current recovery access token
   const { data: { session } } = await supabase.auth.getSession();
   const token = session?.access_token;
@@ -345,7 +349,13 @@ export async function updatePassword(newPassword: string): Promise<void> {
       throw new Error(errData.message || 'Failed to update password. Recovery session may have expired.');
     }
   } catch (err: any) {
-    if (err.message && (err.message.includes('expired') || err.message.includes('at least 8 characters') || err.message.includes('restricted'))) {
+    if (err.message && (
+      err.message.includes('expired') || 
+      err.message.includes('at least 12 characters') || 
+      err.message.includes('at least 8 characters') || 
+      err.message.includes('restricted') ||
+      err.message.includes('too common')
+    )) {
       throw err;
     }
   }
