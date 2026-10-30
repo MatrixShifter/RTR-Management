@@ -853,14 +853,16 @@ export const MonthlyShopStatement: React.FC<MonthlyShopStatementProps> = ({
                             )}
                           </td>
                           <td className="py-3 px-3 sm:px-4 text-center print:hidden" onClick={e => e.stopPropagation()}>
-                            <button
-                              type="button"
-                              onClick={() => setSelectedShopId(shopItem.shopId)}
+                            <a
+                              href={`/statements/shop/${encodeURIComponent(shopItem.shopId)}?month=${selectedMonth}&year=${selectedYear}&status=${statusFilter}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
                               className="px-2.5 py-1 text-xs font-semibold text-[#168BFF] hover:bg-[#168BFF]/10 rounded-lg transition-colors cursor-pointer inline-flex items-center gap-1"
+                              title={`Open statement for ${shopItem.shopName} in new tab`}
                             >
                               <span>View Shop</span>
                               <ExternalLink className="w-3 h-3" />
-                            </button>
+                            </a>
                           </td>
                         </tr>
 

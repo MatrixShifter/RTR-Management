@@ -17,6 +17,7 @@ import { supabase, isSupabaseConfigured } from './lib/supabase.js';
 // Route-level code splitting & lazy loading for heavy workspace pages
 const OwnerDashboard = lazy(() => import('./pages/owner/OwnerDashboard.js').then(m => ({ default: m.OwnerDashboard })));
 const MonthlyShopStatement = lazy(() => import('./pages/owner/MonthlyShopStatement.js').then(m => ({ default: m.MonthlyShopStatement })));
+const IndividualShopStatement = lazy(() => import('./pages/owner/IndividualShopStatement.js').then(m => ({ default: m.IndividualShopStatement })));
 const SettingsPage = lazy(() => import('./pages/owner/Settings.js').then(m => ({ default: m.SettingsPage })));
 
 export interface UserState {
@@ -545,6 +546,7 @@ export const AppContent: React.FC = () => {
         <Route path="/" element={<OwnerDashboard />} />
         <Route path="/records" element={<OwnerDashboard />} />
         <Route path="/statements" element={<MonthlyShopStatement />} />
+        <Route path="/statements/shop/:shopId" element={<IndividualShopStatement />} />
         <Route path="/reports" element={<MonthlyShopStatement />} />
         <Route path="/settings" element={<SettingsPage currentUser={currentUser!} isOnline={isOnline} onSignOut={handleSignOut} />} />
         <Route path="/management" element={<SettingsPage currentUser={currentUser!} isOnline={isOnline} onSignOut={handleSignOut} />} />
