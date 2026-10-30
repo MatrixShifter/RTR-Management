@@ -1332,6 +1332,11 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
                       <span>Product</span>
                     </th>
 
+                    {/* Column 4: Quantity */}
+                    <th className="py-2.5 px-2 sm:py-3 sm:px-3 w-[54px] sm:w-24 text-right font-semibold text-xs sm:text-sm text-[#334155] border-r border-[#CBD5E1]">
+                      <span>Quantity</span>
+                    </th>
+
                     {/* Column 4: Amount (₹) */}
                     <th className="py-2.5 px-2 sm:py-3 sm:px-3 w-[64px] sm:w-32 text-right font-semibold text-xs sm:text-sm text-[#334155] border-r border-[#CBD5E1]">
                       <span>Amount (₹)</span>
@@ -1407,7 +1412,16 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
                           </span>
                         </td>
 
-                        {/* 4. Amount (₹) */}
+                        {/* 4. Quantity */}
+                        <td className="py-2 sm:py-3 px-2 sm:px-3 text-right text-[#102A4C] text-xs sm:text-sm font-medium tabular-nums whitespace-nowrap border-r border-[#E2E8F0] border-b border-[#E2E8F0]">
+                          {rec.quantity !== undefined && rec.quantity !== null && Number(rec.quantity) > 0 ? (
+                            <span>{`${rec.quantity} pcs`}</span>
+                          ) : (
+                            <span className="text-slate-400 font-normal italic">Not Recorded</span>
+                          )}
+                        </td>
+
+                        {/* 5. Amount (₹) */}
                         <td className="py-2 sm:py-3 px-2 sm:px-3 text-right text-[#102A4C] text-xs sm:text-sm font-medium tabular-nums whitespace-nowrap border-r border-[#E2E8F0] border-b border-[#E2E8F0]">
                           {totalAmt.toLocaleString('en-IN')}
                           <span className="sr-only">{`₹${totalAmt.toLocaleString('en-IN')}`}</span>
@@ -1515,7 +1529,16 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
                           </span>
                         </td>
 
-                        {/* 4. Amount (₹) */}
+                        {/* 4. Quantity */}
+                        <td className="py-2 sm:py-3 px-2 sm:px-3 text-right text-[#102A4C] text-xs sm:text-sm font-medium tabular-nums whitespace-nowrap border-r border-[#E2E8F0] border-b border-[#E2E8F0]">
+                          {rec.quantity !== undefined && rec.quantity !== null && Number(rec.quantity) > 0 ? (
+                            <span>{`${rec.quantity} pcs`}</span>
+                          ) : (
+                            <span className="text-slate-400 font-normal italic">Not Recorded</span>
+                          )}
+                        </td>
+
+                        {/* 5. Amount (₹) */}
                         <td className="py-2 sm:py-3 px-2 sm:px-3 text-right text-[#102A4C] text-xs sm:text-sm font-medium tabular-nums whitespace-nowrap border-r border-[#E2E8F0] border-b border-[#E2E8F0]">
                           {totalAmt.toLocaleString('en-IN')}
                           <span className="sr-only">{`₹${totalAmt.toLocaleString('en-IN')}`}</span>

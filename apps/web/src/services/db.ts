@@ -127,6 +127,7 @@ export interface SaveBusinessRecordInput {
   productId?: string;
   quantity?: number;
   unitPrice: number;
+  totalAmount?: number;
   customerPrice?: number | null;
   deliveryStatus?: 'delivered' | 'pending' | 'cancelled';
   pendingAmount?: number;
@@ -2268,8 +2269,12 @@ export async function saveBusinessRecord(input: SaveBusinessRecordInput): Promis
 
   // 3. Save Delivery
   const qty = Number(input.quantity) || 1;
-  const rate = Number(input.unitPrice) || 0;
-  const totalAmount = qty * rate;
+  const totalAmount = input.totalAmount !== undefined && input.totalAmount !== null
+    ? Number(input.totalAmount)
+    : qty * (Number(input.unitPrice) || 0);
+  const rate = input.totalAmount !== undefined && input.totalAmount !== null && qty > 0
+    ? (Math.round((totalAmount / qty) * 10000) / 10000)
+    : (Number(input.unitPrice) || 0);
   let pendingAmount = Number(input.pendingAmount);
   if (isNaN(pendingAmount)) {
     if (input.paidAmount !== undefined && !isNaN(Number(input.paidAmount))) {
@@ -2444,8 +2449,12 @@ export async function updateBusinessRecord(input: UpdateBusinessRecordInput): Pr
   }
 
   const qty = Number(input.quantity) || 1;
-  const rate = Number(input.unitPrice) || 0;
-  const totalAmount = qty * rate;
+  const totalAmount = input.totalAmount !== undefined && input.totalAmount !== null
+    ? Number(input.totalAmount)
+    : qty * (Number(input.unitPrice) || 0);
+  const rate = input.totalAmount !== undefined && input.totalAmount !== null && qty > 0
+    ? (Math.round((totalAmount / qty) * 10000) / 10000)
+    : (Number(input.unitPrice) || 0);
   const pendingAmount = Math.max(0, Number(input.pendingAmount) || 0);
 
   if (isDemoMode()) {

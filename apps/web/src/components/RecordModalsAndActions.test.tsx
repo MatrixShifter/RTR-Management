@@ -122,7 +122,8 @@ describe('Record Action Components (Menu & Modals)', () => {
       // Strictly verifies removed fields and buttons do NOT appear
       expect(html).not.toContain('Metro Telecom'); // No Shop Name
       expect(html).not.toContain('TG-9H'); // No SKU
-      expect(html).not.toContain('50 pcs'); // No Quantity
+      expect(html).toContain('Quantity');
+      expect(html).toContain('50 pcs');
       expect(html).not.toContain('Unit Price'); // No Unit Price
       expect(html).not.toContain('Outstanding Balance'); // No Financial Breakdown
       expect(html).not.toContain('Amount Paid'); // No Paid Amount

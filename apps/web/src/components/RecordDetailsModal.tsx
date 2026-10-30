@@ -1,7 +1,8 @@
 import React, { useEffect } from 'react';
 import { 
   X, 
-  Package, 
+  Package,
+  Layers, 
   Calendar, 
   CheckCircle2, 
   Clock, 
@@ -125,6 +126,23 @@ export const RecordDetailsModal: React.FC<RecordDetailsModalProps> = ({
               </span>
               <span className="text-xs sm:text-sm font-bold text-[#102A4C] text-right break-words max-w-[240px]">
                 {record.productName || 'Accessory Item'}
+              </span>
+            </div>
+
+            {/* Field 2b: Quantity */}
+            <div className="flex items-center justify-between p-3.5 bg-[#F8FAFC]">
+              <span className="text-xs font-semibold text-[#556982] flex items-center gap-1.5">
+                <Layers className="w-4 h-4 text-[#168BFF]" />
+                <span>Quantity</span>
+              </span>
+              <span className={`text-xs sm:text-sm font-bold tabular-nums ${
+                record.quantity !== undefined && record.quantity !== null && Number(record.quantity) > 0
+                  ? 'text-[#102A4C]'
+                  : 'text-slate-400 font-normal italic'
+              }`}>
+                {record.quantity !== undefined && record.quantity !== null && Number(record.quantity) > 0
+                  ? `${record.quantity} pcs`
+                  : 'Not Recorded'}
               </span>
             </div>
 

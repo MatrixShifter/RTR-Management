@@ -1200,12 +1200,13 @@ describe('OwnerDashboard Component — Modern UI & Simple Delivery/Pending Manag
       expect(html).toContain('aria-label="Actions for Braided Lightning Cable 2m"');
       expect(html).toContain('aria-label="Actions for Fast GaN Charger 65W"');
 
-      // Verify the <thead> has strictly exactly 7 <th> elements, NOT 8
+      // Verify the <thead> has strictly the 8 dedicated columns (Date, Shop Name, Product, Quantity, Amount, CP, Profit, Delivery)
       const theadMatch = html.match(/<thead[\s\S]*?<\/thead>/);
       expect(theadMatch).toBeTruthy();
       const theadHtml = theadMatch![0];
       const thCount = (theadHtml.match(/<th[\s>]/g) || []).length;
-      expect(thCount).toBe(7);
+      expect(thCount).toBe(8);
+      expect(theadHtml).toContain('Quantity');
     });
 
     it('persists delivery updates and handles record deletion cleanly via db service', async () => {

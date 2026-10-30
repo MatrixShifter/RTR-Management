@@ -707,6 +707,7 @@ export const SaveBusinessRecordSchema = z.object({
   productId: z.string().optional().nullable(),
   quantity: z.number().int('Quantity must be an integer').positive('Quantity must be greater than zero').default(1),
   unitPrice: z.number().nonnegative('Unit price cannot be negative'),
+  totalAmount: z.number().nonnegative('Total amount cannot be negative').optional(),
   customerPrice: z.number().nonnegative('Customer price cannot be negative').optional().nullable(),
   deliveryStatus: z.enum(['delivered', 'pending', 'cancelled']).default('pending'),
   pendingAmount: z.number().nonnegative('Pending amount cannot be negative').optional(),

@@ -84,7 +84,24 @@ export const RecordEntryDrawer: React.FC<RecordEntryDrawerProps> = ({
   const [customProductName, setCustomProductName] = useState<string>(editingRecord?.productName || '');
 
   // Unit Price (₹)
-  const [unitPrice, setUnitPrice] = useState<number | ''>(editingRecord?.unitPrice ?? '');
+  // Quantity (Pieces)
+  const [quantity, setQuantity] = useState<number | ''>(
+    editingRecord?.quantity !== undefined && editingRecord?.quantity !== null && Number(editingRecord.quantity) > 0
+      ? editingRecord.quantity
+      : (editingRecord ? 1 : '')
+  );
+
+  // Amount (₹) — Total RTR wholesale cost
+  const [amount, setAmount] = useState<number | ''>(
+    editingRecord?.totalAmount !== undefined && editingRecord?.totalAmount !== null
+      ? editingRecord.totalAmount
+      : (editingRecord?.unitPrice !== undefined ? editingRecord.unitPrice : '')
+  );
+
+  // Delivery Status: 'pending' (default) or 'delivered'
+  const [deliveryStatus, setDeliveryStatus] = useState<'pending' | 'delivered'>(
+    editingRecord?.deliveryStatus === 'delivered' ? 'delivered' : 'pending'
+  );
 
   // Customer Price (CP) (₹)
   const [customerPrice, setCustomerPrice] = useState<number | ''>(editingRecord?.customerPrice !== undefined && editingRecord?.customerPrice !== null ? editingRecord.customerPrice : '');
@@ -124,7 +141,9 @@ export const RecordEntryDrawer: React.FC<RecordEntryDrawerProps> = ({
     setIsNewProduct(products.length === 0);
     setCustomProductName('');
 
-    setUnitPrice('');
+    setQuantity('');
+    setAmount('');
+    setDeliveryStatus('pending');
     setCustomerPrice('');
     setValidationErrors({});
     setSubmitError(null);
@@ -149,7 +168,17 @@ export const RecordEntryDrawer: React.FC<RecordEntryDrawerProps> = ({
       setIsNewProduct(!editingRecord.productId);
       setCustomProductName(editingRecord.productName || '');
 
-      setUnitPrice(editingRecord.unitPrice ?? 0);
+      setQuantity(
+        editingRecord.quantity !== undefined && editingRecord.quantity !== null && Number(editingRecord.quantity) > 0
+          ? editingRecord.quantity
+          : 1
+      );
+      setAmount(
+        editingRecord.totalAmount !== undefined && editingRecord.totalAmount !== null
+          ? editingRecord.totalAmount
+          : (editingRecord.unitPrice ?? '')
+      );
+      setDeliveryStatus(editingRecord.deliveryStatus === 'delivered' ? 'delivered' : 'pending');
       setCustomerPrice(editingRecord.customerPrice !== undefined && editingRecord.customerPrice !== null ? editingRecord.customerPrice : '');
     } else {
       resetForm();
@@ -183,7 +212,9 @@ export const RecordEntryDrawer: React.FC<RecordEntryDrawerProps> = ({
         date !== (editingRecord.date || todayStr) ||
         (selectedShopId || customShopName) !== (editingRecord.shopId || editingRecord.shopName || '') ||
         (selectedProductId || customProductName) !== (editingRecord.productId || editingRecord.productName || '') ||
-        String(unitPrice) !== String(editingRecord.unitPrice ?? '') ||
+        String(quantity) !== String(editingRecord.quantity ?? '') ||
+        String(amount) !== String(editingRecord.totalAmount ?? (editingRecord.unitPrice ?? '')) ||
+        deliveryStatus !== (editingRecord.deliveryStatus || 'pending') ||
         String(customerPrice) !== String(editingRecord.customerPrice ?? '')
       );
     }
@@ -192,7 +223,8 @@ export const RecordEntryDrawer: React.FC<RecordEntryDrawerProps> = ({
       selectedShopId ||
       customProductName.trim() ||
       selectedProductId ||
-      unitPrice !== '' ||
+      quantity !== '' ||
+      amount !== '' ||
       customerPrice !== ''
     );
   };
@@ -233,7 +265,7 @@ export const RecordEntryDrawer: React.FC<RecordEntryDrawerProps> = ({
       document.body.style.overflow = 'unset';
       window.removeEventListener('keydown', handleKeyDown);
     };
-  }, [isOpen, isSubmitting, isShopDropdownOpen, isProductDropdownOpen, customShopName, selectedShopId, customProductName, selectedProductId, unitPrice]);
+  }, [isOpen, isSubmitting, isShopDropdownOpen, isProductDropdownOpen, customShopName, selectedShopId, customProductName, selectedProductId, quantity, amount]);
 
   // Handle product selection & unit price autofill
   const handleProductChange = (prodId: string) => {
@@ -250,7 +282,10 @@ export const RecordEntryDrawer: React.FC<RecordEntryDrawerProps> = ({
       setSelectedProductId(prodId);
       const prod = localProducts.find(p => p.id === prodId);
       if (prod && prod.unitPrice !== undefined && prod.unitPrice > 0) {
-        setUnitPrice(prod.unitPrice);
+        if (amount === '') {
+          const qtyNum = typeof quantity === 'number' && quantity > 0 ? quantity : 1;
+          setAmount(qtyNum * prod.unitPrice);
+        }
       }
     }
   };
@@ -271,13 +306,26 @@ export const RecordEntryDrawer: React.FC<RecordEntryDrawerProps> = ({
     }
   };
 
-  const handleUnitPriceChange = (valStr: string) => {
+  const handleQuantityChange = (valStr: string) => {
     if (valStr === '') {
-      setUnitPrice('');
+      setQuantity('');
+      return;
+    }
+    const cleaned = valStr.replace(/[^\d]/g, '');
+    if (cleaned === '') {
+      setQuantity('');
+    } else {
+      setQuantity(parseInt(cleaned, 10));
+    }
+  };
+
+  const handleAmountChange = (valStr: string) => {
+    if (valStr === '') {
+      setAmount('');
       return;
     }
     const val = parseFloat(valStr);
-    setUnitPrice(isNaN(val) ? '' : Math.max(0, val));
+    setAmount(isNaN(val) ? '' : Math.max(0, val));
   };
 
   const handleCustomerPriceChange = (valStr: string) => {
@@ -289,17 +337,12 @@ export const RecordEntryDrawer: React.FC<RecordEntryDrawerProps> = ({
     setCustomerPrice(isNaN(val) ? '' : Math.max(0, val));
   };
 
-  const currentAmount = useMemo(() => {
-    const rate = Number(unitPrice) || 0;
-    const qty = editingRecord?.quantity && editingRecord.quantity > 0 ? editingRecord.quantity : 1;
-    return qty * rate;
-  }, [unitPrice, editingRecord?.quantity]);
-
   const liveProfit = useMemo(() => {
-    if (customerPrice === '' || unitPrice === '') return null;
+    if (customerPrice === '' || amount === '') return null;
     const cp = Number(customerPrice) || 0;
-    return Math.round((cp - currentAmount) * 100) / 100;
-  }, [customerPrice, currentAmount, unitPrice]);
+    const cost = Number(amount) || 0;
+    return Math.round((cp - cost) * 100) / 100;
+  }, [customerPrice, amount]);
 
   // Validation strictly for Date, Shop Name, Product, Unit Price
   const validate = (): boolean => {
@@ -329,12 +372,29 @@ export const RecordEntryDrawer: React.FC<RecordEntryDrawerProps> = ({
       }
     }
 
-    if (unitPrice === '' || Number(unitPrice) < 0 || isNaN(Number(unitPrice))) {
-      errors.unitPrice = 'Unit price must be 0 or greater.';
+    if (quantity === '' || quantity === null || quantity === undefined) {
+      errors.quantity = 'Quantity is required.';
+    } else {
+      const numQty = Number(quantity);
+      if (isNaN(numQty) || !Number.isInteger(numQty) || numQty <= 0) {
+        errors.quantity = 'Quantity must be a positive whole number greater than 0.';
+      }
     }
 
-    if (customerPrice !== '' && (Number(customerPrice) < 0 || isNaN(Number(customerPrice)))) {
-      errors.customerPrice = 'Customer price cannot be negative.';
+    if (amount === '' || amount === null || amount === undefined) {
+      errors.amount = 'Amount is required.';
+    } else {
+      const numAmt = Number(amount);
+      if (isNaN(numAmt) || numAmt < 0) {
+        errors.amount = 'Amount cannot be negative.';
+      }
+    }
+
+    if (customerPrice !== '' && customerPrice !== null && customerPrice !== undefined) {
+      const numCp = Number(customerPrice);
+      if (isNaN(numCp) || numCp < 0) {
+        errors.customerPrice = 'Customer price cannot be negative.';
+      }
     }
 
     setValidationErrors(errors);
@@ -355,20 +415,13 @@ export const RecordEntryDrawer: React.FC<RecordEntryDrawerProps> = ({
     const chosenProduct = isNewProduct ? undefined : localProducts.find(p => p.id === selectedProductId);
     const productName = chosenProduct ? chosenProduct.name : customProductName.trim();
 
-    const rate = Number(unitPrice) || 0;
+    const numQty = Number(quantity) || 1;
+    const total = Number(amount) || 0;
+    const rate = numQty > 0 ? Math.round((total / numQty) * 10000) / 10000 : total;
     const cpVal = customerPrice === '' ? null : Number(customerPrice);
-    // Single ledger item record: 1 unit where total amount = unit price
-    const qty = editingRecord?.quantity && editingRecord.quantity > 0 ? editingRecord.quantity : 1;
-    const total = qty * rate;
-
-    // Delivery workflow: initial state for new dispatches is pending (unchecked)
-    const status = editingRecord?.deliveryStatus || 'pending';
-
-    // Financial balance: pending amount reflects the total billed value of the item
-    const pending = editingRecord !== null && editingRecord !== undefined && editingRecord.pendingAmount !== undefined 
-      ? Math.min(total, editingRecord.pendingAmount) 
-      : total;
-    const paid = Math.max(0, total - pending);
+    const status = deliveryStatus;
+    const pending = status === 'delivered' ? 0 : total;
+    const paid = status === 'delivered' ? total : 0;
     const memo = editingRecord?.notes || '';
 
     setIsSubmitting(true);
@@ -381,8 +434,9 @@ export const RecordEntryDrawer: React.FC<RecordEntryDrawerProps> = ({
           shopName,
           productId: chosenProduct?.id,
           productName,
-          quantity: qty,
+          quantity: numQty,
           unitPrice: rate,
+          totalAmount: total,
           customerPrice: cpVal,
           deliveryStatus: status,
           pendingAmount: pending,
@@ -397,8 +451,9 @@ export const RecordEntryDrawer: React.FC<RecordEntryDrawerProps> = ({
           shopName,
           productId: chosenProduct?.id,
           productName,
-          quantity: qty,
+          quantity: numQty,
           unitPrice: rate,
+          totalAmount: total,
           customerPrice: cpVal,
           deliveryStatus: status,
           pendingAmount: pending,
@@ -914,42 +969,85 @@ export const RecordEntryDrawer: React.FC<RecordEntryDrawerProps> = ({
               )}
             </div>
 
-            {/* 4. Unit Price & Customer Price with Live Profit Calculation */}
+            {/* 4. Quantity (Pieces) & 5. Amount (₹) */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label htmlFor="record-quantity-input" className="block text-xs font-semibold text-slate-800 mb-1">
+                  Quantity (Pieces)
+                </label>
+                <input
+                  id="record-quantity-input"
+                  type="number"
+                  min={1}
+                  step={1}
+                  placeholder="e.g. 100"
+                  value={quantity}
+                  onChange={e => handleQuantityChange(e.target.value)}
+                  required
+                  className={`w-full rounded-xl border px-3.5 py-2 text-xs sm:text-sm text-slate-800 bg-white focus:outline-none focus:ring-2 focus:ring-[#168BFF] ${
+                    validationErrors.quantity ? 'border-rose-400 bg-rose-50/20' : 'border-slate-200'
+                  }`}
+                />
+                {validationErrors.quantity && (
+                  <p className="mt-1 text-xs text-rose-600 font-medium">{validationErrors.quantity}</p>
+                )}
+              </div>
+
+              <div>
+                <label htmlFor="record-amount-input" className="flex items-center justify-between text-xs font-semibold text-slate-800 mb-1">
+                  <span>Amount (₹)</span>
+                  <span className="text-[11px] font-normal text-slate-400">Total Wholesale Cost</span>
+                </label>
+                <input
+                  id="record-amount-input"
+                  type="number"
+                  min={0}
+                  step="any"
+                  placeholder="e.g. 2000"
+                  value={amount}
+                  onChange={e => handleAmountChange(e.target.value)}
+                  required
+                  className={`w-full rounded-xl border px-3.5 py-2 text-xs sm:text-sm text-slate-800 bg-white focus:outline-none focus:ring-2 focus:ring-[#168BFF] ${
+                    validationErrors.amount ? 'border-rose-400 bg-rose-50/20' : 'border-slate-200'
+                  }`}
+                />
+                {validationErrors.amount && (
+                  <p className="mt-1 text-xs text-rose-600 font-medium">{validationErrors.amount}</p>
+                )}
+              </div>
+            </div>
+
+            {/* 6. Delivery Status & Customer Price (CP) */}
             <div className="space-y-3">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
-                  <label htmlFor="record-unit-price-input" className="block text-xs font-semibold text-slate-800 mb-1">
-                    Unit Price / Cost (₹)
+                  <label htmlFor="record-delivery-status-select" className="block text-xs font-semibold text-slate-800 mb-1">
+                    Delivery Status
                   </label>
-                  <input
-                    id="record-unit-price-input"
-                    type="number"
-                    min={0}
-                    step="any"
-                    placeholder="e.g. 25.00"
-                    value={unitPrice}
-                    onChange={e => handleUnitPriceChange(e.target.value)}
-                    required
-                    className={`w-full rounded-xl border px-3.5 py-2 text-xs sm:text-sm text-slate-800 bg-white focus:outline-none focus:ring-2 focus:ring-[#168BFF] ${
-                      validationErrors.unitPrice ? 'border-rose-400 bg-rose-50/20' : 'border-slate-200'
-                    }`}
-                  />
-                  {validationErrors.unitPrice && (
-                    <p className="mt-1 text-xs text-rose-600 font-medium">{validationErrors.unitPrice}</p>
-                  )}
+                  <select
+                    id="record-delivery-status-select"
+                    value={deliveryStatus}
+                    onChange={e => setDeliveryStatus(e.target.value as 'pending' | 'delivered')}
+                    className="w-full rounded-xl border border-slate-200 px-3.5 py-2 text-xs sm:text-sm text-slate-800 bg-white focus:outline-none focus:ring-2 focus:ring-[#168BFF]"
+                  >
+                    <option value="pending">Pending (Not Delivered)</option>
+                    <option value="delivered">Delivered</option>
+                  </select>
                 </div>
 
                 <div>
                   <label htmlFor="record-customer-price-input" className="flex items-center justify-between text-xs font-semibold text-slate-800 mb-1">
                     <span>Customer Price (CP) (₹)</span>
-                    <span className="text-[11px] font-normal text-slate-400">Total Selling</span>
+                    <span className="text-[11px] font-normal text-slate-400">
+                      {deliveryStatus === 'pending' ? 'During Delivery' : 'Optional'}
+                    </span>
                   </label>
                   <input
                     id="record-customer-price-input"
                     type="number"
                     min={0}
                     step="any"
-                    placeholder="e.g. 35.00"
+                    placeholder={deliveryStatus === 'pending' ? 'Entered on delivery' : 'e.g. 3000'}
                     value={customerPrice}
                     onChange={e => handleCustomerPriceChange(e.target.value)}
                     className={`w-full rounded-xl border px-3.5 py-2 text-xs sm:text-sm text-slate-800 bg-white focus:outline-none focus:ring-2 focus:ring-[#168BFF] ${

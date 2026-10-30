@@ -35,7 +35,7 @@ describe('RecordEntryDrawer Component & Catalog Management Suite', () => {
     { id: 'prod-archived', name: 'Legacy Phone Cover', sku: 'CVR-OLD', category: 'Mobile Cases', unitPrice: 99, minStock: 0, isActive: false }
   ];
 
-  it('renders the allowed form fields including Date, Shop Name, Product, Unit Price and Customer Price (CP)', () => {
+  it('renders the allowed form fields including Date, Shop Name, Product, Quantity, Amount, Delivery Status and Customer Price (CP)', () => {
     const html = renderToString(
       <RecordEntryDrawer
         isOpen={true}
@@ -53,14 +53,14 @@ describe('RecordEntryDrawer Component & Catalog Management Suite', () => {
     expect(html).toContain('New Shop');
     expect(html).toContain('Product');
     expect(html).toContain('New Product');
-    expect(html).toContain('Unit Price');
+    expect(html).toContain('Quantity (Pieces)');
+    expect(html).toContain('Amount (₹)');
+    expect(html).toContain('Delivery Status');
     expect(html).toContain('Customer Price (CP) (₹)');
     expect(html).toContain('Cancel');
     expect(html).toContain('Save Record');
 
     // Confirms removed fields are completely absent from visible DOM
-    expect(html).not.toContain('Quantity');
-    expect(html).not.toContain('Delivery Status');
     expect(html).not.toContain('Payment Status &amp; Outstanding');
     expect(html).not.toContain('Payment Status & Outstanding');
     expect(html).not.toContain('Amount Paid');
@@ -427,4 +427,89 @@ describe('RecordEntryDrawer Component & Catalog Management Suite', () => {
     });
   });
 
+
+  describe('Quantity Field & Independent Financial Rule Suite', () => {
+    it('verifies logical form order: Date -> Shop Name -> Product -> Quantity -> Amount -> Delivery Status', () => {
+      const html = renderToString(
+        <RecordEntryDrawer
+          isOpen={true}
+          onClose={() => {}}
+          onSuccess={() => {}}
+          shops={mockShops}
+          products={mockProducts}
+        />
+      );
+
+      const idxDate = html.indexOf('Date');
+      const idxShop = html.indexOf('Shop Name');
+      const idxProd = html.indexOf('Product');
+      const idxQty = html.indexOf('Quantity (Pieces)');
+      const idxAmt = html.indexOf('Amount (₹)');
+      const idxStatus = html.indexOf('Delivery Status');
+
+      expect(idxDate).toBeGreaterThan(-1);
+      expect(idxShop).toBeGreaterThan(idxDate);
+      expect(idxProd).toBeGreaterThan(idxShop);
+      expect(idxQty).toBeGreaterThan(idxProd);
+      expect(idxAmt).toBeGreaterThan(idxQty);
+      expect(idxStatus).toBeGreaterThan(idxAmt);
+    });
+
+    it('preserves independent wholesale Amount and calculates Profit = CP - Amount without multiplying by Quantity', async () => {
+      // Example from specification:
+      // Product: Tempered Glass, Quantity: 100 pieces, Amount: ₹2,000, CP: ₹3,000, Profit: ₹1,000
+      const saved = await saveBusinessRecord({
+        date: '2026-10-30',
+        shopName: 'RTR Anna Nagar',
+        productName: 'Tempered Glass',
+        quantity: 100,
+        unitPrice: 20, // 2000 / 100
+        totalAmount: 2000,
+        customerPrice: 3000,
+        deliveryStatus: 'delivered',
+        pendingAmount: 0
+      });
+
+      expect(saved).toBeDefined();
+      expect(saved.quantity).toBe(100);
+      expect(saved.totalAmount).toBe(2000);
+      expect(saved.customerPrice).toBe(3000);
+      // Profit is strictly CP - Amount = 3000 - 2000 = 1000
+      expect(saved.profit).toBe(1000);
+    });
+
+    it('renders saved quantity in RecordEntryDrawer when editing an existing record', () => {
+      const html = renderToString(
+        <RecordEntryDrawer
+          isOpen={true}
+          onClose={() => {}}
+          onSuccess={() => {}}
+          shops={mockShops}
+          products={mockProducts}
+          editingRecord={{
+            id: 'rec-qty-edit',
+            deliveryId: 'del-qty-edit',
+            date: '2026-10-30',
+            shopId: 'shop-1',
+            shopName: 'RTR Anna Nagar',
+            productId: 'prod-1',
+            productName: 'Tempered Glass 9D',
+            quantity: 75,
+            unitPrice: 20,
+            totalAmount: 1500,
+            customerPrice: 2200,
+            profit: 700,
+            deliveryStatus: 'delivered',
+            pendingAmount: 0,
+            notes: '',
+            createdAt: '2026-10-30T10:00:00Z'
+          }}
+        />
+      );
+
+      expect(html).toContain('value="75"');
+      expect(html).toContain('value="1500"');
+      expect(html).toContain('+₹700');
+    });
+  });
 });
