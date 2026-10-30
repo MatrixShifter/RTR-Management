@@ -25,6 +25,18 @@ import {
   SettlePaymentSchema
 } from '@crimpston/shared';
 import { supabase, isSupabaseConfigured } from '../lib/supabase.js';
+import {
+  saveOfflineShops,
+  getOfflineShops,
+  saveOfflineProducts,
+  getOfflineProducts,
+  saveOfflineRecords,
+  getOfflineRecords,
+  putOfflineRecord,
+  saveOfflineDeliveries,
+  getOfflineDeliveries,
+  enqueuePendingOperation
+} from './offlineStorage.js';
 
 export {
   isDatabaseCapacityError,
@@ -695,6 +707,7 @@ export async function getShops(): Promise<Shop[]> {
   }
 
   return dedupeRequest('shops', async () => {
+    const userId = await getCurrentUserId();
     if (isSupabaseConfigured && supabase) {
       try {
         await ensureAuthenticatedSession();
@@ -725,11 +738,21 @@ export async function getShops(): Promise<Shop[]> {
             createdAt: s.created_at
           }));
           setLocalCache(STORAGE_KEYS.SHOPS, shops);
+          saveOfflineShops(userId, shops).catch(() => {});
           return shops;
         }
       } catch (err) {
         console.warn('Supabase getShops error, using local fallback:', err);
       }
+    }
+    // Fall back to IndexedDB offline store first
+    try {
+      const offlineShops = await getOfflineShops(userId);
+      if (offlineShops && offlineShops.length > 0) {
+        return offlineShops.filter(s => !s.code?.toUpperCase().startsWith('DEMO') && !s.name?.startsWith('DEMO -'));
+      }
+    } catch {
+      // ignore
     }
     const local = getLocalItem<Shop[]>(STORAGE_KEYS.SHOPS, []);
     return local.filter(s => !s.code?.toUpperCase().startsWith('DEMO') && !s.name?.startsWith('DEMO -'));
@@ -1064,6 +1087,7 @@ export async function getProducts(): Promise<Product[]> {
   }
 
   return dedupeRequest('products', async () => {
+    const userId = await getCurrentUserId();
     if (isSupabaseConfigured && supabase) {
       try {
         await ensureAuthenticatedSession();
@@ -1101,11 +1125,21 @@ export async function getProducts(): Promise<Product[]> {
             };
           });
           setLocalCache(STORAGE_KEYS.PRODUCTS, prods);
+          saveOfflineProducts(userId, prods).catch(() => {});
           return prods;
         }
       } catch (err) {
         console.warn('Supabase getProducts error, using local fallback:', err);
       }
+    }
+    // Fall back to IndexedDB offline store first
+    try {
+      const offlineProds = await getOfflineProducts(userId);
+      if (offlineProds && offlineProds.length > 0) {
+        return offlineProds.filter(p => !p.sku?.toUpperCase().startsWith('DEMO') && !p.name?.startsWith('DEMO -'));
+      }
+    } catch {
+      // ignore
     }
     const local = getLocalItem<Product[]>(STORAGE_KEYS.PRODUCTS, []);
     return local.filter(p => !p.sku?.toUpperCase().startsWith('DEMO') && !p.name?.startsWith('DEMO -'));
@@ -1582,12 +1616,28 @@ export async function getDeliveries(): Promise<DeliveryRecord[]> {
           });
           const nonDemoDeliveries = deliveries.filter(d => !d.shopName?.startsWith('DEMO -'));
           setLocalCache(STORAGE_KEYS.DELIVERIES, nonDemoDeliveries);
+          getCurrentUserId().then(uid => {
+            if (uid) saveOfflineDeliveries(uid, nonDemoDeliveries).catch(() => {});
+          }).catch(() => {});
           return nonDemoDeliveries;
         }
       } catch (err) {
         console.warn('Supabase getDeliveries error, using local fallback:', err);
       }
     }
+
+    try {
+      const uid = await getCurrentUserId().catch(() => null);
+      if (uid) {
+        const offline = await getOfflineDeliveries(uid);
+        if (offline && offline.length > 0) {
+          return offline.filter(d => !d.shopName?.startsWith('DEMO -'));
+        }
+      }
+    } catch {
+      // IndexedDB fallback failed, use localStorage
+    }
+
     const local = getLocalItem<DeliveryRecord[]>(STORAGE_KEYS.DELIVERIES, []);
     return local
       .filter(d => !d.shopName?.startsWith('DEMO -'))
@@ -2047,7 +2097,10 @@ export async function getBusinessRecords(filters?: BusinessRecordFilters): Promi
         if (!viewErr && Array.isArray(viewRecords)) {
           const nonDemo = viewRecords.filter((r: any) => !r.shop_name?.startsWith('[DEMO]') && !r.shop_name?.startsWith('DEMO -'));
           const mapped = nonDemo.map(mapViewRecordToBusinessRecord);
-          return sortBusinessRecords(mapped);
+          const sorted = sortBusinessRecords<BusinessRecord>(mapped);
+          const userId = await getCurrentUserId();
+          saveOfflineRecords(userId, sorted).catch(() => {});
+          return sorted;
         }
       } catch (viewEx) {
         console.warn('Direct v_business_records query error, attempting API / fallback:', viewEx);
@@ -2071,7 +2124,10 @@ export async function getBusinessRecords(filters?: BusinessRecordFilters): Promi
           if (Array.isArray(json.records)) {
             const nonDemo = json.records.filter((r: any) => !r.shop_name?.startsWith('[DEMO]') && !r.shop_name?.startsWith('DEMO -'));
             const mapped = nonDemo.map(mapViewRecordToBusinessRecord);
-            return sortBusinessRecords(mapped);
+            const sorted = sortBusinessRecords<BusinessRecord>(mapped);
+            const userId = await getCurrentUserId();
+            saveOfflineRecords(userId, sorted).catch(() => {});
+            return sorted;
           }
         }
       } catch (apiEx) {
@@ -2080,14 +2136,35 @@ export async function getBusinessRecords(filters?: BusinessRecordFilters): Promi
     }
 
     // 3. Fallback: Reconstruct from deliveries, invoices, shops, products
-    const [deliveries, invoices, shops, products] = await Promise.all([
-      getDeliveries(),
-      getInvoices(),
-      getShops(),
-      getProducts()
-    ]);
-    const all = buildBusinessRecordsFromDeliveries(deliveries, invoices, shops, products);
-    return filterBusinessRecords(all, filters);
+    try {
+      const [deliveries, invoices, shops, products] = await Promise.all([
+        getDeliveries(),
+        getInvoices(),
+        getShops(),
+        getProducts()
+      ]);
+      const all = buildBusinessRecordsFromDeliveries(deliveries, invoices, shops, products);
+      if (all && all.length > 0) {
+        const userId = await getCurrentUserId();
+        saveOfflineRecords(userId, all).catch(() => {});
+        return filterBusinessRecords(all, filters);
+      }
+    } catch (fallbackErr) {
+      console.warn('Fallback record reconstruction error, checking IndexedDB:', fallbackErr);
+    }
+
+    // 4. Offline IndexedDB Cache Fallback
+    try {
+      const userId = await getCurrentUserId();
+      const offlineRecs = await getOfflineRecords(userId);
+      if (offlineRecs && offlineRecs.length > 0) {
+        return filterBusinessRecords(sortBusinessRecords<BusinessRecord>(offlineRecs), filters);
+      }
+    } catch {
+      // ignore
+    }
+
+    return [];
   });
 }
 
@@ -2142,6 +2219,51 @@ export async function saveBusinessRecord(input: SaveBusinessRecordInput): Promis
     }
   }
   pendingAmount = Math.max(0, pendingAmount);
+
+  // Offline support: Queue pending sync operation and save local record in IndexedDB
+  if (!isDemoMode() && typeof navigator !== 'undefined' && !navigator.onLine) {
+    const userId = await getCurrentUserId();
+    const localId = `local_rec_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+    const localDelivId = `local_deliv_${Date.now()}`;
+    const opId = `op_rec_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+
+    const localRecord: BusinessRecord = {
+      id: localId,
+      deliveryId: localDelivId,
+      date: input.date,
+      shopId: targetShop.id,
+      shopName: targetShop.name,
+      productId: targetProduct.id,
+      productName: targetProduct.name,
+      productSku: targetProduct.sku,
+      quantity: qty,
+      unitPrice: rate,
+      totalAmount,
+      deliveryStatus: input.deliveryStatus || 'pending',
+      pendingAmount,
+      notes: input.notes,
+      createdAt: new Date().toISOString()
+    };
+
+    await putOfflineRecord(userId, localRecord).catch(() => {});
+
+    await enqueuePendingOperation(userId, {
+      id: opId,
+      userId,
+      type: 'create_record',
+      payload: input,
+      status: 'PENDING',
+      localId
+    }).catch(() => {});
+
+    clearMemoryCache();
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('rtr:pending-operation-queued', { detail: { opId, type: 'create_record' } }));
+      window.dispatchEvent(new CustomEvent('rtr_data_sync', { detail: { key: 'deliveries' } }));
+    }
+
+    return localRecord;
+  }
 
   const delivery = await recordDelivery({
     shopId: targetShop.id,
@@ -2569,6 +2691,44 @@ export async function updateDeliveryStatus(
     };
   }
 
+  // 1.5. Offline Operation Queueing
+  if (typeof navigator !== 'undefined' && !navigator.onLine) {
+    const userId = await getCurrentUserId().catch(() => null);
+    const opId = `op_status_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+    if (userId) {
+      await enqueuePendingOperation(userId, {
+        id: opId,
+        userId,
+        type: 'update_delivery_status',
+        payload: { deliveryId: targetId, status },
+        status: 'PENDING'
+      });
+    }
+
+    const deliveries = getLocalItem<DeliveryRecord[]>(STORAGE_KEYS.DELIVERIES, []);
+    const resolvedId = resolveDeliveryIdFromList(targetId, deliveries) || targetId;
+    const idx = deliveries.findIndex(d => d.id === resolvedId || d.id === targetId || d.id === cleanId);
+    if (idx >= 0 && deliveries[idx]) {
+      deliveries[idx] = { ...deliveries[idx]!, status };
+      setLocalItem(STORAGE_KEYS.DELIVERIES, deliveries);
+    }
+    clearMemoryCache();
+
+    if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function') {
+      window.dispatchEvent(new CustomEvent('rtr_data_sync', { 
+        detail: { key: 'deliveries', deliveryId: targetId, status } 
+      }));
+      window.dispatchEvent(new CustomEvent('rtr_offline_queue_updated'));
+    }
+
+    return {
+      success: true,
+      deliveryId: targetId,
+      status,
+      message: `Delivery status updated to ${status} (saved offline, will sync automatically).`
+    };
+  }
+
   // 2. Authoritative API Server Request (/api/records/:id/delivery-status)
   let apiSuccess = false;
   let confirmedStatus: 'delivered' | 'pending' = status;
@@ -2796,6 +2956,40 @@ export async function settleRecordPayment(deliveryId: string, amountToPay?: numb
     return;
   }
 
+  // Offline Operation Queueing
+  if (typeof navigator !== 'undefined' && !navigator.onLine) {
+    const userId = await getCurrentUserId().catch(() => null);
+    const opId = `op_pay_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+    if (userId) {
+      await enqueuePendingOperation(userId, {
+        id: opId,
+        userId,
+        type: 'settle_payment',
+        payload: { deliveryId, amountToPay },
+        status: 'PENDING'
+      });
+    }
+
+    const deliveries = await getDeliveries();
+    const dIdx = deliveries.findIndex(d => d.id === deliveryId);
+    if (dIdx >= 0 && deliveries[dIdx]) {
+      const curPending = deliveries[dIdx]!.pendingAmount || 0;
+      const payAmount = amountToPay !== undefined ? amountToPay : curPending;
+      deliveries[dIdx] = {
+        ...deliveries[dIdx]!,
+        pendingAmount: Math.max(0, curPending - payAmount)
+      };
+      setLocalItem(STORAGE_KEYS.DELIVERIES, deliveries);
+    }
+    clearMemoryCache();
+
+    if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function') {
+      window.dispatchEvent(new CustomEvent('rtr_data_sync', { detail: { key: 'deliveries', deliveryId } }));
+      window.dispatchEvent(new CustomEvent('rtr_offline_queue_updated'));
+    }
+    return;
+  }
+
   if (isSupabaseConfigured && supabase && !deliveryId.startsWith('deliv-')) {
     try {
       await ensureAuthenticatedSession();
@@ -2895,6 +3089,8 @@ export async function settleRecordPayment(deliveryId: string, amountToPay?: numb
 
   clearMemoryCache();
 }
+
+export const settleDeliveryPayment = settleRecordPayment;
 
 // ----------------------------------------------------
 // DAILY REPORTS

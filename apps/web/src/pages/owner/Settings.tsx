@@ -10,9 +10,17 @@ import {
   WifiOff,
   AlertCircle,
   Shield,
-  Info
+  Info,
+  Smartphone,
+  Download,
+  Database,
+  Trash2
 } from 'lucide-react';
 import { clearMemoryCache } from '../../services/db.js';
+import { usePwaInstall } from '../../services/usePwaInstall.js';
+import { InstallAppModal } from '../../components/InstallAppModal.js';
+import { synchronizeUserData } from '../../services/syncEngine.js';
+import { getSyncMetadata, clearUserOfflineData, type SyncMetadata } from '../../services/offlineStorage.js';
 
 interface UserState {
   id?: string;
@@ -118,6 +126,65 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
   };
 
   const isActuallyOnline = propIsOnline ?? (typeof navigator !== 'undefined' ? navigator.onLine : true);
+
+  const {
+    isInstalled,
+    hasNativePrompt,
+    showInstructions,
+    setShowInstructions,
+    installApp
+  } = usePwaInstall();
+
+  const [syncMeta, setSyncMeta] = useState<SyncMetadata | null>(null);
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [syncStatusMsg, setSyncStatusMsg] = useState<string | null>(null);
+  const [clearCacheMsg, setClearCacheMsg] = useState<string | null>(null);
+
+  const loadOfflineMeta = useCallback(async () => {
+    if (!resolvedUser?.id) return;
+    try {
+      const meta = await getSyncMetadata(resolvedUser.id);
+      setSyncMeta(meta);
+    } catch {}
+  }, [resolvedUser?.id]);
+
+  useEffect(() => {
+    loadOfflineMeta();
+  }, [loadOfflineMeta]);
+
+  const handleSyncOfflineData = async () => {
+    if (!resolvedUser?.id || isSyncing) return;
+    setIsSyncing(true);
+    setSyncStatusMsg(null);
+    try {
+      const result = await synchronizeUserData(resolvedUser.id);
+      await loadOfflineMeta();
+      if (result.failedCount > 0) {
+        setSyncStatusMsg(`Synchronized with ${result.failedCount} failed items.`);
+      } else {
+        setSyncStatusMsg(`Successfully synchronized all offline records!`);
+      }
+      setTimeout(() => setSyncStatusMsg(null), 4000);
+    } catch (err: any) {
+      setSyncStatusMsg(err.message || 'Synchronization failed.');
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
+  const handleClearCache = async () => {
+    if (!resolvedUser?.id) return;
+    if (!window.confirm('Are you sure you want to clear locally cached offline data? Server data will not be affected.')) return;
+    try {
+      await clearUserOfflineData(resolvedUser.id);
+      clearMemoryCache();
+      await loadOfflineMeta();
+      setClearCacheMsg('Local offline cache cleared.');
+      setTimeout(() => setClearCacheMsg(null), 3000);
+    } catch {
+      setClearCacheMsg('Failed to clear local cache.');
+    }
+  };
 
   return (
     <div className="max-w-4xl mx-auto space-y-6">
@@ -291,6 +358,112 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
           </div>
         </div>
       </div>
+
+      {/* Mobile App & Offline Ledger Capabilities */}
+      <div className="bg-white rounded-2xl border border-slate-200/80 p-6 shadow-xs space-y-5">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-slate-100">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-blue-50 text-[#168BFF] flex items-center justify-center font-bold">
+              <Smartphone className="w-5 h-5" />
+            </div>
+            <div>
+              <h2 className="text-sm font-bold text-slate-900">Mobile App &amp; Offline Sync</h2>
+              <p className="text-xs text-slate-400">Install standalone Android/iOS app &amp; manage offline records</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            {isInstalled ? (
+              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                Standalone App Installed
+              </span>
+            ) : (
+              <button
+                type="button"
+                onClick={installApp}
+                className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs font-bold bg-[#168BFF] hover:bg-blue-600 text-white transition-colors cursor-pointer shadow-xs"
+              >
+                <Download className="w-3.5 h-3.5" />
+                <span>Install Mobile App</span>
+              </button>
+            )}
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-xs">
+          <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200/70 space-y-1">
+            <span className="text-slate-500 font-medium">Pending Sync Operations</span>
+            <p className="text-base font-bold text-slate-900">
+              {syncMeta?.pendingCount || 0}
+            </p>
+            <p className="text-[11px] text-slate-400">Mutations queued offline</p>
+          </div>
+
+          <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200/70 space-y-1">
+            <span className="text-slate-500 font-medium">Last Sync Timestamp</span>
+            <p className="text-base font-bold text-slate-900 truncate">
+              {syncMeta?.lastSyncedAt 
+                ? new Date(syncMeta.lastSyncedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                : 'Never'}
+            </p>
+            <p className="text-[11px] text-slate-400">
+              {syncMeta?.lastSyncedAt 
+                ? new Date(syncMeta.lastSyncedAt).toLocaleDateString([], { month: 'short', day: 'numeric' })
+                : 'No sync yet'}
+            </p>
+          </div>
+
+          <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200/70 space-y-1">
+            <span className="text-slate-500 font-medium">Offline Storage Mode</span>
+            <p className="text-base font-bold text-emerald-700 flex items-center gap-1">
+              <Database className="w-4 h-4 text-emerald-600" />
+              IndexedDB Active
+            </p>
+            <p className="text-[11px] text-slate-400">Isolated per owner ID</p>
+          </div>
+        </div>
+
+        {syncStatusMsg && (
+          <div className="p-3 rounded-xl bg-blue-50 border border-blue-200 text-blue-900 text-xs font-medium">
+            {syncStatusMsg}
+          </div>
+        )}
+
+        {clearCacheMsg && (
+          <div className="p-3 rounded-xl bg-amber-50 border border-amber-200 text-amber-900 text-xs font-medium">
+            {clearCacheMsg}
+          </div>
+        )}
+
+        <div className="flex flex-col sm:flex-row items-center gap-3 pt-2">
+          <button
+            type="button"
+            onClick={handleSyncOfflineData}
+            disabled={isSyncing || !isActuallyOnline}
+            className="w-full sm:w-auto flex items-center justify-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold text-[#102A4C] bg-white border border-[#DCE4EC] hover:bg-slate-50 transition-colors cursor-pointer disabled:opacity-50 shadow-2xs"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 text-[#168BFF] ${isSyncing ? 'animate-spin' : ''}`} />
+            <span>{isSyncing ? 'Synchronizing...' : 'Sync Offline Operations Now'}</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={handleClearCache}
+            className="w-full sm:w-auto flex items-center justify-center gap-2 px-4 py-2 rounded-xl text-xs font-medium text-slate-600 hover:text-rose-600 bg-white border border-slate-200 hover:border-rose-200 transition-colors cursor-pointer"
+          >
+            <Trash2 className="w-3.5 h-3.5 text-slate-400" />
+            <span>Clear Local Cached Data</span>
+          </button>
+        </div>
+      </div>
+
+      {/* Manual Install Guidance Modal */}
+      <InstallAppModal
+        isOpen={showInstructions}
+        onClose={() => setShowInstructions(false)}
+        onNativeInstall={installApp}
+        hasNativePrompt={hasNativePrompt}
+      />
     </div>
   );
 };

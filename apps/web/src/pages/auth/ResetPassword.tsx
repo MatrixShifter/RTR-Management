@@ -65,7 +65,7 @@ export const ResetPassword: React.FC<ResetPasswordProps> = ({
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   // Manual OTP verification state (solves email link scanner prefetch)
-  const [otpEmail, setOtpEmail] = useState('vinov042007@gmail.com');
+  const [otpEmail, setOtpEmail] = useState((import.meta.env?.VITE_OWNER_EMAIL || '').trim());
   const [otpToken, setOtpToken] = useState('');
   const [isVerifyingOtp, setIsVerifyingOtp] = useState(false);
   const [otpError, setOtpError] = useState<string | null>(null);
@@ -483,7 +483,7 @@ export const ResetPassword: React.FC<ResetPasswordProps> = ({
                       type="text"
                       value={otpEmail}
                       onChange={e => setOtpEmail(e.target.value)}
-                      placeholder="e.g. vinov042007@gmail.com or owner"
+                      placeholder="e.g. owner@rtrmobiles.com or owner"
                       required
                       className="w-full px-3 py-2 text-xs bg-white border border-slate-200 rounded-lg text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
                     />

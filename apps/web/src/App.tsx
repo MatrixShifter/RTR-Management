@@ -11,6 +11,7 @@ import { ResetPassword } from './pages/auth/ResetPassword.js';
 import { NotFound } from './pages/NotFound.js';
 import { StatusError } from './pages/StatusError.js';
 import { Navbar } from './components/Navbar.js';
+import { InstallAppBanner } from './components/InstallAppBanner.js';
 import { supabase, isSupabaseConfigured } from './lib/supabase.js';
 
 // Route-level code splitting & lazy loading for heavy workspace pages
@@ -51,9 +52,11 @@ const WorkspaceLayout: React.FC<WorkspaceLayoutProps> = ({ currentUser, isOnline
       <Navbar
         userRole={currentUser.role}
         userName={currentUser.name}
+        userId={currentUser.id}
         isOnline={isOnline}
         onSignOut={onSignOut}
       />
+      <InstallAppBanner />
       <main className="flex-1 w-full lg:pl-[205px] print:pl-0 animate-fade-in overflow-x-hidden">
         <div className="w-full max-w-[1400px] mx-auto px-3 sm:px-6 lg:px-8 py-4 sm:py-6">
           <Suspense fallback={<div className="py-6"><TableSkeleton rows={5} /></div>}>

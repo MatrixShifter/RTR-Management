@@ -4,17 +4,17 @@ import {
   ClipboardList, 
   Settings, 
   LogOut, 
-  Wifi, 
-  WifiOff, 
   Menu, 
   X,
   ChevronDown,
   MoreVertical
 } from 'lucide-react';
+import { OfflineSyncIndicator } from './OfflineSyncIndicator.js';
 
 interface NavbarProps {
   userRole?: 'owner' | 'demo';
   userName?: string;
+  userId?: string | null;
   isOnline?: boolean;
   onSignOut: () => void;
 }
@@ -22,6 +22,7 @@ interface NavbarProps {
 export const Navbar: React.FC<NavbarProps> = ({
   userRole = 'owner',
   userName = 'Business Owner',
+  userId = null,
   isOnline = true,
   onSignOut
 }) => {
@@ -141,22 +142,7 @@ export const Navbar: React.FC<NavbarProps> = ({
 
           {/* Right: Desktop Live indicator & User profile menu */}
           <div className="hidden lg:flex items-center space-x-4">
-            <div 
-              className="flex items-center space-x-1.5 px-2.5 py-1 rounded-full bg-[#152744]/80 text-[11px] border border-[#233B60]"
-              title={isOnline ? "System connected and live" : "Working in offline mode"}
-            >
-              {isOnline ? (
-                <>
-                  <Wifi className="w-3 h-3 text-emerald-400 flex-shrink-0" />
-                  <span className="text-slate-200 font-medium">Live</span>
-                </>
-              ) : (
-                <>
-                  <WifiOff className="w-3 h-3 text-amber-400 flex-shrink-0" />
-                  <span className="text-amber-300 font-semibold">Offline</span>
-                </>
-              )}
-            </div>
+            <OfflineSyncIndicator userId={userId} variant="dark" />
 
             {/* Authenticated user menu */}
             <div className="relative user-dropdown-container">
@@ -213,14 +199,8 @@ export const Navbar: React.FC<NavbarProps> = ({
           </div>
 
           {/* Right: Mobile Live indicator & 3-dot menu */}
-          <div className="lg:hidden flex items-center space-x-2">
-            <div 
-              className="flex items-center space-x-1.5 px-2.5 py-1 rounded-full bg-[#152744]/80 text-[11px] border border-[#233B60]"
-              title={isOnline ? "System connected and live" : "Working in offline mode"}
-            >
-              <span className={`w-1.5 h-1.5 rounded-full ${isOnline ? 'bg-emerald-400' : 'bg-amber-400'}`} />
-              <span className="text-slate-200">{isOnline ? 'Live' : 'Offline'}</span>
-            </div>
+          <div className="lg:hidden flex items-center space-x-1.5">
+            <OfflineSyncIndicator userId={userId} variant="dark" />
 
             {/* 3-dot overflow menu for mobile */}
             <div className="relative user-dropdown-container">

@@ -1,12 +1,12 @@
 {
   "name": "RTR Wholesale Management",
-  "short_name": "RTR Wholesale",
+  "short_name": "RTR Management",
   "description": "Multi-Shop Wholesale Accessories, Stock Ledger and Settlement System for RTR Mobiles",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
   "orientation": "portrait-primary",
-  "background_color": "#F8FAFC",
+  "background_color": "#F4F9FF",
   "theme_color": "#102A4C",
   "categories": ["business", "finance", "productivity"],
   "icons": [
