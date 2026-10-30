@@ -328,7 +328,7 @@ describe('Complete HTTP Status Pages & Error Handling System Suite', () => {
         </MemoryRouter>
       );
 
-      expect(html).toContain('HTTP 404 • Page Not Found');
+      expect(html).toContain('Error 404 • Page Not Found');
       expect(html).toContain('/non-existent-invoice');
       expect(html).toContain('Go to Dashboard');
     });

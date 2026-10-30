@@ -10,7 +10,7 @@
  * 6. Guarantees every fetch handler returns a valid Response object (eliminates TypeError).
  */
 
-const CACHE_NAME = 'rtr-wholesale-v3';
+const CACHE_NAME = 'rtr-wholesale-v4';
 
 const STATIC_SHELL_ASSETS = [
   '/',
@@ -22,7 +22,8 @@ const STATIC_SHELL_ASSETS = [
   '/icon-192.png',
   '/icon-512.png',
   '/apple-touch-icon.png',
-  '/icon-maskable.png'
+  '/icon-maskable.png',
+  '/fonts/plus-jakarta-sans-latin.woff2'
 ];
 
 // Install: Pre-cache core application shell
@@ -34,7 +35,7 @@ self.addEventListener('install', (event) => {
   );
 });
 
-// Activate: Clean up stale legacy caches (e.g. rtr-wholesale-v2) and claim active clients
+// Activate: Clean up stale legacy caches (e.g. rtr-wholesale-v2, rtr-wholesale-v3) and claim active clients
 self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches.keys().then((cacheNames) => {
@@ -57,18 +58,24 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // 1. SECURITY RULE: Strictly bypass cache for non-HTTP(S) schemes, API routes, Supabase endpoints, auth routes, and mutations
+  // 1. SECURITY & PASSTHROUGH RULE:
+  // Strictly bypass service worker for:
+  // - Non-HTTP(S) schemes
+  // - Non-GET requests (POST, PATCH, DELETE, PUT mutations)
+  // - Third-party domains (Supabase *.supabase.co, external CDNs)
+  // - Backend API routes (/api/*)
+  // - Authentication & password recovery routes (/auth/*, /login, /forgot-password, /reset-password)
   if (
-    url.protocol !== 'http:' && url.protocol !== 'https:' ||
+    (url.protocol !== 'http:' && url.protocol !== 'https:') ||
     req.method !== 'GET' ||
+    url.origin !== self.location.origin ||
     url.pathname.startsWith('/api') ||
-    url.hostname.includes('supabase.co') ||
     url.pathname.includes('/auth') ||
     url.pathname.includes('/reset-password') ||
     url.pathname.includes('/forgot-password') ||
     url.pathname.includes('/login')
   ) {
-    // Network-only: Never store or serve business data, auth tokens, or mutations from cache
+    // Pass directly to the native browser network stack
     return;
   }
 
@@ -81,7 +88,7 @@ self.addEventListener('fetch', (event) => {
             return cachedHtml;
           }
           return new Response(
-            '<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><title>RTR Wholesale - Offline</title></head><body><div style="font-family:sans-serif;text-align:center;padding:50px;"><h2>You are currently offline</h2><p>Please check your internet connection and reload the application.</p></div></body></html>',
+            '<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><title>RTR Wholesale - Offline</title></head><body><div style="font-family:system-ui,-apple-system,sans-serif;text-align:center;padding:50px;"><h2>You are currently offline</h2><p>Please check your internet connection and reload the application.</p></div></body></html>',
             {
               status: 503,
               statusText: 'Service Unavailable',
@@ -94,15 +101,17 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // 3. Static assets (JS, CSS, images, fonts): Stale-While-Revalidate with guaranteed Response return
+  // 3. Same-origin static assets (JS, CSS, images, local font files):
+  // Cache-first / Stale-While-Revalidate with guaranteed valid Response return
   event.respondWith(
     caches.match(req).then((cachedResponse) => {
       const fetchPromise = fetch(req).then((networkResponse) => {
-        // Cache valid successful responses for static assets only
+        // Cache valid successful 200 responses for same-origin static assets only
         if (
           networkResponse && 
           networkResponse.status === 200 && 
-          (url.origin === self.location.origin || url.hostname.includes('fonts.gstatic.com'))
+          networkResponse.type === 'basic' &&
+          url.origin === self.location.origin
         ) {
           const responseToCache = networkResponse.clone();
           caches.open(CACHE_NAME).then((cache) => {
