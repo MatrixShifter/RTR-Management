@@ -8,6 +8,7 @@
     "dev:all": "npm run dev --prefix ../..",
     "start": "npm run dev --prefix ../..",
     "build": "tsc && vite build",
+    "postbuild": "node scripts/postbuild.mjs",
     "preview": "vite preview",
     "test": "vitest run"
   },
