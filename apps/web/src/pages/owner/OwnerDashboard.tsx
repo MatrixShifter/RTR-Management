@@ -22,6 +22,7 @@ import { RecordEntryDrawer } from '../../components/RecordEntryDrawer.js';
 import { RecordDetailsModal } from '../../components/RecordDetailsModal.js';
 import { RecordActionsMenu } from '../../components/RecordActionsMenu.js';
 import { SettlePaymentModal } from '../../components/SettlePaymentModal.js';
+import { ConfirmDeliveryModal } from '../../components/ConfirmDeliveryModal.js';
 import { 
   getShops, 
   getProducts, 
@@ -258,6 +259,8 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
   const [activeMenu, setActiveMenu] = useState<{ record: BusinessRecord; anchorRect: DOMRect } | null>(null);
   const [recordToDelete, setRecordToDelete] = useState<BusinessRecord | null>(null);
   const [isDeleting, setIsDeleting] = useState<boolean>(false);
+  const [deliveryConfirmTarget, setDeliveryConfirmTarget] = useState<BusinessRecord | null>(null);
+  const [isConfirmingDelivery, setIsConfirmingDelivery] = useState(false);
 
   // Load live data from database with silent background reconciliation support
   const loadData = useCallback(async (options: { silent?: boolean } = {}) => {
@@ -442,7 +445,40 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
    * - Moves row automatically between Pending Deliveries and Delivered Items sections.
    * - On failure, reliably rolls back to previous state and displays error notification.
    */
+  /**
+   * Delivery status change dispatcher:
+   * - If currently pending: opens ConfirmDeliveryModal to capture Customer Price (CP).
+   * - If currently delivered: asks user for confirmation before reverting to pending (preserving CP/profit in audit history).
+   */
   const handleToggleDelivery = async (rec: BusinessRecord) => {
+    const isCurrentlyDelivered = isDelivered(rec);
+
+    if (isCurrentlyDelivered) {
+      // Reverting from Delivered -> Pending
+      const confirmed = window.confirm(
+        `Revert delivery for "${rec.productName}" at "${rec.shopName}" back to Pending?\n\nRecorded Customer Price and Profit will be preserved in audit history.`
+      );
+      if (!confirmed) return;
+
+      // Revert to pending
+      await executeDeliveryStatusUpdate(rec, 'pending');
+    } else {
+      // Transitioning from Pending -> Delivered requires Customer Price entry
+      setDeliveryConfirmTarget(rec);
+    }
+  };
+
+  /**
+   * Executes authoritative delivery status update:
+   * - Handles server mutation with atomic CP recording if marking delivered.
+   * - Reconciles UI state with server response.
+   * - Rolls back on failure and preserves entered CP.
+   */
+  const executeDeliveryStatusUpdate = async (
+    rec: BusinessRecord, 
+    nextStatus: 'delivered' | 'pending', 
+    customerPrice?: number
+  ) => {
     const targetDeliveryId = rec.deliveryId || rec.id;
     if (inFlightTogglesRef.current.has(rec.id) || inFlightTogglesRef.current.has(targetDeliveryId)) {
       return; // Lock against concurrent in-flight requests
@@ -451,9 +487,6 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
     setError(null);
     inFlightTogglesRef.current.add(rec.id);
     inFlightTogglesRef.current.add(targetDeliveryId);
-
-    const isCurrentlyDelivered = isDelivered(rec);
-    const nextStatus: 'delivered' | 'pending' = isCurrentlyDelivered ? 'pending' : 'delivered';
 
     // Store previous records snapshot for reliable rollback
     const previousRecords = [...records];
@@ -465,6 +498,10 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
              r.id === targetDeliveryId;
     };
 
+    // Calculate optimistic profit if customerPrice is provided
+    const totalCost = Number(rec.totalAmount) || (Number(rec.quantity || 1) * Number(rec.unitPrice || 0));
+    const optimisticProfit = customerPrice !== undefined ? customerPrice - totalCost : rec.profit;
+
     // Optimistic UI update across all items belonging to this delivery
     setRecords(prev => prev.map(r => 
       matchesRecord(r) 
@@ -473,7 +510,8 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
             deliveryStatus: nextStatus,
             delivery_status: nextStatus,
             status: nextStatus,
-            isDelivered: nextStatus === 'delivered'
+            isDelivered: nextStatus === 'delivered',
+            ...(customerPrice !== undefined ? { customerPrice, profit: optimisticProfit } : {})
           } 
         : r
     ));
@@ -487,10 +525,15 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
 
     try {
       // Send delivery-status update through existing backend/API
-      const result = await updateDeliveryStatus(targetDeliveryId, nextStatus);
+      const result = await updateDeliveryStatus(targetDeliveryId, nextStatus, customerPrice);
 
       // Validate response and reconcile using authoritative server response
       const confirmedStatus = (result?.status as 'delivered' | 'pending') || nextStatus;
+      const confirmedCp = result?.customerPrice !== undefined ? result.customerPrice : customerPrice;
+      const confirmedProfit = result?.profit !== undefined 
+        ? result.profit 
+        : (confirmedCp !== undefined && confirmedCp !== null ? confirmedCp - totalCost : rec.profit);
+
       recentStatusOverridesRef.current.set(rec.id, { status: confirmedStatus, timestamp: Date.now() });
       recentStatusOverridesRef.current.set(targetDeliveryId, { status: confirmedStatus, timestamp: Date.now() });
       if (rec.deliveryId) {
@@ -504,7 +547,8 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
               deliveryStatus: confirmedStatus,
               delivery_status: confirmedStatus,
               status: confirmedStatus,
-              isDelivered: confirmedStatus === 'delivered'
+              isDelivered: confirmedStatus === 'delivered',
+              ...(confirmedCp !== undefined ? { customerPrice: confirmedCp, profit: confirmedProfit } : {})
             } 
           : r
       ));
@@ -522,6 +566,7 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
       } else {
         setError(err?.message || 'Failed to update delivery status. Restored previous state.');
       }
+      throw err;
     } finally {
       inFlightTogglesRef.current.delete(rec.id);
       inFlightTogglesRef.current.delete(targetDeliveryId);
@@ -535,12 +580,18 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
   };
 
   /**
-   * Confirmed record deletion handler:
-   * - Shows confirmation dialog before execution.
-   * - Disables duplicate submissions while isDeleting is true.
-   * - Calls deleteBusinessRecord and removes the row from the UI ONLY after the server confirms success.
-   * - Keeps row visible and shows truthful, actionable error on failure.
+   * Confirms delivery with entered Customer Price:
    */
+  const handleConfirmDelivery = async (rec: BusinessRecord, customerPrice: number) => {
+    setIsConfirmingDelivery(true);
+    try {
+      await executeDeliveryStatusUpdate(rec, 'delivered', customerPrice);
+      setDeliveryConfirmTarget(null);
+    } finally {
+      setIsConfirmingDelivery(false);
+    }
+  };
+
   const handleConfirmDelete = async () => {
     if (!recordToDelete || isDeleting) return;
     const target = recordToDelete;
@@ -1253,13 +1304,13 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
           </div>
         ) : (
           <>
-            {/* Records Table: Exactly 5 Visible Columns with Clean Grid Layout */}
+            {/* Records Table: Exactly 7 Dedicated Visible Columns: Date, Shop Name, Product, Amount, CP, Profit, Delivery */}
             <div className="overflow-x-auto rounded-lg border border-[#DCE4EC] bg-white scroll-smooth touch-pan-x">
               <table className="w-full text-left border-collapse border border-[#DCE4EC] bg-white">
                 <thead className="bg-[#F8FAFC] text-[#334155] text-xs sm:text-sm font-semibold border-b border-[#CBD5E1] select-none">
                   <tr>
                     {/* Column 1: Date */}
-                    <th className="py-2.5 px-2 sm:py-3 sm:px-4 w-[54px] sm:w-28 text-left border-r border-[#CBD5E1]">
+                    <th className="py-2.5 px-2 sm:py-3 sm:px-3 w-[54px] sm:w-28 text-left border-r border-[#CBD5E1]">
                       <button
                         type="button"
                         onClick={() => setSortDirection(prev => prev === 'asc' ? 'desc' : 'asc')}
@@ -1272,22 +1323,32 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
                     </th>
 
                     {/* Column 2: Shop Name */}
-                    <th className="py-2.5 px-2 sm:py-3 sm:px-4 text-left font-semibold text-xs sm:text-sm text-[#334155] min-w-[76px] sm:w-48 lg:w-56 border-r border-[#CBD5E1]">
+                    <th className="py-2.5 px-2 sm:py-3 sm:px-3 text-left font-semibold text-xs sm:text-sm text-[#334155] min-w-[76px] sm:w-44 border-r border-[#CBD5E1]">
                       <span>Shop Name</span>
                     </th>
 
                     {/* Column 3: Product */}
-                    <th className="py-2.5 px-2 sm:py-3 sm:px-4 text-left font-semibold text-xs sm:text-sm text-[#334155] min-w-[96px] border-r border-[#CBD5E1]">
+                    <th className="py-2.5 px-2 sm:py-3 sm:px-3 text-left font-semibold text-xs sm:text-sm text-[#334155] min-w-[96px] border-r border-[#CBD5E1]">
                       <span>Product</span>
                     </th>
 
                     {/* Column 4: Amount (₹) */}
-                    <th className="py-2.5 px-2 sm:py-3 sm:px-4 w-[64px] sm:w-36 text-right font-semibold text-xs sm:text-sm text-[#334155] border-r border-[#CBD5E1]">
+                    <th className="py-2.5 px-2 sm:py-3 sm:px-3 w-[64px] sm:w-32 text-right font-semibold text-xs sm:text-sm text-[#334155] border-r border-[#CBD5E1]">
                       <span>Amount (₹)</span>
                     </th>
 
-                    {/* Column 5: Delivery */}
-                    <th className="py-2.5 px-1.5 sm:py-3 sm:px-4 w-[50px] sm:w-24 text-center font-semibold text-xs sm:text-sm text-[#334155]">
+                    {/* Column 5: CP (₹) */}
+                    <th className="py-2.5 px-2 sm:py-3 sm:px-3 w-[64px] sm:w-28 text-right font-semibold text-xs sm:text-sm text-[#334155] border-r border-[#CBD5E1]">
+                      <span>CP (₹)</span>
+                    </th>
+
+                    {/* Column 6: Profit (₹) */}
+                    <th className="py-2.5 px-2 sm:py-3 sm:px-3 w-[64px] sm:w-28 text-right font-semibold text-xs sm:text-sm text-[#334155] border-r border-[#CBD5E1]">
+                      <span>Profit (₹)</span>
+                    </th>
+
+                    {/* Column 7: Delivery */}
+                    <th className="py-2.5 px-1.5 sm:py-3 sm:px-3 w-[50px] sm:w-24 text-center font-semibold text-xs sm:text-sm text-[#334155]">
                       <span>Delivery</span>
                     </th>
                   </tr>
@@ -1305,19 +1366,19 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
                         key={rowKey}
                         className="bg-white hover:bg-slate-50 transition-colors border-b border-[#E2E8F0]"
                       >
-                        {/* Date */}
-                        <td className="py-2 sm:py-3 px-2 sm:px-4 text-[#102A4C] text-xs sm:text-sm whitespace-nowrap border-r border-[#E2E8F0] border-b border-[#E2E8F0]">
+                        {/* 1. Date */}
+                        <td className="py-2 sm:py-3 px-2 sm:px-3 text-[#102A4C] text-xs sm:text-sm whitespace-nowrap border-r border-[#E2E8F0] border-b border-[#E2E8F0]">
                           <span className="hidden sm:inline">{formatDateDesktop(rec.date)}</span>
                           <span className="sm:hidden">{formatDateMobile(rec.date)}</span>
                         </td>
 
-                        {/* Shop Name */}
-                        <td className="py-2 sm:py-3 px-2 sm:px-4 text-[#102A4C] text-xs sm:text-sm font-medium leading-snug break-words border-r border-[#E2E8F0] border-b border-[#E2E8F0]">
+                        {/* 2. Shop Name */}
+                        <td className="py-2 sm:py-3 px-2 sm:px-3 text-[#102A4C] text-xs sm:text-sm font-medium leading-snug break-words border-r border-[#E2E8F0] border-b border-[#E2E8F0]">
                           <span>{rec.shopName || '—'}</span>
                         </td>
 
-                        {/* Product Name */}
-                        <td className="py-2 sm:py-3 px-2 sm:px-4 text-[#102A4C] text-xs sm:text-sm font-medium leading-snug break-words border-r border-[#E2E8F0] border-b border-[#E2E8F0]">
+                        {/* 3. Product Name (Clean without subtext) */}
+                        <td className="py-2 sm:py-3 px-2 sm:px-3 text-[#102A4C] text-xs sm:text-sm font-medium leading-snug break-words border-r border-[#E2E8F0] border-b border-[#E2E8F0]">
                           <div className="flex items-center justify-between gap-1 group">
                             <button
                               type="button"
@@ -1325,13 +1386,6 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
                               className="text-left text-[#102A4C] hover:text-[#168BFF] font-medium transition-colors cursor-pointer flex-1"
                             >
                               <div>{rec.productName}</div>
-                              <div className="flex items-center gap-1.5 mt-0.5 text-[11px] text-slate-500 font-normal">
-                                <span>CP: <span className="font-medium text-slate-700">{rec.customerPrice !== undefined && rec.customerPrice !== null ? `₹${Number(rec.customerPrice).toLocaleString('en-IN')}` : 'Not Recorded'}</span></span>
-                                <span className="text-slate-300">•</span>
-                                <span>Profit: <span className={`font-medium ${rec.profit !== undefined && rec.profit !== null ? (rec.profit >= 0 ? 'text-emerald-700' : 'text-rose-600') : 'text-slate-400'}`}>
-                                  {rec.profit !== undefined && rec.profit !== null ? (rec.profit >= 0 ? `+₹${Number(rec.profit).toLocaleString('en-IN')}` : `-₹${Math.abs(Number(rec.profit)).toLocaleString('en-IN')}`) : 'Not Available'}
-                                </span></span>
-                              </div>
                             </button>
                             <button
                               type="button"
@@ -1353,15 +1407,25 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
                           </span>
                         </td>
 
-                        {/* Amount (₹) */}
-                        <td className="py-2 sm:py-3 px-2 sm:px-4 text-right text-[#102A4C] text-xs sm:text-sm font-medium tabular-nums whitespace-nowrap border-r border-[#E2E8F0] border-b border-[#E2E8F0]">
+                        {/* 4. Amount (₹) */}
+                        <td className="py-2 sm:py-3 px-2 sm:px-3 text-right text-[#102A4C] text-xs sm:text-sm font-medium tabular-nums whitespace-nowrap border-r border-[#E2E8F0] border-b border-[#E2E8F0]">
                           {totalAmt.toLocaleString('en-IN')}
                           <span className="sr-only">{`₹${totalAmt.toLocaleString('en-IN')}`}</span>
                           <span className="sr-only">{`₹${pendingAmt.toLocaleString('en-IN')}`}</span>
                         </td>
 
-                        {/* Delivery Checkbox */}
-                        <td className="py-2 sm:py-3 px-1.5 sm:px-4 text-center border-b border-[#E2E8F0]">
+                        {/* 5. CP (₹) — Em dash for pending records */}
+                        <td className="py-2 sm:py-3 px-2 sm:px-3 text-right text-[#64748B] text-xs sm:text-sm font-medium whitespace-nowrap border-r border-[#E2E8F0] border-b border-[#E2E8F0]">
+                          —
+                        </td>
+
+                        {/* 6. Profit (₹) — Em dash for pending records */}
+                        <td className="py-2 sm:py-3 px-2 sm:px-3 text-right text-[#64748B] text-xs sm:text-sm font-medium whitespace-nowrap border-r border-[#E2E8F0] border-b border-[#E2E8F0]">
+                          —
+                        </td>
+
+                        {/* 7. Delivery Checkbox (Unchecked for pending records) */}
+                        <td className="py-2 sm:py-3 px-1.5 sm:px-3 text-center border-b border-[#E2E8F0]">
                           <button
                             type="button"
                             role="checkbox"
@@ -1386,7 +1450,7 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
                   {/* 2. Delivered Items Separator (Shown only when delivered records exist) */}
                   {paginatedDelivered.length > 0 && (
                     <tr key="delivered-separator">
-                      <td colSpan={5} className="py-2.5 px-2 sm:px-3 bg-[#F8FAFC] border-y border-[#CBD5E1]">
+                      <td colSpan={7} className="py-2.5 px-2 sm:px-3 bg-[#F8FAFC] border-y border-[#CBD5E1]">
                         <div className="flex items-center gap-2 sm:gap-3 justify-center text-xs text-[#64748B] font-medium select-none">
                           <div className="h-px bg-[#CBD5E1] flex-1 max-w-[80px] sm:max-w-[200px]" />
                           <span className="hidden sm:inline">Delivered Items (moved to bottom)</span>
@@ -1402,25 +1466,27 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
                     const rowKey = rec.id || `${rec.deliveryId || 'deliv'}-${rec.productId || idx}`;
                     const pendingAmt = Number(rec.pendingAmount ?? (rec as any).pending_amount) || 0;
                     const totalAmt = Number(rec.totalAmount ?? (rec as any).total_amount) || (Number(rec.quantity || 0) * Number(rec.unitPrice || 0));
+                    const hasValidCp = rec.customerPrice !== undefined && rec.customerPrice !== null && !isNaN(Number(rec.customerPrice));
+                    const hasValidProfit = rec.profit !== undefined && rec.profit !== null && !isNaN(Number(rec.profit));
 
                     return (
                       <tr
                         key={rowKey}
                         className="bg-[#F8FAFC]/60 hover:bg-[#F1F5F9] transition-colors border-b border-[#E2E8F0]"
                       >
-                        {/* Date */}
-                        <td className="py-2 sm:py-3 px-2 sm:px-4 text-[#102A4C] text-xs sm:text-sm whitespace-nowrap border-r border-[#E2E8F0] border-b border-[#E2E8F0]">
+                        {/* 1. Date */}
+                        <td className="py-2 sm:py-3 px-2 sm:px-3 text-[#102A4C] text-xs sm:text-sm whitespace-nowrap border-r border-[#E2E8F0] border-b border-[#E2E8F0]">
                           <span className="hidden sm:inline">{formatDateDesktop(rec.date)}</span>
                           <span className="sm:hidden">{formatDateMobile(rec.date)}</span>
                         </td>
 
-                        {/* Shop Name */}
-                        <td className="py-2 sm:py-3 px-2 sm:px-4 text-[#102A4C] text-xs sm:text-sm font-medium leading-snug break-words border-r border-[#E2E8F0] border-b border-[#E2E8F0]">
+                        {/* 2. Shop Name */}
+                        <td className="py-2 sm:py-3 px-2 sm:px-3 text-[#102A4C] text-xs sm:text-sm font-medium leading-snug break-words border-r border-[#E2E8F0] border-b border-[#E2E8F0]">
                           <span>{rec.shopName || '—'}</span>
                         </td>
 
-                        {/* Product Name */}
-                        <td className="py-2 sm:py-3 px-2 sm:px-4 text-[#102A4C] text-xs sm:text-sm font-medium leading-snug break-words border-r border-[#E2E8F0] border-b border-[#E2E8F0]">
+                        {/* 3. Product Name (Clean without subtext) */}
+                        <td className="py-2 sm:py-3 px-2 sm:px-3 text-[#102A4C] text-xs sm:text-sm font-medium leading-snug break-words border-r border-[#E2E8F0] border-b border-[#E2E8F0]">
                           <div className="flex items-center justify-between gap-1 group">
                             <button
                               type="button"
@@ -1428,13 +1494,6 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
                               className="text-left text-[#102A4C] hover:text-[#168BFF] font-medium transition-colors cursor-pointer flex-1"
                             >
                               <div>{rec.productName}</div>
-                              <div className="flex items-center gap-1.5 mt-0.5 text-[11px] text-slate-500 font-normal">
-                                <span>CP: <span className="font-medium text-slate-700">{rec.customerPrice !== undefined && rec.customerPrice !== null ? `₹${Number(rec.customerPrice).toLocaleString('en-IN')}` : 'Not Recorded'}</span></span>
-                                <span className="text-slate-300">•</span>
-                                <span>Profit: <span className={`font-medium ${rec.profit !== undefined && rec.profit !== null ? (rec.profit >= 0 ? 'text-emerald-700' : 'text-rose-600') : 'text-slate-400'}`}>
-                                  {rec.profit !== undefined && rec.profit !== null ? (rec.profit >= 0 ? `+₹${Number(rec.profit).toLocaleString('en-IN')}` : `-₹${Math.abs(Number(rec.profit)).toLocaleString('en-IN')}`) : 'Not Available'}
-                                </span></span>
-                              </div>
                             </button>
                             <button
                               type="button"
@@ -1456,15 +1515,37 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
                           </span>
                         </td>
 
-                        {/* Amount (₹) */}
-                        <td className="py-2 sm:py-3 px-2 sm:px-4 text-right text-[#102A4C] text-xs sm:text-sm font-medium tabular-nums whitespace-nowrap border-r border-[#E2E8F0] border-b border-[#E2E8F0]">
+                        {/* 4. Amount (₹) */}
+                        <td className="py-2 sm:py-3 px-2 sm:px-3 text-right text-[#102A4C] text-xs sm:text-sm font-medium tabular-nums whitespace-nowrap border-r border-[#E2E8F0] border-b border-[#E2E8F0]">
                           {totalAmt.toLocaleString('en-IN')}
                           <span className="sr-only">{`₹${totalAmt.toLocaleString('en-IN')}`}</span>
                           <span className="sr-only">{`₹${pendingAmt.toLocaleString('en-IN')}`}</span>
                         </td>
 
-                        {/* Delivery Checkbox */}
-                        <td className="py-2 sm:py-3 px-1.5 sm:px-4 text-center border-b border-[#E2E8F0]">
+                        {/* 5. CP (₹) — Saved Customer Price */}
+                        <td className="py-2 sm:py-3 px-2 sm:px-3 text-right text-[#102A4C] text-xs sm:text-sm font-medium tabular-nums whitespace-nowrap border-r border-[#E2E8F0] border-b border-[#E2E8F0]">
+                          {hasValidCp ? Number(rec.customerPrice).toLocaleString('en-IN') : '—'}
+                          {hasValidCp && (
+                            <span className="sr-only">{`₹${Number(rec.customerPrice).toLocaleString('en-IN')}`}</span>
+                          )}
+                        </td>
+
+                        {/* 6. Profit (₹) — Calculated Profit */}
+                        <td className="py-2 sm:py-3 px-2 sm:px-3 text-right text-xs sm:text-sm font-medium tabular-nums whitespace-nowrap border-r border-[#E2E8F0] border-b border-[#E2E8F0]">
+                          {hasValidProfit ? (
+                            <span className={`inline-flex items-center justify-end font-semibold ${Number(rec.profit) >= 0 ? 'text-emerald-700' : 'text-rose-600'}`}>
+                              {Number(rec.profit) >= 0 ? `+${Number(rec.profit).toLocaleString('en-IN')}` : `-${Math.abs(Number(rec.profit)).toLocaleString('en-IN')}`}
+                              <span className="sr-only">
+                                {Number(rec.profit) >= 0 ? `+₹${Number(rec.profit).toLocaleString('en-IN')}` : `-₹${Math.abs(Number(rec.profit)).toLocaleString('en-IN')}`}
+                              </span>
+                            </span>
+                          ) : (
+                            <span className="text-[#64748B]">—</span>
+                          )}
+                        </td>
+
+                        {/* 7. Delivery Checkbox (Checked for delivered records) */}
+                        <td className="py-2 sm:py-3 px-1.5 sm:px-3 text-center border-b border-[#E2E8F0]">
                           <button
                             type="button"
                             role="checkbox"
@@ -1493,7 +1574,7 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
               </table>
             </div>
 
-            {/* Panel Footer: Record Count & Rows Per Page Selector */}
+{/* Panel Footer: Record Count & Rows Per Page Selector */}
             <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-2 select-none text-xs sm:text-sm text-[#738499]">
               {/* Record count display */}
               <div className="text-center sm:text-left">
@@ -1664,6 +1745,17 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
             </div>
           </div>
         </div>
+      )}
+
+      {/* Confirm Delivery Modal */}
+      {deliveryConfirmTarget && (
+        <ConfirmDeliveryModal
+          isOpen={!!deliveryConfirmTarget}
+          record={deliveryConfirmTarget}
+          onClose={() => !isConfirmingDelivery && setDeliveryConfirmTarget(null)}
+          onConfirm={handleConfirmDelivery}
+          isSubmitting={isConfirmingDelivery}
+        />
       )}
 
       {/* Settle Payment Modal */}

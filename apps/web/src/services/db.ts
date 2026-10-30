@@ -2727,6 +2727,8 @@ export interface UpdateDeliveryStatusResult {
   success: boolean;
   deliveryId: string;
   status: 'delivered' | 'pending';
+  customerPrice?: number | null;
+  profit?: number | null;
   message: string;
 }
 
@@ -2768,11 +2770,22 @@ export function normalizeDeliveryStatus(statusOrRecord?: string | boolean | Busi
  */
 export async function updateDeliveryStatus(
   deliveryId: string, 
-  status: 'delivered' | 'pending'
+  status: 'delivered' | 'pending',
+  customerPrice?: number | null
 ): Promise<UpdateDeliveryStatusResult> {
   const cleanId = deliveryId.trim();
   const uuidMatch = cleanId.match(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i);
   const targetId = uuidMatch ? uuidMatch[0] : cleanId;
+
+  // Validate or round customerPrice if provided
+  let validatedCp: number | null | undefined = undefined;
+  if (customerPrice !== undefined) {
+    if (customerPrice !== null && !isNaN(Number(customerPrice))) {
+      validatedCp = Math.round(Number(customerPrice) * 100) / 100;
+    } else {
+      validatedCp = null;
+    }
+  }
 
   // 1. Demo Mode Storage
   if (isDemoMode()) {
@@ -2780,8 +2793,19 @@ export async function updateDeliveryStatus(
     const deliveries = getLocalItem<DeliveryRecord[]>(DEMO_STORAGE_KEYS.DELIVERIES, []);
     const resolvedId = resolveDeliveryIdFromList(targetId, deliveries) || targetId;
     const idx = deliveries.findIndex(d => d.id === resolvedId || d.id === targetId || d.id === cleanId);
+    let calculatedProfit: number | null = null;
     if (idx >= 0 && deliveries[idx]) {
-      deliveries[idx] = { ...deliveries[idx]!, status };
+      const existing = deliveries[idx]!;
+      const cpToUse = validatedCp !== undefined ? validatedCp : (existing.customerPrice ?? null);
+      const totalCost = (existing.items || []).reduce((acc, it) => acc + (it.quantity * (it.unitPrice || 0)), 0);
+      if (cpToUse !== null && totalCost > 0) {
+        calculatedProfit = cpToUse - totalCost;
+      }
+      deliveries[idx] = { 
+        ...existing, 
+        status,
+        ...(validatedCp !== undefined ? { customerPrice: validatedCp, profit: calculatedProfit } : {})
+      };
       setLocalItem(DEMO_STORAGE_KEYS.DELIVERIES, deliveries);
     } else {
       deliveries.push({
@@ -2791,6 +2815,8 @@ export async function updateDeliveryStatus(
         status,
         createdBy: 'demo-owner',
         items: [],
+        customerPrice: validatedCp ?? null,
+        profit: calculatedProfit,
         createdAt: new Date().toISOString()
       });
       setLocalItem(DEMO_STORAGE_KEYS.DELIVERIES, deliveries);
@@ -2800,12 +2826,14 @@ export async function updateDeliveryStatus(
       success: true,
       deliveryId: targetId,
       status,
+      customerPrice: validatedCp,
+      profit: calculatedProfit,
       message: `Delivery status updated to ${status} in demo sandbox.`
     };
   }
 
   // 1.5. Offline Operation Queueing
-  if (typeof navigator !== 'undefined' && !navigator.onLine) {
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) {
     const userId = await getCurrentUserId().catch(() => null);
     const opId = `op_status_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
     if (userId) {
@@ -2813,7 +2841,7 @@ export async function updateDeliveryStatus(
         id: opId,
         userId,
         type: 'update_delivery_status',
-        payload: { deliveryId: targetId, status },
+        payload: { deliveryId: targetId, status, customerPrice: validatedCp },
         status: 'PENDING'
       });
     }
@@ -2821,15 +2849,26 @@ export async function updateDeliveryStatus(
     const deliveries = getLocalItem<DeliveryRecord[]>(STORAGE_KEYS.DELIVERIES, []);
     const resolvedId = resolveDeliveryIdFromList(targetId, deliveries) || targetId;
     const idx = deliveries.findIndex(d => d.id === resolvedId || d.id === targetId || d.id === cleanId);
+    let calculatedProfit: number | null = null;
     if (idx >= 0 && deliveries[idx]) {
-      deliveries[idx] = { ...deliveries[idx]!, status };
+      const existing = deliveries[idx]!;
+      const cpToUse = validatedCp !== undefined ? validatedCp : (existing.customerPrice ?? null);
+      const totalCost = (existing.items || []).reduce((acc, it) => acc + (it.quantity * (it.unitPrice || 0)), 0);
+      if (cpToUse !== null && totalCost > 0) {
+        calculatedProfit = cpToUse - totalCost;
+      }
+      deliveries[idx] = { 
+        ...existing, 
+        status,
+        ...(validatedCp !== undefined ? { customerPrice: validatedCp, profit: calculatedProfit } : {})
+      };
       setLocalItem(STORAGE_KEYS.DELIVERIES, deliveries);
     }
     clearMemoryCache();
 
     if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function') {
       window.dispatchEvent(new CustomEvent('rtr_data_sync', { 
-        detail: { key: 'deliveries', deliveryId: targetId, status } 
+        detail: { key: 'deliveries', deliveryId: targetId, status, customerPrice: validatedCp } 
       }));
       window.dispatchEvent(new CustomEvent('rtr_offline_queue_updated'));
     }
@@ -2838,6 +2877,8 @@ export async function updateDeliveryStatus(
       success: true,
       deliveryId: targetId,
       status,
+      customerPrice: validatedCp,
+      profit: calculatedProfit,
       message: `Delivery status updated to ${status} (saved offline, will sync automatically).`
     };
   }
@@ -2845,12 +2886,17 @@ export async function updateDeliveryStatus(
   // 2. Authoritative API Server Request (/api/records/:id/delivery-status)
   let apiSuccess = false;
   let confirmedStatus: 'delivered' | 'pending' = status;
+  let confirmedCp: number | null | undefined = validatedCp;
 
   if (isSupabaseConfigured && supabase && !targetId.startsWith('deliv-')) {
     try {
+      const reqBody: any = { status };
+      if (validatedCp !== undefined) {
+        reqBody.customerPrice = validatedCp;
+      }
       const res = await authenticatedFetch(`/api/records/${encodeURIComponent(targetId)}/delivery-status`, {
         method: 'PATCH',
-        body: JSON.stringify({ status })
+        body: JSON.stringify(reqBody)
       });
 
       if (res.ok) {
@@ -2858,6 +2904,9 @@ export async function updateDeliveryStatus(
         if (json.success) {
           apiSuccess = true;
           confirmedStatus = json.status || status;
+          if (json.customerPrice !== undefined) {
+            confirmedCp = json.customerPrice;
+          }
         }
       } else {
         const errJson = await res.json().catch(() => ({}));
@@ -2884,15 +2933,32 @@ export async function updateDeliveryStatus(
     if (!apiSuccess) {
       try {
         await ensureAuthenticatedSession();
-        const { data, error } = await supabase
+        const updatePayload: any = {
+          status,
+          updated_at: new Date().toISOString()
+        };
+        if (validatedCp !== undefined) {
+          updatePayload.customer_price = validatedCp;
+        }
+
+        let { data, error } = await supabase
           .from('deliveries')
-          .update({
-            status,
-            updated_at: new Date().toISOString()
-          })
+          .update(updatePayload)
           .eq('id', targetId)
           .select('id, status')
           .single();
+
+        if (error && (error.message?.includes('customer_price') || error.code === '42703')) {
+          // If customer_price column not present in deliveries, fallback without it
+          const retryRes = await supabase
+            .from('deliveries')
+            .update({ status, updated_at: new Date().toISOString() })
+            .eq('id', targetId)
+            .select('id, status')
+            .single();
+          data = retryRes.data;
+          error = retryRes.error;
+        }
 
         if (error) {
           throw new Error(error.message);
@@ -2924,7 +2990,11 @@ export async function updateDeliveryStatus(
   const resolvedId = resolveDeliveryIdFromList(targetId, deliveries) || targetId;
   const idx = deliveries.findIndex(d => d.id === resolvedId || d.id === targetId || d.id === cleanId);
   if (idx >= 0 && deliveries[idx]) {
-    deliveries[idx] = { ...deliveries[idx]!, status: confirmedStatus };
+    deliveries[idx] = { 
+      ...deliveries[idx]!, 
+      status: confirmedStatus,
+      ...(confirmedCp !== undefined ? { customerPrice: confirmedCp } : {})
+    };
     setLocalItem(STORAGE_KEYS.DELIVERIES, deliveries);
   } else {
     deliveries.unshift({
@@ -2932,6 +3002,7 @@ export async function updateDeliveryStatus(
       shopId: 'shop-synced',
       deliveryDate: new Date().toISOString().split('T')[0] || '',
       status: confirmedStatus,
+      customerPrice: confirmedCp ?? null,
       createdBy: 'Business Owner',
       items: [],
       createdAt: new Date().toISOString()
@@ -2943,7 +3014,7 @@ export async function updateDeliveryStatus(
   // Dispatch sync event with confirmed details
   if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function') {
     window.dispatchEvent(new CustomEvent('rtr_data_sync', { 
-      detail: { key: 'deliveries', deliveryId: targetId, status: confirmedStatus } 
+      detail: { key: 'deliveries', deliveryId: targetId, status: confirmedStatus, customerPrice: confirmedCp } 
     }));
   }
 
@@ -2951,6 +3022,7 @@ export async function updateDeliveryStatus(
     success: true,
     deliveryId: targetId,
     status: confirmedStatus,
+    customerPrice: confirmedCp,
     message: `Delivery status updated to ${confirmedStatus}.`
   };
 }

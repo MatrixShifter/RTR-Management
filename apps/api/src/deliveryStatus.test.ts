@@ -25,6 +25,28 @@ describe('Delivery Status Lifecycle Endpoints (/api/records/:id/delivery-status)
       expect(res.body.error).toBe('Unauthorized');
     });
 
+    it('rejects negative customerPrice values with validation error (400)', async () => {
+      const res = await request(app)
+        .patch('/api/records/00000000-0000-0000-0000-000000000000/delivery-status')
+        .set('Authorization', `Bearer ${ownerToken}`)
+        .send({ status: 'delivered', customerPrice: -100 });
+
+      expect(res.status).toBe(400);
+      expect(res.body.error).toBe('Validation Error');
+      expect(res.body.message).toContain('non-negative');
+    });
+
+    it('rejects non-numeric customerPrice with validation error (400)', async () => {
+      const res = await request(app)
+        .patch('/api/records/00000000-0000-0000-0000-000000000000/delivery-status')
+        .set('Authorization', `Bearer ${ownerToken}`)
+        .send({ status: 'delivered', customerPrice: 'not-a-number' });
+
+      expect(res.status).toBe(400);
+      expect(res.body.error).toBe('Validation Error');
+      expect(res.body.message).toContain('non-negative');
+    });
+
     it('rejects invalid status values other than "delivered" or "pending" (400)', async () => {
       const res = await request(app)
         .patch('/api/records/deliv-test-1/delivery-status')

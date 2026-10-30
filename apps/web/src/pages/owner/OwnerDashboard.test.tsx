@@ -355,6 +355,133 @@ describe('OwnerDashboard Component — Modern UI & Simple Delivery/Pending Manag
     expect(demoProd).toBeUndefined();
   });
 
+
+  describe('Main Records Table 7 Dedicated Columns & Delivery Customer Price Workflow Suite', () => {
+    const pendingRecord: db.BusinessRecord = {
+      id: 'rec-pend-7col',
+      deliveryId: 'deliv-pend-7col',
+      date: '2026-10-30',
+      shopId: 'shop-1',
+      shopName: 'RTR Anna Nagar Hub',
+      productId: 'prod-1',
+      productName: 'Super Fast Charger 65W',
+      quantity: 5,
+      unitPrice: 400,
+      totalAmount: 2000,
+      customerPrice: null,
+      profit: null,
+      deliveryStatus: 'pending',
+      pendingAmount: 2000,
+      createdAt: '2026-10-30T10:00:00Z'
+    };
+
+    const deliveredRecord: db.BusinessRecord = {
+      id: 'rec-deliv-7col',
+      deliveryId: 'deliv-deliv-7col',
+      date: '2026-10-30',
+      shopId: 'shop-2',
+      shopName: 'RTR T Nagar Store',
+      productId: 'prod-2',
+      productName: 'Tempered Curved Glass',
+      quantity: 10,
+      unitPrice: 150,
+      totalAmount: 1500,
+      customerPrice: 2200,
+      profit: 700,
+      deliveryStatus: 'delivered',
+      pendingAmount: 0,
+      createdAt: '2026-10-30T11:00:00Z'
+    };
+
+    it('displays all 7 columns as separate, dedicated table headers', () => {
+      const html = renderToString(
+        <MemoryRouter>
+          <OwnerDashboard
+            initialLoading={false}
+            initialShops={[]}
+            initialRecords={[pendingRecord, deliveredRecord]}
+          />
+        </MemoryRouter>
+      );
+
+      const theadMatch = html.match(/<thead[\s\S]*?<\/thead>/);
+      expect(theadMatch).toBeTruthy();
+      const theadHtml = theadMatch![0];
+      expect(theadHtml).toContain('Date');
+      expect(theadHtml).toContain('Shop Name');
+      expect(theadHtml).toContain('Product');
+      expect(theadHtml).toContain('Amount (₹)');
+      expect(theadHtml).toContain('CP (₹)');
+      expect(theadHtml).toContain('Profit (₹)');
+      expect(theadHtml).toContain('Delivery');
+    });
+
+    it('renders em dashes for CP and Profit in Pending records and unchecked delivery checkbox', () => {
+      const html = renderToString(
+        <MemoryRouter>
+          <OwnerDashboard
+            initialLoading={false}
+            initialShops={[]}
+            initialRecords={[pendingRecord]}
+          />
+        </MemoryRouter>
+      );
+
+      // Product column does NOT hide CP or Profit beneath product
+      expect(html).toContain('Super Fast Charger 65W');
+      expect(html).not.toContain('CP: Not Recorded');
+      expect(html).not.toContain('Profit: Not Available');
+
+      // Amount renders value
+      expect(html).toContain('2,000');
+
+      // Dedicated CP and Profit cells render em dashes (—)
+      expect(html).toContain('—');
+
+      // Checkbox is unchecked
+      expect(html).toContain('aria-checked="false"');
+      expect(html).toContain('Mark delivery as completed for Super Fast Charger 65W');
+    });
+
+    it('renders saved CP, calculated profit (+₹700) in Delivered records and checked delivery checkbox', () => {
+      const html = renderToString(
+        <MemoryRouter>
+          <OwnerDashboard
+            initialLoading={false}
+            initialShops={[]}
+            initialRecords={[deliveredRecord]}
+          />
+        </MemoryRouter>
+      );
+
+      // Product column does NOT have subtext CP or Profit
+      expect(html).toContain('Tempered Curved Glass');
+      expect(html).not.toContain('CP: 2,200');
+
+      // Amount renders 1,500
+      expect(html).toContain('1,500');
+
+      // Dedicated CP cell renders 2,200
+      expect(html).toContain('2,200');
+
+      // Dedicated Profit cell renders +700 with green styling
+      expect(html).toContain('+700');
+      expect(html).toContain('text-emerald-700');
+
+      // Checkbox is checked
+      expect(html).toContain('aria-checked="true"');
+      expect(html).toContain('Mark delivery as pending for Tempered Curved Glass');
+    });
+
+    it('updates delivery status and atomic customer price in database service', async () => {
+      db.setDemoMode(true);
+      const res = await db.updateDeliveryStatus('deliv-test-service', 'delivered', 3500);
+      expect(res.success).toBe(true);
+      expect(res.status).toBe('delivered');
+      expect(res.customerPrice).toBe(3500);
+    });
+  });
+
   describe('Financial Accounting & Dashboard Metrics Verification (Scenarios A through F)', () => {
     const testShop: db.Shop = {
       id: 'shop-test-1',
@@ -996,7 +1123,7 @@ describe('OwnerDashboard Component — Modern UI & Simple Delivery/Pending Manag
       expect(html).toContain('Delivered Items');
     });
 
-    it('renders exactly five visible table columns in order: Date, Shop Name, Product, Amount, Delivery', () => {
+    it('renders exactly seven visible table columns in order: Date, Shop Name, Product, Amount, CP, Profit, Delivery', () => {
       const html = renderToString(
         <MemoryRouter>
           <OwnerDashboard
@@ -1012,13 +1139,17 @@ describe('OwnerDashboard Component — Modern UI & Simple Delivery/Pending Manag
       const shopPos = theadHtml.indexOf('<span>Shop Name</span>');
       const prodPos = theadHtml.indexOf('<span>Product</span>');
       const amtPos = theadHtml.indexOf('<span>Amount (₹)</span>');
+      const cpPos = theadHtml.indexOf('<span>CP (₹)</span>');
+      const profitPos = theadHtml.indexOf('<span>Profit (₹)</span>');
       const delivPos = theadHtml.indexOf('<span>Delivery</span>');
 
       expect(datePos).toBeGreaterThan(-1);
       expect(shopPos).toBeGreaterThan(datePos);
       expect(prodPos).toBeGreaterThan(shopPos);
       expect(amtPos).toBeGreaterThan(prodPos);
-      expect(delivPos).toBeGreaterThan(amtPos);
+      expect(cpPos).toBeGreaterThan(amtPos);
+      expect(profitPos).toBeGreaterThan(cpPos);
+      expect(delivPos).toBeGreaterThan(profitPos);
 
       // Verify actual shop name is rendered in the row
       expect(html).toContain('RTR Mobile Hub');
@@ -1054,7 +1185,7 @@ describe('OwnerDashboard Component — Modern UI & Simple Delivery/Pending Manag
       expect(html).toContain('—');
     });
 
-    it('renders delete/action icon button on records without introducing a 6th table header column', () => {
+    it('renders delete/action icon button on records without introducing an 8th table header column', () => {
       const html = renderToString(
         <MemoryRouter>
           <OwnerDashboard
@@ -1069,12 +1200,12 @@ describe('OwnerDashboard Component — Modern UI & Simple Delivery/Pending Manag
       expect(html).toContain('aria-label="Actions for Braided Lightning Cable 2m"');
       expect(html).toContain('aria-label="Actions for Fast GaN Charger 65W"');
 
-      // Verify the <thead> has strictly exactly 5 <th> elements, NOT 6
+      // Verify the <thead> has strictly exactly 7 <th> elements, NOT 8
       const theadMatch = html.match(/<thead[\s\S]*?<\/thead>/);
       expect(theadMatch).toBeTruthy();
       const theadHtml = theadMatch![0];
       const thCount = (theadHtml.match(/<th[\s>]/g) || []).length;
-      expect(thCount).toBe(5);
+      expect(thCount).toBe(7);
     });
 
     it('persists delivery updates and handles record deletion cleanly via db service', async () => {
@@ -1662,7 +1793,7 @@ describe('OwnerDashboard Component — Modern UI & Simple Delivery/Pending Manag
       expect(htmlSearch).not.toContain('Fast Cable 65W');
     });
 
-    it('renders all 5 columns without artificial min-w-[500px] table clipping', () => {
+    it('renders all 7 columns without artificial min-w-[500px] table clipping', () => {
       const mockRecord: db.BusinessRecord = {
         id: 'rec-mobile-test',
         deliveryId: 'deliv-mobile-test',
@@ -1689,16 +1820,18 @@ describe('OwnerDashboard Component — Modern UI & Simple Delivery/Pending Manag
         </MemoryRouter>
       );
 
-      // Eliminates artificial min-w-[500px] that clipped the 5th column on mobile
+      // Eliminates artificial min-w-[500px] that clipped columns on mobile
       expect(html).not.toContain('min-w-[500px]');
       expect(html).toContain('overflow-x-auto');
       expect(html).toContain('touch-pan-x');
 
-      // All 5 visible columns rendered in order
+      // All 7 visible columns rendered in order
       expect(html).toContain('Date');
       expect(html).toContain('Shop Name');
       expect(html).toContain('Product');
       expect(html).toContain('Amount (₹)');
+      expect(html).toContain('CP (₹)');
+      expect(html).toContain('Profit (₹)');
       expect(html).toContain('Delivery');
 
       // Mobile touch targets configured: min-h-[44px] for primary actions

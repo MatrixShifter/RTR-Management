@@ -190,12 +190,25 @@ recordsRouter.patch('/:id/delivery-status', requireOwnerAuth, businessMutationRa
   const user = req.user!;
   const rawId = req.params.id;
   const status = req.body?.status;
+  const rawCp = req.body?.customerPrice !== undefined ? req.body.customerPrice : req.body?.customer_price;
 
   if (status !== 'delivered' && status !== 'pending') {
     return res.status(400).json({
       error: 'Validation Error',
       message: 'Status must be either "delivered" or "pending".'
     });
+  }
+
+  let validatedCp: number | null = null;
+  if (rawCp !== undefined && rawCp !== null && rawCp !== '') {
+    const parsed = Number(rawCp);
+    if (isNaN(parsed) || parsed < 0) {
+      return res.status(400).json({
+        error: 'Validation Error',
+        message: 'Customer price must be a non-negative number.'
+      });
+    }
+    validatedCp = Math.round(parsed * 100) / 100;
   }
 
   if (!rawId || typeof rawId !== 'string') {
@@ -273,25 +286,30 @@ recordsRouter.patch('/:id/delivery-status', requireOwnerAuth, businessMutationRa
     }
 
     // 4. Update delivery status in database and verify affected row
+    const updatePayload: any = {
+      status,
+      updated_at: new Date().toISOString()
+    };
+    if (validatedCp !== null) {
+      updatePayload.customer_price = validatedCp;
+    }
+
     let { data: updatedDelivery, error: updateErr } = await supabaseAdmin
       .from('deliveries')
-      .update({
-        status,
-        updated_at: new Date().toISOString()
-      })
+      .update(updatePayload)
       .eq('id', targetId)
-      .select('id, status')
+      .select('id, status, customer_price')
       .maybeSingle();
 
-    // If updated_at column is missing on older schema, gracefully fallback to updating status only
-    if (updateErr && (updateErr.message?.includes('updated_at') || updateErr.code === '42703')) {
+    // If customer_price or updated_at column is missing on older schema, gracefully fallback to updating status only
+    if (updateErr && (updateErr.message?.includes('customer_price') || updateErr.message?.includes('updated_at') || updateErr.code === '42703')) {
       const retryRes = await supabaseAdmin
         .from('deliveries')
         .update({ status })
         .eq('id', targetId)
         .select('id, status')
         .maybeSingle();
-      updatedDelivery = retryRes.data;
+      updatedDelivery = retryRes.data as any;
       updateErr = retryRes.error;
     }
 
@@ -331,7 +349,8 @@ recordsRouter.patch('/:id/delivery-status', requireOwnerAuth, businessMutationRa
       success: true,
       message: `Delivery status updated to ${status}.`,
       deliveryId: targetId,
-      status: updatedDelivery.status
+      status: updatedDelivery.status,
+      customerPrice: validatedCp ?? (updatedDelivery as any)?.customer_price ?? null
     });
   } catch (err: any) {
     const correlationId = (req.headers['x-correlation-id'] as string);
