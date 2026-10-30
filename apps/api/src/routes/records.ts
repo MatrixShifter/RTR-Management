@@ -47,6 +47,33 @@ recordsRouter.get('/', requireOwnerAuth, async (req: Request, res: Response) => 
       .order('priority_rank', { ascending: true })
       .order('date', { ascending: false });
 
+    // Date & Catalog server-side filtering
+    const exactDate = typeof req.query.date === 'string' && req.query.date.trim() ? req.query.date.trim() : null;
+    const startDate = typeof req.query.startDate === 'string' && req.query.startDate.trim() ? req.query.startDate.trim() : null;
+    const endDate = typeof req.query.endDate === 'string' && req.query.endDate.trim() ? req.query.endDate.trim() : null;
+    const shopId = typeof req.query.shopId === 'string' && req.query.shopId.trim() ? req.query.shopId.trim() : null;
+    const productId = typeof req.query.productId === 'string' && req.query.productId.trim() ? req.query.productId.trim() : null;
+    const status = typeof req.query.status === 'string' && req.query.status.trim() ? req.query.status.trim() : null;
+
+    if (exactDate) {
+      query = query.eq('date', exactDate);
+    }
+    if (startDate) {
+      query = query.gte('date', startDate);
+    }
+    if (endDate) {
+      query = query.lte('date', endDate);
+    }
+    if (shopId) {
+      query = query.eq('shop_id', shopId);
+    }
+    if (productId) {
+      query = query.eq('product_id', productId);
+    }
+    if (status) {
+      query = query.eq('delivery_status', status);
+    }
+
     if (rawLimit !== undefined || rawOffset !== undefined) {
       query = query.range(offset, offset + limit - 1);
     }

@@ -12,7 +12,8 @@ import {
   X,
   MoreVertical,
   Trash2,
-  Loader2 
+  Loader2,
+  Calendar
 } from 'lucide-react';
 import { TableSkeleton } from '../../components/ui/Skeleton.js';
 import { ErrorState } from '../../components/ui/StateViews.js';
@@ -56,6 +57,41 @@ export const isPendingRecord = (r: BusinessRecord): boolean => {
   return pendingAmt > 0 || status === 'pending';
 };
 
+/**
+ * Normalizes any ISO or DB date string to YYYY-MM-DD format without timezone shifts.
+ */
+export function normalizeDateString(dateVal: string | undefined | null): string {
+  if (!dateVal) return '';
+  const trimmed = dateVal.trim();
+  if (trimmed.length >= 10 && /^\d{4}-\d{2}-\d{2}/.test(trimmed)) {
+    return trimmed.slice(0, 10);
+  }
+  return trimmed;
+}
+
+const MONTH_SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+/**
+ * Clean, timezone-safe display formatter for filter pills (e.g. "29 Oct 2026").
+ */
+export function formatFilterDisplayDate(dateStr: string): string {
+  const norm = normalizeDateString(dateStr);
+  const parts = norm.split('-');
+  if (parts.length === 3) {
+    const year = parts[0];
+    const monthStr = parts[1];
+    const dayStr = parts[2];
+    if (year && monthStr && dayStr) {
+      const monthIdx = parseInt(monthStr, 10) - 1;
+      const day = parseInt(dayStr, 10);
+      if (monthIdx >= 0 && monthIdx < 12 && !isNaN(day)) {
+        return `${day} ${MONTH_SHORT[monthIdx]} ${year}`;
+      }
+    }
+  }
+  return dateStr;
+}
+
 export interface OwnerDashboardProps {
   initialLoading?: boolean;
   initialError?: string | null;
@@ -68,6 +104,12 @@ export interface OwnerDashboardProps {
   initialRecords?: BusinessRecord[];
   initialSearchQuery?: string;
   initialCurrentPage?: number;
+  initialDate?: string;
+  initialStartDate?: string;
+  initialEndDate?: string;
+  initialShopId?: string;
+  initialProductId?: string;
+  initialStatusFilter?: 'all' | 'pending' | 'delivered';
 }
 
 export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
@@ -78,7 +120,13 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
   initialInvoices,
   initialRecords,
   initialSearchQuery = '',
-  initialCurrentPage = 1
+  initialCurrentPage = 1,
+  initialDate = '',
+  initialStartDate = '',
+  initialEndDate = '',
+  initialShopId = '',
+  initialProductId = '',
+  initialStatusFilter = 'all'
 }) => {
   // Primary Data States
   const [records, setRecords] = useState<BusinessRecord[]>(() => {
@@ -144,8 +192,19 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
   // Sorting: Date descending by default matching reference UI
   const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
 
-  // Search Query State
+  // Search & Filter States
   const [searchQuery, setSearchQuery] = useState(initialSearchQuery);
+  const [dateMode, setDateMode] = useState<'exact' | 'range'>(
+    initialStartDate || initialEndDate ? 'range' : 'exact'
+  );
+  const [exactDate, setExactDate] = useState<string>(initialDate);
+  const [startDate, setStartDate] = useState<string>(initialStartDate);
+  const [endDate, setEndDate] = useState<string>(initialEndDate);
+  const [selectedShopId, setSelectedShopId] = useState<string>(initialShopId);
+  const [selectedProductId, setSelectedProductId] = useState<string>(initialProductId);
+  const [statusFilter, setStatusFilter] = useState<'all' | 'pending' | 'delivered'>(
+    initialStatusFilter
+  );
 
   const handleSearchChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     setSearchQuery(e.target.value);
@@ -156,6 +215,26 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
     setSearchQuery('');
     setCurrentPage(1);
   };
+
+  const handleClearAllFilters = useCallback(() => {
+    setSearchQuery('');
+    setExactDate('');
+    setStartDate('');
+    setEndDate('');
+    setSelectedShopId('');
+    setSelectedProductId('');
+    setStatusFilter('all');
+    setCurrentPage(1);
+  }, []);
+
+  const hasActiveFilters = Boolean(
+    searchQuery.trim() ||
+    (dateMode === 'exact' && exactDate) ||
+    (dateMode === 'range' && (startDate || endDate)) ||
+    selectedShopId ||
+    selectedProductId ||
+    statusFilter !== 'all'
+  );
 
   // Pagination States
   const [currentPage, setCurrentPage] = useState<number>(initialCurrentPage ?? 1);
@@ -543,27 +622,95 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
     return r.productName || '';
   }, [productMap]);
 
-  // Filter records case-insensitively by both product name and shop name (including partial matches & relations)
+  // Filter records by search query, date (exact or range), shop, product, and status
   const filteredRecords = useMemo(() => {
     const query = searchQuery.trim().toLowerCase();
-    if (!query) return records;
+    const normExact = normalizeDateString(exactDate);
+    const normStart = normalizeDateString(startDate);
+    const normEnd = normalizeDateString(endDate);
 
     return records.filter(r => {
-      const resolvedShop = getRecordShopName(r).toLowerCase();
-      const directShop = (r.shopName || '').toLowerCase();
-      const anyRec = r as any;
-      const extraShop = (anyRec.shop?.name || anyRec.shop_name || '').toLowerCase();
+      // 1. Text Search (matches shop or product)
+      if (query) {
+        const resolvedShop = getRecordShopName(r).toLowerCase();
+        const directShop = (r.shopName || '').toLowerCase();
+        const anyRec = r as any;
+        const extraShop = (anyRec.shop?.name || anyRec.shop_name || '').toLowerCase();
 
-      const resolvedProduct = getRecordProductName(r).toLowerCase();
-      const directProduct = (r.productName || '').toLowerCase();
-      const extraProduct = (anyRec.product?.name || anyRec.product_name || anyRec.productSku || r.productSku || '').toLowerCase();
+        const resolvedProduct = getRecordProductName(r).toLowerCase();
+        const directProduct = (r.productName || '').toLowerCase();
+        const extraProduct = (anyRec.product?.name || anyRec.product_name || anyRec.productSku || r.productSku || '').toLowerCase();
 
-      const matchesShop = resolvedShop.includes(query) || directShop.includes(query) || extraShop.includes(query);
-      const matchesProduct = resolvedProduct.includes(query) || directProduct.includes(query) || extraProduct.includes(query);
+        const matchesShop = resolvedShop.includes(query) || directShop.includes(query) || extraShop.includes(query);
+        const matchesProduct = resolvedProduct.includes(query) || directProduct.includes(query) || extraProduct.includes(query);
 
-      return matchesShop || matchesProduct;
+        if (!matchesShop && !matchesProduct) {
+          return false;
+        }
+      }
+
+      // 2. Specific Shop filter (dropdown selection)
+      if (selectedShopId) {
+        const rShopId = r.shopId || (r as any).shop_id;
+        const targetShopName = (shopMap.get(selectedShopId) || '').toLowerCase();
+        const matchesId = rShopId === selectedShopId;
+        const matchesName = targetShopName ? getRecordShopName(r).toLowerCase() === targetShopName : false;
+        if (!matchesId && !matchesName) {
+          return false;
+        }
+      }
+
+      // 3. Specific Product filter (dropdown selection)
+      if (selectedProductId) {
+        const rProdId = r.productId || (r as any).product_id;
+        const targetProdName = (productMap.get(selectedProductId) || '').toLowerCase();
+        const matchesId = rProdId === selectedProductId;
+        const matchesName = targetProdName ? getRecordProductName(r).toLowerCase() === targetProdName : false;
+        if (!matchesId && !matchesName) {
+          return false;
+        }
+      }
+
+      // 4. Date filtering (exact date or inclusive date range)
+      const rDate = normalizeDateString(r.date);
+      if (dateMode === 'exact' && normExact) {
+        if (rDate !== normExact) {
+          return false;
+        }
+      } else if (dateMode === 'range') {
+        if (normStart && rDate < normStart) {
+          return false;
+        }
+        if (normEnd && rDate > normEnd) {
+          return false;
+        }
+      }
+
+      // 5. Status filter
+      if (statusFilter === 'pending' && !isPendingRecord(r)) {
+        return false;
+      }
+      if (statusFilter === 'delivered' && isPendingRecord(r)) {
+        return false;
+      }
+
+      return true;
     });
-  }, [records, searchQuery, getRecordShopName, getRecordProductName]);
+  }, [
+    records, 
+    searchQuery, 
+    dateMode, 
+    exactDate, 
+    startDate, 
+    endDate, 
+    selectedShopId, 
+    selectedProductId, 
+    statusFilter, 
+    getRecordShopName, 
+    getRecordProductName,
+    shopMap,
+    productMap
+  ]);
 
   // --------------------------------------------------------------------------
   // DYNAMIC DELIVERY GROUPING & ORDERING:
@@ -833,34 +980,201 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
           </button>
         </div>
 
-        {/* Full-width Search Bar placed directly below Records heading and above the table */}
-        <div className="relative w-full">
-          <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-[#738499]">
-            <Search className="w-4 h-4" aria-hidden="true" />
+        {/* Search & Date-Based Filter Controls Section */}
+        <div className="flex flex-col gap-2.5 w-full">
+          {/* Full-width Search Bar placed directly below Records heading and above the table */}
+          <div className="relative w-full">
+            <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-[#738499]">
+              <Search className="w-4 h-4" aria-hidden="true" />
+            </div>
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={handleSearchChange}
+              placeholder="Search by shop or product..."
+              aria-label="Search by shop or product"
+              className="w-full min-h-[44px] bg-[#F8FAFC] focus:bg-white text-[#102A4C] placeholder-[#8A9BAE] text-xs sm:text-sm rounded-xl pl-9 pr-10 py-2 sm:py-2.5 border border-[#DCE4EC] focus:border-[#168BFF] focus:outline-none focus:ring-1 focus:ring-[#168BFF] transition-all shadow-2xs"
+            />
+            {searchQuery && (
+              <button
+                type="button"
+                onClick={handleClearSearch}
+                aria-label="Clear search"
+                className="absolute inset-y-0 right-0 pr-1.5 flex items-center justify-center min-w-[44px] min-h-[44px] text-[#8A9BAE] hover:text-[#102A4C] transition-colors cursor-pointer"
+              >
+                <div className="p-1 rounded-full hover:bg-slate-200/60 transition-colors">
+                  <X className="w-4 h-4" />
+                </div>
+              </button>
+            )}
           </div>
-          <input
-            type="text"
-            value={searchQuery}
-            onChange={handleSearchChange}
-            placeholder="Search by shop or product..."
-            aria-label="Search by shop or product"
-            className="w-full min-h-[44px] bg-[#F8FAFC] focus:bg-white text-[#102A4C] placeholder-[#8A9BAE] text-xs sm:text-sm rounded-xl pl-9 pr-10 py-2 sm:py-2.5 border border-[#DCE4EC] focus:border-[#168BFF] focus:outline-none focus:ring-1 focus:ring-[#168BFF] transition-all shadow-2xs"
-          />
-          {searchQuery && (
-            <button
-              type="button"
-              onClick={handleClearSearch}
-              aria-label="Clear search"
-              className="absolute inset-y-0 right-0 pr-1.5 flex items-center justify-center min-w-[44px] min-h-[44px] text-[#8A9BAE] hover:text-[#102A4C] transition-colors cursor-pointer"
-            >
-              <div className="p-1 rounded-full hover:bg-slate-200/60 transition-colors">
-                <X className="w-4 h-4" />
+
+          {/* Filter Controls Row: Date Picker, Range, Status & Clear Filters */}
+          <div className="flex flex-wrap items-center gap-2 pt-0.5">
+            {/* Date Mode Toggle */}
+            <div className="inline-flex rounded-xl bg-[#F0F4F8] p-1 border border-[#DCE4EC]">
+              <button
+                type="button"
+                onClick={() => { setDateMode('exact'); setCurrentPage(1); }}
+                className={`px-2.5 py-1 text-xs font-semibold rounded-lg transition-all cursor-pointer ${
+                  dateMode === 'exact'
+                    ? 'bg-white text-[#102A4C] shadow-2xs'
+                    : 'text-[#738499] hover:text-[#102A4C]'
+                }`}
+              >
+                Exact Date
+              </button>
+              <button
+                type="button"
+                onClick={() => { setDateMode('range'); setCurrentPage(1); }}
+                className={`px-2.5 py-1 text-xs font-semibold rounded-lg transition-all cursor-pointer ${
+                  dateMode === 'range'
+                    ? 'bg-white text-[#102A4C] shadow-2xs'
+                    : 'text-[#738499] hover:text-[#102A4C]'
+                }`}
+              >
+                Date Range
+              </button>
+            </div>
+
+            {/* Date Input(s) */}
+            {dateMode === 'exact' ? (
+              <div className="flex items-center gap-1.5 bg-[#F8FAFC] focus-within:bg-white border border-[#DCE4EC] focus-within:border-[#168BFF] rounded-xl px-2.5 py-1 min-h-[40px] transition-all">
+                <Calendar className="w-4 h-4 text-[#738499] shrink-0" aria-hidden="true" />
+                <input
+                  type="date"
+                  aria-label="Exact date"
+                  value={exactDate}
+                  onChange={(e) => { setExactDate(e.target.value); setCurrentPage(1); }}
+                  className="bg-transparent text-xs sm:text-sm text-[#102A4C] outline-none cursor-pointer"
+                />
+                {exactDate && (
+                  <button
+                    type="button"
+                    onClick={() => { setExactDate(''); setCurrentPage(1); }}
+                    aria-label="Clear date"
+                    className="text-[#8A9BAE] hover:text-[#102A4C] p-0.5 cursor-pointer"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                )}
               </div>
-            </button>
+            ) : (
+              <div className="flex flex-wrap items-center gap-1.5">
+                <div className="flex items-center gap-1 bg-[#F8FAFC] focus-within:bg-white border border-[#DCE4EC] focus-within:border-[#168BFF] rounded-xl px-2.5 py-1 min-h-[40px] transition-all">
+                  <span className="text-[11px] font-medium text-[#738499]">From:</span>
+                  <input
+                    type="date"
+                    aria-label="Start date"
+                    value={startDate}
+                    onChange={(e) => { setStartDate(e.target.value); setCurrentPage(1); }}
+                    className="bg-transparent text-xs sm:text-sm text-[#102A4C] outline-none cursor-pointer"
+                  />
+                  {startDate && (
+                    <button
+                      type="button"
+                      onClick={() => { setStartDate(''); setCurrentPage(1); }}
+                      aria-label="Clear start date"
+                      className="text-[#8A9BAE] hover:text-[#102A4C] p-0.5 cursor-pointer"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                </div>
+                <div className="flex items-center gap-1 bg-[#F8FAFC] focus-within:bg-white border border-[#DCE4EC] focus-within:border-[#168BFF] rounded-xl px-2.5 py-1 min-h-[40px] transition-all">
+                  <span className="text-[11px] font-medium text-[#738499]">To:</span>
+                  <input
+                    type="date"
+                    aria-label="End date"
+                    value={endDate}
+                    onChange={(e) => { setEndDate(e.target.value); setCurrentPage(1); }}
+                    className="bg-transparent text-xs sm:text-sm text-[#102A4C] outline-none cursor-pointer"
+                  />
+                  {endDate && (
+                    <button
+                      type="button"
+                      onClick={() => { setEndDate(''); setCurrentPage(1); }}
+                      aria-label="Clear end date"
+                      className="text-[#8A9BAE] hover:text-[#102A4C] p-0.5 cursor-pointer"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* Status Filter Dropdown */}
+            <div className="relative">
+              <select
+                aria-label="Filter by status"
+                value={statusFilter}
+                onChange={(e) => { setStatusFilter(e.target.value as any); setCurrentPage(1); }}
+                className="bg-[#F8FAFC] focus:bg-white text-xs sm:text-sm text-[#102A4C] border border-[#DCE4EC] focus:border-[#168BFF] rounded-xl pl-3 pr-8 py-2 min-h-[40px] outline-none appearance-none cursor-pointer transition-all"
+              >
+                <option value="all">All Statuses</option>
+                <option value="pending">Pending</option>
+                <option value="delivered">Delivered</option>
+              </select>
+              <div className="absolute inset-y-0 right-0 pr-2.5 flex items-center pointer-events-none text-[#738499]">
+                <ChevronDown className="w-3.5 h-3.5" />
+              </div>
+            </div>
+
+            {/* Clear All Filters Button */}
+            {hasActiveFilters && (
+              <button
+                type="button"
+                onClick={handleClearAllFilters}
+                aria-label="Clear filters"
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold text-[#DC2626] bg-red-50 hover:bg-red-100/80 border border-red-200 transition-colors min-h-[40px] cursor-pointer"
+              >
+                <X className="w-3.5 h-3.5" />
+                <span>Clear Filters</span>
+              </button>
+            )}
+          </div>
+
+          {/* Active Filter Summary Pill Bar */}
+          {hasActiveFilters && (
+            <div className="flex flex-wrap items-center gap-1.5 text-xs text-[#738499] bg-[#F1F5F9]/70 px-3 py-2 rounded-xl border border-[#E2E8F0]">
+              <span className="font-semibold text-[#102A4C]">Filtered by:</span>
+              {dateMode === 'exact' && exactDate && (
+                <span className="inline-flex items-center gap-1 bg-white px-2 py-0.5 rounded-md border border-[#DCE4EC] text-[#102A4C] font-medium">
+                  Date: {formatFilterDisplayDate(exactDate)}
+                </span>
+              )}
+              {dateMode === 'range' && (startDate || endDate) && (
+                <span className="inline-flex items-center gap-1 bg-white px-2 py-0.5 rounded-md border border-[#DCE4EC] text-[#102A4C] font-medium">
+                  Date: {startDate ? formatFilterDisplayDate(startDate) : 'Beginning'} &ndash; {endDate ? formatFilterDisplayDate(endDate) : 'Present'}
+                </span>
+              )}
+              {selectedShopId && (
+                <span className="inline-flex items-center gap-1 bg-white px-2 py-0.5 rounded-md border border-[#DCE4EC] text-[#102A4C] font-medium">
+                  Shop ID: {selectedShopId}
+                </span>
+              )}
+              {selectedProductId && (
+                <span className="inline-flex items-center gap-1 bg-white px-2 py-0.5 rounded-md border border-[#DCE4EC] text-[#102A4C] font-medium">
+                  Product ID: {selectedProductId}
+                </span>
+              )}
+              {searchQuery.trim() && (
+                <span className="inline-flex items-center gap-1 bg-white px-2 py-0.5 rounded-md border border-[#DCE4EC] text-[#102A4C] font-medium">
+                  Search: &ldquo;{searchQuery.trim()}&rdquo;
+                </span>
+              )}
+              {statusFilter !== 'all' && (
+                <span className="inline-flex items-center gap-1 bg-white px-2 py-0.5 rounded-md border border-[#DCE4EC] text-[#102A4C] font-medium capitalize">
+                  Status: {statusFilter}
+                </span>
+              )}
+              <span className="text-[#8A9BAE]">({filteredRecords.length} matching {filteredRecords.length === 1 ? 'record' : 'records'})</span>
+            </div>
           )}
         </div>
 
-        {records.length === 0 && !searchQuery.trim() ? (
+        {records.length === 0 && !hasActiveFilters ? (
           <div className="py-8 text-center border-t border-[#E2E8F0] pt-6">
             <EmptyState
               icon={Store}
@@ -876,20 +1190,25 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
             <span className="sr-only">No Retail Stores Registered Register First Shop No Business Records Entered</span>
           </div>
         ) : orderedRecords.length === 0 ? (
-          /* Empty state when search produces 0 matches */
+          /* Empty state when search or filters produce 0 matches */
           <div className="py-10 px-4 text-center border rounded-xl border-[#E2E8F0] bg-[#F8FAFC]/50">
             <div className="w-10 h-10 rounded-full bg-slate-100 flex items-center justify-center mx-auto text-slate-400 mb-2.5">
               <Search className="w-5 h-5" />
             </div>
             <h3 className="text-sm font-semibold text-[#102A4C]">
-              No records found for &ldquo;{searchQuery.trim()}&rdquo;
+              {searchQuery.trim() 
+                ? `No records found for \u201C${searchQuery.trim()}\u201D`
+                : 'No records found matching your filters'}
             </h3>
             <p className="text-xs text-[#738499] mt-1 max-w-sm mx-auto">
-              No records match &ldquo;{searchQuery.trim()}&rdquo;. Try searching for a different shop or product name.
+              {searchQuery.trim() 
+                ? `No records match \u201C${searchQuery.trim()}\u201D with the current filter selections. Try searching for a different shop or product name.`
+                : 'No records match the selected date or category filters. Try expanding your search criteria.'}
             </p>
             <button
               type="button"
-              onClick={handleClearSearch}
+              onClick={handleClearAllFilters}
+              aria-label="Clear search"
               className="mt-3 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-[#168BFF] hover:bg-blue-50 border border-blue-200 transition-colors cursor-pointer"
             >
               <X className="w-3.5 h-3.5" />

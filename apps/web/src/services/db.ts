@@ -1895,34 +1895,109 @@ function buildBusinessRecordsFromDeliveries(
   return sortBusinessRecords(records);
 }
 
-export async function getBusinessRecords(): Promise<BusinessRecord[]> {
+export interface BusinessRecordFilters {
+  date?: string;
+  startDate?: string;
+  endDate?: string;
+  shopId?: string;
+  productId?: string;
+  status?: string;
+}
+
+/**
+ * Normalizes any ISO or DB date string to YYYY-MM-DD format without timezone shifts.
+ */
+export function normalizeDateString(dateVal: string | undefined | null): string {
+  if (!dateVal) return '';
+  const trimmed = dateVal.trim();
+  if (trimmed.length >= 10 && /^\d{4}-\d{2}-\d{2}/.test(trimmed)) {
+    return trimmed.slice(0, 10);
+  }
+  return trimmed;
+}
+
+const MONTH_SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+/**
+ * Clean, timezone-safe display formatter for filter pills (e.g. "29 Oct 2026").
+ */
+export function formatFilterDisplayDate(dateStr: string): string {
+  const norm = normalizeDateString(dateStr);
+  const parts = norm.split('-');
+  if (parts.length === 3) {
+    const year = parts[0];
+    const monthStr = parts[1];
+    const dayStr = parts[2];
+    if (year && monthStr && dayStr) {
+      const monthIdx = parseInt(monthStr, 10) - 1;
+      const day = parseInt(dayStr, 10);
+      if (monthIdx >= 0 && monthIdx < 12 && !isNaN(day)) {
+        return `${day} ${MONTH_SHORT[monthIdx]} ${year}`;
+      }
+    }
+  }
+  return dateStr;
+}
+
+export function filterBusinessRecords(records: BusinessRecord[], filters?: BusinessRecordFilters): BusinessRecord[] {
+  if (!filters) return records;
+  const { date, startDate, endDate, shopId, productId, status } = filters;
+  if (!date && !startDate && !endDate && !shopId && !productId && !status) return records;
+
+  return records.filter(r => {
+    const rDate = normalizeDateString(r.date);
+    if (date && rDate !== normalizeDateString(date)) return false;
+    if (startDate && rDate < normalizeDateString(startDate)) return false;
+    if (endDate && rDate > normalizeDateString(endDate)) return false;
+    if (shopId && r.shopId !== shopId) return false;
+    if (productId && r.productId !== productId) return false;
+    if (status && r.deliveryStatus !== status) return false;
+    return true;
+  });
+}
+
+export async function getBusinessRecords(filters?: BusinessRecordFilters): Promise<BusinessRecord[]> {
+  const cacheKey = filters 
+    ? `business_records_${JSON.stringify(filters)}`
+    : 'business_records';
+
   if (isDemoMode()) {
-    return dedupeRequest('business_records_demo', async () => {
+    return dedupeRequest(cacheKey, async () => {
       const [deliveries, invoices, shops, products] = await Promise.all([
         getDeliveries(),
         getInvoices(),
         getShops(),
         getProducts()
       ]);
-      return buildBusinessRecordsFromDeliveries(deliveries, invoices, shops, products);
+      const all = buildBusinessRecordsFromDeliveries(deliveries, invoices, shops, products);
+      return filterBusinessRecords(all, filters);
     });
   }
 
-  return dedupeRequest('business_records', async () => {
+  return dedupeRequest(cacheKey, async () => {
     // 1. Direct query against canonical Supabase view (public.v_business_records)
     if (isSupabaseConfigured && supabase) {
       try {
         await ensureAuthenticatedSession();
+        let query = supabase
+          .from('v_business_records')
+          .select('*')
+          .order('priority_rank', { ascending: true })
+          .order('date', { ascending: false });
+
+        if (filters?.date) query = query.eq('date', filters.date);
+        if (filters?.startDate) query = query.gte('date', filters.startDate);
+        if (filters?.endDate) query = query.lte('date', filters.endDate);
+        if (filters?.shopId) query = query.eq('shop_id', filters.shopId);
+        if (filters?.productId) query = query.eq('product_id', filters.productId);
+        if (filters?.status) query = query.eq('delivery_status', filters.status);
+
         const { data: viewRecords, error: viewErr } = await withTimeout(
-          supabase
-            .from('v_business_records')
-            .select('*')
-            .order('priority_rank', { ascending: true })
-            .order('date', { ascending: false }),
+          query,
           6000
         );
 
-        if (!viewErr && Array.isArray(viewRecords) && viewRecords.length > 0) {
+        if (!viewErr && Array.isArray(viewRecords)) {
           const nonDemo = viewRecords.filter((r: any) => !r.shop_name?.startsWith('[DEMO]') && !r.shop_name?.startsWith('DEMO -'));
           const mapped = nonDemo.map(mapViewRecordToBusinessRecord);
           return sortBusinessRecords(mapped);
@@ -1933,10 +2008,20 @@ export async function getBusinessRecords(): Promise<BusinessRecord[]> {
 
       // 2. Query through backend Express API (/api/records) which queries v_business_records via admin client
       try {
-        const res = await authenticatedFetch('/api/records');
+        const params = new URLSearchParams();
+        if (filters?.date) params.set('date', filters.date);
+        if (filters?.startDate) params.set('startDate', filters.startDate);
+        if (filters?.endDate) params.set('endDate', filters.endDate);
+        if (filters?.shopId) params.set('shopId', filters.shopId);
+        if (filters?.productId) params.set('productId', filters.productId);
+        if (filters?.status) params.set('status', filters.status);
+        const qs = params.toString();
+        const url = qs ? `/api/records?${qs}` : '/api/records';
+
+        const res = await authenticatedFetch(url);
         if (res.ok) {
           const json = await res.json();
-          if (Array.isArray(json.records) && json.records.length > 0) {
+          if (Array.isArray(json.records)) {
             const nonDemo = json.records.filter((r: any) => !r.shop_name?.startsWith('[DEMO]') && !r.shop_name?.startsWith('DEMO -'));
             const mapped = nonDemo.map(mapViewRecordToBusinessRecord);
             return sortBusinessRecords(mapped);
@@ -1954,7 +2039,8 @@ export async function getBusinessRecords(): Promise<BusinessRecord[]> {
       getShops(),
       getProducts()
     ]);
-    return buildBusinessRecordsFromDeliveries(deliveries, invoices, shops, products);
+    const all = buildBusinessRecordsFromDeliveries(deliveries, invoices, shops, products);
+    return filterBusinessRecords(all, filters);
   });
 }
 

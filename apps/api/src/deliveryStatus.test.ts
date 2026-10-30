@@ -80,4 +80,43 @@ describe('Delivery Status Lifecycle Endpoints (/api/records/:id/delivery-status)
       expect(res.status).toBe(404);
     });
   });
+
+  describe('GET /api/records Server-Side Date & Filter Support', () => {
+    it('returns filtered records when exact date query is passed', async () => {
+      const res = await request(app)
+        .get('/api/records?date=2026-10-29')
+        .set('Authorization', `Bearer ${ownerToken}`);
+
+      expect(res.status).toBe(200);
+      expect(Array.isArray(res.body.records)).toBe(true);
+      res.body.records.forEach((r: any) => {
+        expect(r.date).toBe('2026-10-29');
+      });
+    });
+
+    it('returns filtered records when inclusive date range queries are passed', async () => {
+      const res = await request(app)
+        .get('/api/records?startDate=2026-10-25&endDate=2026-10-29')
+        .set('Authorization', `Bearer ${ownerToken}`);
+
+      expect(res.status).toBe(200);
+      expect(Array.isArray(res.body.records)).toBe(true);
+      res.body.records.forEach((r: any) => {
+        expect(r.date >= '2026-10-25').toBe(true);
+        expect(r.date <= '2026-10-29').toBe(true);
+      });
+    });
+
+    it('supports combining status filter with date range query', async () => {
+      const res = await request(app)
+        .get('/api/records?startDate=2026-10-20&endDate=2026-10-30&status=pending')
+        .set('Authorization', `Bearer ${ownerToken}`);
+
+      expect(res.status).toBe(200);
+      expect(Array.isArray(res.body.records)).toBe(true);
+      res.body.records.forEach((r: any) => {
+        expect(r.delivery_status).toBe('pending');
+      });
+    });
+  });
 });

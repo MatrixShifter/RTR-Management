@@ -2412,6 +2412,270 @@ describe('OwnerDashboard Component — Modern UI & Simple Delivery/Pending Manag
       expect(deliveredSeparatorPos).toBeLessThan(deliveredItemPos);
     });
   });
+
+  describe('Date-Based Record Search & Multi-Filter Suite', () => {
+    const multiDateRecords: db.BusinessRecord[] = [
+      {
+        id: 'rec-date-1',
+        deliveryId: 'deliv-date-1',
+        date: '2026-10-25',
+        shopId: 'shop-alpha',
+        shopName: 'Alpha Wireless',
+        productId: 'prod-alpha',
+        productName: 'USB-C Braided Cable',
+        quantity: 10,
+        unitPrice: 150,
+        totalAmount: 1500,
+        deliveryStatus: 'delivered',
+        pendingAmount: 0,
+        createdAt: '2026-10-25T10:00:00Z'
+      },
+      {
+        id: 'rec-date-2',
+        deliveryId: 'deliv-date-2',
+        date: '2026-10-27',
+        shopId: 'shop-beta',
+        shopName: 'Beta Cellular',
+        productId: 'prod-beta',
+        productName: 'Wireless Bluetooth Earbuds',
+        quantity: 5,
+        unitPrice: 600,
+        totalAmount: 3000,
+        deliveryStatus: 'pending',
+        pendingAmount: 3000,
+        createdAt: '2026-10-27T11:00:00Z'
+      },
+      {
+        id: 'rec-date-3',
+        deliveryId: 'deliv-date-3',
+        date: '2026-10-29',
+        shopId: 'shop-1dhope',
+        shopName: '1dhope Accessories',
+        productId: 'prod-fast-charger',
+        productName: '65W Fast Charger',
+        quantity: 20,
+        unitPrice: 450,
+        totalAmount: 9000,
+        deliveryStatus: 'delivered',
+        pendingAmount: 0,
+        createdAt: '2026-10-29T14:00:00Z'
+      },
+      {
+        id: 'rec-date-4',
+        deliveryId: 'deliv-date-4',
+        date: '2026-10-29',
+        shopId: 'shop-gamma',
+        shopName: 'Gamma Mobiles',
+        productId: 'prod-screen-guard',
+        productName: 'Matte Screen Guard',
+        quantity: 30,
+        unitPrice: 80,
+        totalAmount: 2400,
+        deliveryStatus: 'pending',
+        pendingAmount: 2400,
+        createdAt: '2026-10-29T16:00:00Z'
+      }
+    ];
+
+    it('1. searching a single date returns strictly the correct records for that date', () => {
+      const html = renderToString(
+        <MemoryRouter>
+          <OwnerDashboard
+            initialLoading={false}
+            initialRecords={multiDateRecords}
+            initialDate="2026-10-29"
+          />
+        </MemoryRouter>
+      );
+
+      // Should contain 29 Oct records
+      expect(html).toContain('1dhope Accessories');
+      expect(html).toContain('Gamma Mobiles');
+      expect(html).toContain('65W Fast Charger');
+      expect(html).toContain('Matte Screen Guard');
+
+      // Should exclude records on 25 Oct and 27 Oct from table rows
+      expect(html).not.toContain('Alpha Wireless');
+      expect(html).not.toContain('Beta Cellular');
+      expect(html).not.toContain('USB-C Braided Cable');
+      expect(html).not.toContain('Wireless Bluetooth Earbuds');
+    });
+
+    it('2. date-range search includes both start and end dates inclusively', () => {
+      const html = renderToString(
+        <MemoryRouter>
+          <OwnerDashboard
+            initialLoading={false}
+            initialRecords={multiDateRecords}
+            initialStartDate="2026-10-25"
+            initialEndDate="2026-10-27"
+          />
+        </MemoryRouter>
+      );
+
+      // Includes 25 Oct (start boundary) and 27 Oct (end boundary)
+      expect(html).toContain('Alpha Wireless');
+      expect(html).toContain('Beta Cellular');
+
+      // Excludes 29 Oct (outside boundary)
+      expect(html).not.toContain('1dhope Accessories');
+      expect(html).not.toContain('Gamma Mobiles');
+    });
+
+    it('3. shop + date filtering work harmoniously together (e.g. 29 October 2026 + 1dhope)', () => {
+      const html = renderToString(
+        <MemoryRouter>
+          <OwnerDashboard
+            initialLoading={false}
+            initialRecords={multiDateRecords}
+            initialDate="2026-10-29"
+            initialSearchQuery="1dhope"
+          />
+        </MemoryRouter>
+      );
+
+      // Should display only the matching record for 1dhope on 29 Oct
+      expect(html).toContain('1dhope Accessories');
+      expect(html).toContain('65W Fast Charger');
+
+      // Should exclude other shop on 29 Oct (Gamma Mobiles) and other dates
+      expect(html).not.toContain('Gamma Mobiles');
+      expect(html).not.toContain('Matte Screen Guard');
+      expect(html).not.toContain('Alpha Wireless');
+    });
+
+    it('4. product + date filtering work harmoniously together (e.g. 29 October 2026 + Screen Guard)', () => {
+      const html = renderToString(
+        <MemoryRouter>
+          <OwnerDashboard
+            initialLoading={false}
+            initialRecords={multiDateRecords}
+            initialDate="2026-10-29"
+            initialSearchQuery="Screen Guard"
+          />
+        </MemoryRouter>
+      );
+
+      expect(html).toContain('Gamma Mobiles');
+      expect(html).toContain('Matte Screen Guard');
+      expect(html).not.toContain('1dhope Accessories');
+      expect(html).not.toContain('65W Fast Charger');
+    });
+
+    it('5. pending and delivered filters work seamlessly with dates', () => {
+      const htmlPending = renderToString(
+        <MemoryRouter>
+          <OwnerDashboard
+            initialLoading={false}
+            initialRecords={multiDateRecords}
+            initialDate="2026-10-29"
+            initialStatusFilter="pending"
+          />
+        </MemoryRouter>
+      );
+
+      // On 29 Oct, Gamma Mobiles is pending, 1dhope is delivered
+      expect(htmlPending).toContain('Gamma Mobiles');
+      expect(htmlPending).not.toContain('1dhope Accessories');
+
+      const htmlDelivered = renderToString(
+        <MemoryRouter>
+          <OwnerDashboard
+            initialLoading={false}
+            initialRecords={multiDateRecords}
+            initialDate="2026-10-29"
+            initialStatusFilter="delivered"
+          />
+        </MemoryRouter>
+      );
+
+      expect(htmlDelivered).toContain('1dhope Accessories');
+      expect(htmlDelivered).not.toContain('Gamma Mobiles');
+    });
+
+    it('6. clear filters option is available when any filter is active and displays selected range clearly', () => {
+      const html = renderToString(
+        <MemoryRouter>
+          <OwnerDashboard
+            initialLoading={false}
+            initialRecords={multiDateRecords}
+            initialStartDate="2026-10-25"
+            initialEndDate="2026-10-29"
+          />
+        </MemoryRouter>
+      );
+
+      expect(html).toContain('Clear Filters');
+      expect(html).toContain('Filtered by:');
+      expect(html).toContain('25 Oct 2026');
+      expect(html).toContain('29 Oct 2026');
+      expect(html).toMatch(/4[\s\S]*?matching[\s\S]*?records/);
+    });
+
+    it('7. db.filterBusinessRecords correctly filters records for authoritative background sync and refresh', () => {
+      const filteredExact = db.filterBusinessRecords(multiDateRecords, { date: '2026-10-29' });
+      expect(filteredExact).toHaveLength(2);
+      expect(filteredExact.map(r => r.id)).toEqual(['rec-date-3', 'rec-date-4']);
+
+      const filteredRange = db.filterBusinessRecords(multiDateRecords, {
+        startDate: '2026-10-25',
+        endDate: '2026-10-27'
+      });
+      expect(filteredRange).toHaveLength(2);
+      expect(filteredRange.map(r => r.id)).toEqual(['rec-date-1', 'rec-date-2']);
+
+      const filteredStatus = db.filterBusinessRecords(multiDateRecords, {
+        date: '2026-10-29',
+        status: 'pending'
+      });
+      expect(filteredStatus).toHaveLength(1);
+      expect(filteredStatus[0]?.id).toBe('rec-date-4');
+    });
+
+    it('8. provides accessible mobile date picker inputs with standard type="date"', () => {
+      const html = renderToString(
+        <MemoryRouter>
+          <OwnerDashboard
+            initialLoading={false}
+            initialRecords={multiDateRecords}
+          />
+        </MemoryRouter>
+      );
+
+      expect(html).toContain('type="date"');
+      expect(html).toContain('aria-label="Exact date"');
+    });
+
+    it('9. guarantees no timezone-related date shifting occurs across formatting and normalization', () => {
+      // 2026-10-29 should never become 2026-10-28
+      const rawDate = '2026-10-29';
+      expect(db.normalizeDateString(rawDate)).toBe('2026-10-29');
+      expect(db.formatFilterDisplayDate(rawDate)).toBe('29 Oct 2026');
+
+      // ISO string representation
+      const isoDate = '2026-10-29T18:30:00.000Z';
+      expect(db.normalizeDateString(isoDate)).toBe('2026-10-29');
+      expect(db.formatFilterDisplayDate(isoDate)).toBe('29 Oct 2026');
+    });
+
+    it('10. renders empty state when no records match the combined date and search criteria', () => {
+      const html = renderToString(
+        <MemoryRouter>
+          <OwnerDashboard
+            initialLoading={false}
+            initialRecords={multiDateRecords}
+            initialDate="2026-10-29"
+            initialSearchQuery="NonExistentShopName"
+          />
+        </MemoryRouter>
+      );
+
+      expect(html).toContain('No records found');
+      expect(html).toContain('Clear search');
+      expect(html).not.toContain('1dhope Accessories');
+      expect(html).not.toContain('Gamma Mobiles');
+    });
+  });
 });
 
 
