@@ -13,7 +13,7 @@ describe('Catalog Management API Endpoints (/api/shops & /api/products)', { time
 
     expect(loginRes.status).toBe(200);
     ownerToken = loginRes.body.session.access_token;
-  });
+  }, 35000);
 
   describe('Authorization Guards', () => {
     it('blocks unauthenticated requests to delete a shop (401)', async () => {

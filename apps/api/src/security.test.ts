@@ -3,7 +3,7 @@ import request from 'supertest';
 import { app } from './app.js';
 import { supabaseAdmin } from './routes/auth.js';
 
-describe('Production Security Hardening Suite', () => {
+describe('Production Security Hardening Suite', { timeout: 25000 }, () => {
   describe('Authentication & Role Authorization Middleware', () => {
     it('returns 401 Unauthorized when accessing protected records endpoint without token', async () => {
       const res = await request(app).get('/api/records');

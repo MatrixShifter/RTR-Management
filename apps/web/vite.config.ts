@@ -76,19 +76,21 @@ export default defineConfig({
     rollupOptions: {
       output: {
         manualChunks(id: string) {
-          if (id.includes('node_modules')) {
+          const normId = id.replace(/\\/g, '/');
+          if (normId.includes('node_modules/')) {
             if (
-              id.includes('react') || 
-              id.includes('react-dom') || 
-              id.includes('react-router') || 
-              id.includes('scheduler')
+              normId.includes('node_modules/react/') || 
+              normId.includes('node_modules/react-dom/') || 
+              normId.includes('node_modules/react-router/') || 
+              normId.includes('node_modules/react-router-dom/') || 
+              normId.includes('node_modules/scheduler/')
             ) {
               return 'vendor-react';
             }
-            if (id.includes('@supabase')) {
+            if (normId.includes('node_modules/@supabase/')) {
               return 'vendor-supabase';
             }
-            if (id.includes('lucide-react')) {
+            if (normId.includes('node_modules/lucide-react/')) {
               return 'vendor-icons';
             }
           }

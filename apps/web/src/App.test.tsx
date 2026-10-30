@@ -47,9 +47,27 @@ describe('SPA Fallback Routing & Vercel Deployment Configuration', () => {
     const apiRewrite = config.rewrites.find((r: any) => r.source === '/api/(.*)');
     expect(apiRewrite).toBeDefined();
     expect(apiRewrite.destination).toBe('/api/$1');
+
+    // Verify Production Security Headers in apps/web/vercel.json
+    expect(config.headers).toBeDefined();
+    const globalHeader = config.headers.find((h: any) => h.source === '/(.*)');
+    expect(globalHeader).toBeDefined();
+    const csp = globalHeader.headers.find((h: any) => h.key === 'Content-Security-Policy');
+    expect(csp).toBeDefined();
+    expect(csp.value).toContain("default-src 'self'");
+    expect(csp.value).toContain("script-src 'self'");
+    expect(csp.value).toContain("connect-src 'self' https://*.supabase.co wss://*.supabase.co");
+    expect(csp.value).toContain("frame-ancestors 'none'");
+    expect(csp.value).toContain("object-src 'none'");
+
+    const hsts = globalHeader.headers.find((h: any) => h.key === 'Strict-Transport-Security');
+    expect(hsts?.value).toContain('max-age=31536000');
+
+    const xfo = globalHeader.headers.find((h: any) => h.key === 'X-Frame-Options');
+    expect(xfo?.value).toBe('DENY');
   });
 
-  it('verifies root vercel.json preserves API and Web service monorepo routing', () => {
+  it('verifies root vercel.json preserves API and Web service monorepo routing and security headers', () => {
     const rootVercelPath = resolve(__dirname, '../../../vercel.json');
     expect(existsSync(rootVercelPath)).toBe(true);
 
@@ -59,6 +77,12 @@ describe('SPA Fallback Routing & Vercel Deployment Configuration', () => {
 
     const apiRewrite = rootConfig.rewrites?.find((r: any) => r.source === '/api/(.*)');
     expect(apiRewrite?.destination?.service).toBe('api');
+
+    const rootHeader = rootConfig.headers?.find((h: any) => h.source === '/(.*)');
+    expect(rootHeader).toBeDefined();
+    const rootCsp = rootHeader.headers.find((h: any) => h.key === 'Content-Security-Policy');
+    expect(rootCsp).toBeDefined();
+    expect(rootCsp.value).toContain("frame-ancestors 'none'");
   });
 
   it('renders intended NotFound component for unknown routes', () => {

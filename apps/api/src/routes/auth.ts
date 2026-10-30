@@ -522,7 +522,7 @@ authRouter.post('/forgot-password', passwordRecoveryRateLimiter, async (req: Req
  * Securely updates user password using authenticated recovery session token.
  * Validates session against Supabase Auth before modifying password.
  */
-authRouter.post('/reset-password', async (req: Request, res: Response) => {
+authRouter.post('/reset-password', passwordRecoveryRateLimiter, async (req: Request, res: Response) => {
   const authHeader = req.headers.authorization;
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
     return res.status(401).json({

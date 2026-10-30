@@ -362,7 +362,11 @@ export interface RecordPriorityInput {
  * 4. Completed and fully settled: Delivery is complete and outstanding payment is zero.
  */
 export function getRecordPriority(record: RecordPriorityInput): RecordPriorityRank {
-  const deliveryStatus = record.deliveryStatus || 'delivered';
+  const rawStatus = String(record.deliveryStatus ?? (record as any).delivery_status ?? (record as any).status ?? '').toLowerCase();
+  const deliveryStatus: 'delivered' | 'pending' | 'cancelled' = 
+    rawStatus === 'delivered' || rawStatus === 'completed' 
+      ? 'delivered' 
+      : (rawStatus === 'cancelled' ? 'cancelled' : 'pending');
 
   // Resolve total amount from totalAmount or quantity * unitPrice
   let total = Number(record.totalAmount);
@@ -701,10 +705,10 @@ export const SaveBusinessRecordSchema = z.object({
   shopId: z.string().optional().nullable(),
   productName: z.string().min(1, 'Product name is required').max(150),
   productId: z.string().optional().nullable(),
-  quantity: z.number().int('Quantity must be an integer').positive('Quantity must be greater than zero'),
+  quantity: z.number().int('Quantity must be an integer').positive('Quantity must be greater than zero').default(1),
   unitPrice: z.number().nonnegative('Unit price cannot be negative'),
-  deliveryStatus: z.enum(['delivered', 'pending', 'cancelled']),
-  pendingAmount: z.number().nonnegative('Pending amount cannot be negative'),
+  deliveryStatus: z.enum(['delivered', 'pending', 'cancelled']).default('pending'),
+  pendingAmount: z.number().nonnegative('Pending amount cannot be negative').optional(),
   paidAmount: z.number().nonnegative('Paid amount cannot be negative').optional(),
   notes: z.string().max(1000).optional().nullable()
 });

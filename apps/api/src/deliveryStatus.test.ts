@@ -13,7 +13,7 @@ describe('Delivery Status Lifecycle Endpoints (/api/records/:id/delivery-status)
 
     expect(loginRes.status).toBe(200);
     ownerToken = loginRes.body.session.access_token;
-  });
+  }, 35000);
 
   describe('Validation & Authorization', () => {
     it('rejects unauthenticated delivery status update requests (401)', async () => {

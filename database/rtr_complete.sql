@@ -214,8 +214,7 @@ CREATE TABLE IF NOT EXISTS public.deliveries (
     business_id UUID NOT NULL REFERENCES public.businesses(id) ON DELETE CASCADE,
     shop_id UUID NOT NULL REFERENCES public.shops(id) ON DELETE CASCADE,
     delivery_date DATE NOT NULL,
-    delivery_number VARCHAR(50),
-    status VARCHAR(20) NOT NULL DEFAULT 'delivered' CHECK (status IN ('pending', 'delivered', 'cancelled')),
+    status VARCHAR(20) NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'delivered', 'cancelled')),
     total_amount NUMERIC(12, 2) NOT NULL DEFAULT 0.00 CHECK (total_amount >= 0),
     amount_paid NUMERIC(12, 2) NOT NULL DEFAULT 0.00 CHECK (amount_paid >= 0),
     outstanding_amount NUMERIC(12, 2) GENERATED ALWAYS AS (GREATEST(0.00, total_amount - amount_paid)) STORED,
@@ -227,9 +226,11 @@ CREATE TABLE IF NOT EXISTS public.deliveries (
 );
 
 -- Ensure financial columns exist if migrating an existing deliveries table
+ALTER TABLE public.deliveries ALTER COLUMN status SET DEFAULT 'pending';
 ALTER TABLE public.deliveries ADD COLUMN IF NOT EXISTS total_amount NUMERIC(12, 2) NOT NULL DEFAULT 0.00 CHECK (total_amount >= 0);
 ALTER TABLE public.deliveries ADD COLUMN IF NOT EXISTS amount_paid NUMERIC(12, 2) NOT NULL DEFAULT 0.00 CHECK (amount_paid >= 0);
 ALTER TABLE public.deliveries ADD COLUMN IF NOT EXISTS payment_status VARCHAR(20) NOT NULL DEFAULT 'unpaid' CHECK (payment_status IN ('unpaid', 'partially_paid', 'fully_paid'));
+ALTER TABLE public.deliveries ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now());
 
 DO $$ 
 BEGIN
@@ -464,6 +465,7 @@ CREATE INDEX IF NOT EXISTS idx_deliveries_business ON public.deliveries(business
 CREATE INDEX IF NOT EXISTS idx_deliveries_status ON public.deliveries(status);
 CREATE INDEX IF NOT EXISTS idx_deliveries_payment_status ON public.deliveries(payment_status);
 CREATE INDEX IF NOT EXISTS idx_deliveries_shop_date_desc ON public.deliveries(shop_id, delivery_date DESC);
+CREATE INDEX IF NOT EXISTS idx_deliveries_biz_status_date ON public.deliveries(business_id, status, delivery_date DESC);
 
 CREATE INDEX IF NOT EXISTS idx_delivery_items_delivery ON public.delivery_items(delivery_id);
 CREATE INDEX IF NOT EXISTS idx_delivery_items_product ON public.delivery_items(product_id);
@@ -688,7 +690,7 @@ BEGIN
       di.quantity,
       NEW.id,
       false,
-      COALESCE('Wholesale Delivery #' || NEW.delivery_number, 'Wholesale Delivery ' || NEW.id::text),
+      'Wholesale Delivery ' || NEW.id::text,
       NEW.created_by
     FROM public.delivery_items di
     WHERE di.delivery_id = NEW.id;
@@ -853,39 +855,35 @@ $$;
 -- 7.1. Unified Business Records View (Directly maps to the Records Page Ledger)
 CREATE OR REPLACE VIEW public.v_business_records WITH (security_invoker = true) AS
 SELECT
-    di.id AS record_id,
+    COALESCE(di.id, d.id) AS record_id,
     d.id AS delivery_id,
     d.business_id,
     d.delivery_date AS date,
     s.id AS shop_id,
-    s.name AS shop_name,
-    s.code AS shop_code,
+    COALESCE(s.name, 'Direct Wholesale')::VARCHAR(150) AS shop_name,
+    s.code::VARCHAR(30) AS shop_code,
     p.id AS product_id,
-    p.name AS product_name,
-    p.sku AS product_sku,
-    di.quantity,
-    di.unit_price,
-    di.total_price AS total_amount,
-    d.status AS delivery_status,
-    d.amount_paid,
-    d.outstanding_amount AS pending_amount,
-    d.payment_status,
+    COALESCE(p.name, 'Wholesale Product')::VARCHAR(200) AS product_name,
+    p.sku::VARCHAR(50) AS product_sku,
+    COALESCE(di.quantity, 1)::INTEGER AS quantity,
+    COALESCE(di.unit_price, d.total_amount, 0.00)::NUMERIC(12, 2) AS unit_price,
+    COALESCE(di.total_price, d.total_amount, 0.00)::NUMERIC(12, 2) AS total_amount,
+    d.status::VARCHAR(20) AS delivery_status,
+    d.amount_paid::NUMERIC(12, 2) AS amount_paid,
+    d.outstanding_amount::NUMERIC(12, 2) AS pending_amount,
+    d.payment_status::VARCHAR(20) AS payment_status,
     d.notes,
     d.created_at,
     CASE
-        -- 4. Completed and fully settled: delivery is delivered/cancelled and outstanding payment is 0
-        WHEN (d.status IN ('delivered', 'cancelled')) AND d.outstanding_amount <= 0 THEN 4
-        -- 2. Partially completed / partially paid: partial payment received or delivery pending but fully prepaid
-        WHEN (d.amount_paid > 0 AND d.outstanding_amount > 0) OR (d.status = 'pending' AND d.outstanding_amount <= 0) THEN 2
-        -- 3. Delivered but payment pending: delivery is complete, but customer owes full money (unpaid)
-        WHEN d.status = 'delivered' AND d.outstanding_amount > 0 THEN 3
-        -- 1. Pending: incomplete delivery and unpaid balance
+        -- Delivered & cancelled items placed below pending
+        WHEN d.status IN ('delivered', 'cancelled') THEN 2
+        -- Pending (unchecked) deliveries first
         ELSE 1
-    END AS priority_rank
+    END::INTEGER AS priority_rank
 FROM public.deliveries d
-JOIN public.shops s ON s.id = d.shop_id
-JOIN public.delivery_items di ON di.delivery_id = d.id
-JOIN public.products p ON p.id = di.product_id;
+LEFT JOIN public.shops s ON s.id = d.shop_id
+LEFT JOIN public.delivery_items di ON di.delivery_id = d.id
+LEFT JOIN public.products p ON p.id = di.product_id;
 
 -- 7.2. Shop-wise Payment & Outstanding Balances View
 CREATE OR REPLACE VIEW public.v_shop_payment_balances WITH (security_invoker = true) AS

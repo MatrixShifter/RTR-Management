@@ -12,7 +12,7 @@ import {
   getRememberedUsername, 
   setRememberedUsername 
 } from '../../services/rememberUsername.js';
-import type { AuthUser } from '../../services/auth.js';
+import { type AuthUser, signIn } from '../../services/auth.js';
 
 const INCORRECT_CREDENTIALS_MSG = "Incorrect username or password. Please try again.";
 
@@ -52,7 +52,6 @@ export const Login: React.FC<LoginProps> = ({
     setIsLoading(true);
 
     try {
-      const { signIn } = await import('../../services/auth.js');
       const user = await signIn(username, password);
       setRememberedUsername(username, rememberMe);
       onLoginSuccess(user);

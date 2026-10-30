@@ -45,22 +45,65 @@ productsRouter.get('/', requireOwnerAuth, async (req: Request, res: Response) =>
 /**
  * GET /api/products/:id/usage
  * Checks if a product is referenced in any delivery line items, inventory, or audit movements.
+ * Strictly verifies existence and business ownership to prevent cross-tenant enumeration.
  */
 productsRouter.get('/:id/usage', requireOwnerAuth, async (req: Request, res: Response) => {
+  const user = req.user!;
   const productId = req.params.id;
 
   if (!productId) {
     return res.status(400).json({ error: 'Validation Error', message: 'Product ID is required.' });
   }
 
+  if (user.isDemo) {
+    return res.status(200).json({
+      inUse: false,
+      count: 0,
+      details: {
+        deliveryItems: 0,
+        stockMovements: 0,
+        dailyReportItems: 0
+      }
+    });
+  }
+
   try {
+    // 1. Verify existence and cross-tenant ownership
+    const { data: existingProduct, error: prodErr } = await supabaseAdmin
+      .from('products')
+      .select('id, business_id')
+      .eq('id', productId)
+      .maybeSingle();
+
+    if (prodErr) throw prodErr;
+
+    // Cross-tenant IDOR protection: if product exists but belongs to another business, reject with 403
+    if (existingProduct && existingProduct.business_id !== user.businessId) {
+      return res.status(403).json({
+        error: 'Forbidden',
+        message: 'You do not have permission to check usage for this product.'
+      });
+    }
+
+    if (!existingProduct) {
+      return res.status(200).json({
+        inUse: false,
+        count: 0,
+        details: {
+          deliveryItems: 0,
+          stockMovements: 0,
+          dailyReportItems: 0
+        }
+      });
+    }
+
     const [itemRes, moveRes, reportItemRes, countRes, transRes, adjRes] = await Promise.all([
       supabaseAdmin.from('delivery_items').select('id', { count: 'exact', head: true }).eq('product_id', productId),
-      supabaseAdmin.from('stock_movements').select('id', { count: 'exact', head: true }).eq('product_id', productId),
+      supabaseAdmin.from('stock_movements').select('id', { count: 'exact', head: true }).eq('product_id', productId).eq('business_id', user.businessId),
       supabaseAdmin.from('daily_report_items').select('id', { count: 'exact', head: true }).eq('product_id', productId),
-      supabaseAdmin.from('stock_counts').select('id', { count: 'exact', head: true }).eq('product_id', productId),
-      supabaseAdmin.from('stock_transfers').select('id', { count: 'exact', head: true }).eq('product_id', productId),
-      supabaseAdmin.from('stock_adjustments').select('id', { count: 'exact', head: true }).eq('product_id', productId)
+      supabaseAdmin.from('stock_counts').select('id', { count: 'exact', head: true }).eq('product_id', productId).eq('business_id', user.businessId),
+      supabaseAdmin.from('stock_transfers').select('id', { count: 'exact', head: true }).eq('product_id', productId).eq('business_id', user.businessId),
+      supabaseAdmin.from('stock_adjustments').select('id', { count: 'exact', head: true }).eq('product_id', productId).eq('business_id', user.businessId)
     ]);
 
     const totalCount = (itemRes.count || 0) + 

@@ -46,8 +46,24 @@ export async function requireOwnerAuth(req: Request, res: Response, next: NextFu
 
   const token = authHeader.split(' ')[1];
 
-  // Demo token handler
+  // Demo token handler (active only when demo sandbox is enabled)
   if (token && token.startsWith('demo-session-')) {
+    const isDemoEnabled = process.env.NODE_ENV !== 'production' && process.env.DEMO_ENABLED !== 'false';
+    if (!isDemoEnabled) {
+      logSecurityEvent({
+        action: 'API_AUTH_ATTEMPT',
+        category: 'auth_session',
+        status: 'FAILURE',
+        statusCode: 401,
+        correlationId,
+        errorCategory: 'demo_access_disabled'
+      });
+      return res.status(401).json({
+        error: 'Unauthorized',
+        message: 'Demo access is disabled in production.'
+      });
+    }
+
     // If request attempts to write / mutate production data, reject with 403 Forbidden
     if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method)) {
       logSecurityEvent({

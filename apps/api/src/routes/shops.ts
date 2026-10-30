@@ -45,22 +45,69 @@ shopsRouter.get('/', requireOwnerAuth, async (req: Request, res: Response) => {
 /**
  * GET /api/shops/:id/usage
  * Checks if a shop is currently referenced in any delivery, inventory, or audit records.
+ * Strictly verifies existence and business ownership to prevent cross-tenant enumeration.
  */
 shopsRouter.get('/:id/usage', requireOwnerAuth, async (req: Request, res: Response) => {
+  const user = req.user!;
   const shopId = req.params.id;
 
   if (!shopId) {
     return res.status(400).json({ error: 'Validation Error', message: 'Shop ID is required.' });
   }
 
+  if (user.isDemo) {
+    return res.status(200).json({
+      inUse: false,
+      count: 0,
+      details: {
+        deliveries: 0,
+        stockMovements: 0,
+        invoices: 0,
+        dailyReports: 0,
+        transfers: 0
+      }
+    });
+  }
+
   try {
+    // 1. Verify existence and cross-tenant ownership
+    const { data: existingShop, error: shopErr } = await supabaseAdmin
+      .from('shops')
+      .select('id, business_id')
+      .eq('id', shopId)
+      .maybeSingle();
+
+    if (shopErr) throw shopErr;
+
+    // Cross-tenant IDOR protection: if shop exists but belongs to another business, reject with 403
+    if (existingShop && existingShop.business_id !== user.businessId) {
+      return res.status(403).json({
+        error: 'Forbidden',
+        message: 'You do not have permission to check usage for this shop.'
+      });
+    }
+
+    if (!existingShop) {
+      return res.status(200).json({
+        inUse: false,
+        count: 0,
+        details: {
+          deliveries: 0,
+          stockMovements: 0,
+          invoices: 0,
+          dailyReports: 0,
+          transfers: 0
+        }
+      });
+    }
+
     const [delivRes, moveRes, invRes, repRes, transFromRes, transToRes] = await Promise.all([
-      supabaseAdmin.from('deliveries').select('id', { count: 'exact', head: true }).eq('shop_id', shopId),
-      supabaseAdmin.from('stock_movements').select('id', { count: 'exact', head: true }).eq('shop_id', shopId),
-      supabaseAdmin.from('invoices').select('id', { count: 'exact', head: true }).eq('shop_id', shopId),
-      supabaseAdmin.from('daily_reports').select('id', { count: 'exact', head: true }).eq('shop_id', shopId),
-      supabaseAdmin.from('stock_transfers').select('id', { count: 'exact', head: true }).eq('from_shop_id', shopId),
-      supabaseAdmin.from('stock_transfers').select('id', { count: 'exact', head: true }).eq('to_shop_id', shopId)
+      supabaseAdmin.from('deliveries').select('id', { count: 'exact', head: true }).eq('shop_id', shopId).eq('business_id', user.businessId),
+      supabaseAdmin.from('stock_movements').select('id', { count: 'exact', head: true }).eq('shop_id', shopId).eq('business_id', user.businessId),
+      supabaseAdmin.from('invoices').select('id', { count: 'exact', head: true }).eq('shop_id', shopId).eq('business_id', user.businessId),
+      supabaseAdmin.from('daily_reports').select('id', { count: 'exact', head: true }).eq('shop_id', shopId).eq('business_id', user.businessId),
+      supabaseAdmin.from('stock_transfers').select('id', { count: 'exact', head: true }).eq('from_shop_id', shopId).eq('business_id', user.businessId),
+      supabaseAdmin.from('stock_transfers').select('id', { count: 'exact', head: true }).eq('to_shop_id', shopId).eq('business_id', user.businessId)
     ]);
 
     const totalCount = (delivRes.count || 0) + 

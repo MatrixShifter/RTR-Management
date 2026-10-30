@@ -10,6 +10,7 @@ import { ForgotPassword } from './pages/auth/ForgotPassword.js';
 import { ResetPassword } from './pages/auth/ResetPassword.js';
 import { NotFound } from './pages/NotFound.js';
 import { Navbar } from './components/Navbar.js';
+import { supabase, isSupabaseConfigured } from './lib/supabase.js';
 
 // Route-level code splitting & lazy loading for heavy workspace pages
 const OwnerDashboard = lazy(() => import('./pages/owner/OwnerDashboard.js').then(m => ({ default: m.OwnerDashboard })));
@@ -132,7 +133,6 @@ export const AppContent: React.FC = () => {
     isVerifyingRef.current = true;
 
     try {
-      const { supabase, isSupabaseConfigured } = await import('./lib/supabase.js');
       if (isSupabaseConfigured && supabase) {
         // Enforce 2500ms timeout on Supabase session lookup to avoid browser lock freezes
         let session = null;
@@ -339,31 +339,28 @@ export const AppContent: React.FC = () => {
     runInitSession();
 
     let authSub: { unsubscribe: () => void } | null = null;
-    import('./lib/supabase.js').then(({ supabase, isSupabaseConfigured }) => {
-      if (!isMounted) return;
-      if (isSupabaseConfigured && supabase) {
-        const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event: any, session: any) => {
-          if (!isMounted) return;
-          if (event === 'PASSWORD_RECOVERY') return;
-          if (location.pathname.startsWith('/reset-password')) return;
-          if (event === 'SIGNED_OUT') {
-            lastVerifiedTokenRef.current = null;
-            setCurrentUser(null);
-            localStorage.removeItem(STORAGE_USER_KEY);
-            localStorage.removeItem(STORAGE_EXPIRY_KEY);
-          } else if (event === 'SIGNED_IN' && session?.user && session?.access_token) {
-            if (lastVerifiedTokenRef.current !== session.access_token) {
-              runInitSession();
-            }
-          } else if (event === 'TOKEN_REFRESHED' && session?.access_token) {
-            if (lastVerifiedTokenRef.current !== session.access_token) {
-              runInitSession();
-            }
+    if (isSupabaseConfigured && supabase) {
+      const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event: any, session: any) => {
+        if (!isMounted) return;
+        if (event === 'PASSWORD_RECOVERY') return;
+        if (location.pathname.startsWith('/reset-password')) return;
+        if (event === 'SIGNED_OUT') {
+          lastVerifiedTokenRef.current = null;
+          setCurrentUser(null);
+          localStorage.removeItem(STORAGE_USER_KEY);
+          localStorage.removeItem(STORAGE_EXPIRY_KEY);
+        } else if (event === 'SIGNED_IN' && session?.user && session?.access_token) {
+          if (lastVerifiedTokenRef.current !== session.access_token) {
+            runInitSession();
           }
-        });
-        authSub = subscription;
-      }
-    }).catch(() => {});
+        } else if (event === 'TOKEN_REFRESHED' && session?.access_token) {
+          if (lastVerifiedTokenRef.current !== session.access_token) {
+            runInitSession();
+          }
+        }
+      });
+      authSub = subscription;
+    }
 
     return () => {
       isMounted = false;
@@ -430,7 +427,6 @@ export const AppContent: React.FC = () => {
   const handleSignOut = async () => {
     setDemoMode(false);
     try {
-      const { supabase, isSupabaseConfigured } = await import('./lib/supabase.js');
       if (isSupabaseConfigured && supabase) {
         await supabase.auth.signOut();
       }

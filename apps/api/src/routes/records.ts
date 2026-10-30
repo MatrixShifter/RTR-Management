@@ -21,6 +21,7 @@ const supabaseAdmin = createClient(config.SUPABASE_URL, config.SUPABASE_SERVICE_
 /**
  * GET /api/records
  * Returns records for the authenticated Business Owner's business workspace.
+ * Supports server-side pagination with query params (?limit=100&offset=0).
  */
 recordsRouter.get('/', requireOwnerAuth, async (req: Request, res: Response) => {
   const user = req.user!;
@@ -29,13 +30,28 @@ recordsRouter.get('/', requireOwnerAuth, async (req: Request, res: Response) => 
     return res.status(200).json({ records: [], message: 'Demo records are managed in local client sandbox.' });
   }
 
+  const rawLimit = req.query.limit;
+  const rawOffset = req.query.offset;
+  const limit = typeof rawLimit === 'string' && !isNaN(parseInt(rawLimit, 10))
+    ? Math.min(Math.max(1, parseInt(rawLimit, 10)), 1000)
+    : 1000;
+  const offset = typeof rawOffset === 'string' && !isNaN(parseInt(rawOffset, 10))
+    ? Math.max(0, parseInt(rawOffset, 10))
+    : 0;
+
   try {
-    const { data, error } = await supabaseAdmin
+    let query = supabaseAdmin
       .from('v_business_records')
       .select('*')
       .eq('business_id', user.businessId)
       .order('priority_rank', { ascending: true })
       .order('date', { ascending: false });
+
+    if (rawLimit !== undefined || rawOffset !== undefined) {
+      query = query.range(offset, offset + limit - 1);
+    }
+
+    const { data, error } = await query;
 
     if (error) {
       throw error;
@@ -214,7 +230,7 @@ recordsRouter.patch('/:id/delivery-status', requireOwnerAuth, businessMutationRa
     const correlationId = (req.headers['x-correlation-id'] as string);
 
     // 3. Authorization check: must belong to the authenticated owner's business
-    if (existingDelivery.business_id && user.businessId && existingDelivery.business_id !== user.businessId) {
+    if (!existingDelivery.business_id || existingDelivery.business_id !== user.businessId) {
       logSecurityEvent({
         action: 'UNAUTHORIZED_DELIVERY_UPDATE_ATTEMPT',
         category: 'access_control',
@@ -371,7 +387,7 @@ recordsRouter.delete('/:id', requireOwnerAuth, businessMutationRateLimiter, asyn
       });
     }
 
-    if (existingDelivery.business_id && user.businessId && existingDelivery.business_id !== user.businessId) {
+    if (!existingDelivery.business_id || existingDelivery.business_id !== user.businessId) {
       logSecurityEvent({
         action: 'UNAUTHORIZED_DELIVERY_DELETE_ATTEMPT',
         category: 'access_control',

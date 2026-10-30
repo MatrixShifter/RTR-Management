@@ -169,7 +169,6 @@ CREATE TABLE IF NOT EXISTS public.deliveries (
     business_id UUID NOT NULL REFERENCES public.businesses(id) ON DELETE CASCADE,
     shop_id UUID NOT NULL REFERENCES public.shops(id) ON DELETE CASCADE,
     delivery_date DATE NOT NULL,
-    delivery_number VARCHAR(50),
     status VARCHAR(20) NOT NULL DEFAULT 'delivered' CHECK (status IN ('pending', 'delivered', 'cancelled')),
     notes TEXT,
     created_by UUID NOT NULL REFERENCES public.profiles(id),
@@ -538,7 +537,7 @@ BEGIN
       di.quantity,
       NEW.id,
       false,
-      COALESCE('Delivery batch ' || NEW.delivery_number, 'Delivery batch ' || NEW.id::text),
+      'Wholesale Delivery ' || NEW.id::text,
       NEW.created_by
     FROM public.delivery_items di
     WHERE di.delivery_id = NEW.id;

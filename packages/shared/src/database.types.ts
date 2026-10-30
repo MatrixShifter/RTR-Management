@@ -216,7 +216,6 @@ export interface Database {
           business_id: string;
           shop_id: string;
           delivery_date: string;
-          delivery_number: string | null;
           status: 'pending' | 'delivered' | 'cancelled';
           total_amount: number;
           amount_paid: number;
@@ -232,7 +231,6 @@ export interface Database {
           business_id: string;
           shop_id: string;
           delivery_date: string;
-          delivery_number?: string | null;
           status?: 'pending' | 'delivered' | 'cancelled';
           total_amount?: number;
           amount_paid?: number;
@@ -247,7 +245,6 @@ export interface Database {
           business_id?: string;
           shop_id?: string;
           delivery_date?: string;
-          delivery_number?: string | null;
           status?: 'pending' | 'delivered' | 'cancelled';
           total_amount?: number;
           amount_paid?: number;
