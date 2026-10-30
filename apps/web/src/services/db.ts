@@ -630,10 +630,20 @@ export async function ensureAuthenticatedSession(): Promise<string> {
     if (session?.user?.id) {
       return session.user.id;
     }
+
+    // Attempt proactive token refresh if session exists but needs refresh
+    const { data: refreshData, error: refreshErr } = await supabase.auth.refreshSession();
+    if (!refreshErr && refreshData.session?.user?.id) {
+      return refreshData.session.user.id;
+    }
   } catch {
     if (process.env.NODE_ENV !== 'production') {
       console.warn('Could not establish Supabase auth session');
     }
+  }
+
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('rtr:session-expired'));
   }
 
   return 'b46689e9-754e-49b5-b79b-ebc1ee42538f';
@@ -695,6 +705,13 @@ export async function getShops(): Promise<Shop[]> {
             .order('name'),
           6000
         );
+        if (error) {
+          if (error.code === '42501' || (error as any).status === 401) {
+            if (typeof window !== 'undefined') {
+              window.dispatchEvent(new CustomEvent('rtr:session-expired'));
+            }
+          }
+        }
         if (!error && Array.isArray(data)) {
           const nonDemo = data.filter((s: any) => !s.code?.toUpperCase().startsWith('DEMO') && !s.name?.startsWith('DEMO -'));
           const shops: Shop[] = nonDemo.map((s: any) => ({
@@ -1057,6 +1074,13 @@ export async function getProducts(): Promise<Product[]> {
             .order('name'),
           6000
         );
+        if (error) {
+          if (error.code === '42501' || (error as any).status === 401) {
+            if (typeof window !== 'undefined') {
+              window.dispatchEvent(new CustomEvent('rtr:session-expired'));
+            }
+          }
+        }
         if (!error && Array.isArray(data)) {
           const nonDemo = data.filter((p: any) => !p.sku?.toUpperCase().startsWith('DEMO') && !p.name?.startsWith('DEMO -'));
           const localProds = getLocalItem<Product[]>(STORAGE_KEYS.PRODUCTS, []);
@@ -1448,6 +1472,13 @@ export async function getDeliveries(): Promise<DeliveryRecord[]> {
           6000
         );
 
+        if (error) {
+          if (error.code === '42501' || (error as any).status === 401) {
+            if (typeof window !== 'undefined') {
+              window.dispatchEvent(new CustomEvent('rtr:session-expired'));
+            }
+          }
+        }
         if (!error && Array.isArray(data)) {
           const [shops, prods, invoices] = await Promise.all([getShops(), getProducts(), getInvoices()]);
           const shopMap = new Map(shops.map(s => [s.id, s.name]));
@@ -2004,6 +2035,14 @@ export async function getBusinessRecords(filters?: BusinessRecordFilters): Promi
           query,
           6000
         );
+
+        if (viewErr) {
+          if (viewErr.code === '42501' || (viewErr as any).status === 401) {
+            if (typeof window !== 'undefined') {
+              window.dispatchEvent(new CustomEvent('rtr:session-expired'));
+            }
+          }
+        }
 
         if (!viewErr && Array.isArray(viewRecords)) {
           const nonDemo = viewRecords.filter((r: any) => !r.shop_name?.startsWith('[DEMO]') && !r.shop_name?.startsWith('DEMO -'));
@@ -2869,6 +2908,13 @@ export async function getDailyReports(): Promise<DailyReportRecord[]> {
           .select('id, shop_id, report_date, is_zero_sales, status, notes, created_at, daily_report_items(product_id, quantity_sold)')
           .order('report_date', { ascending: false });
 
+        if (error) {
+          if (error.code === '42501' || (error as any).status === 401) {
+            if (typeof window !== 'undefined') {
+              window.dispatchEvent(new CustomEvent('rtr:session-expired'));
+            }
+          }
+        }
         if (!error && Array.isArray(data)) {
           const [shops, prods] = await Promise.all([getShops(), getProducts()]);
           const shopMap = new Map(shops.map(s => [s.id, s.name]));
@@ -3064,6 +3110,13 @@ export async function getStockAudits(): Promise<StockAuditRecord[]> {
           .from('stock_counts')
           .select('id, shop_id, product_id, counted_quantity, expected_quantity, variance, created_at, notes')
           .order('created_at', { ascending: false });
+        if (error) {
+          if (error.code === '42501' || (error as any).status === 401) {
+            if (typeof window !== 'undefined') {
+              window.dispatchEvent(new CustomEvent('rtr:session-expired'));
+            }
+          }
+        }
         if (!error && Array.isArray(data)) {
           const audits: StockAuditRecord[] = data.map((c: any) => ({
             id: c.id,

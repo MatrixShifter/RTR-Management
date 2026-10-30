@@ -300,14 +300,22 @@ export const AppContent: React.FC = () => {
         } else {
           try {
             const parsed = JSON.parse(storedUser);
-            if (parsed && (parsed.role === 'owner' || parsed.role === 'demo' || parsed.isDemo)) {
-              if (parsed.role === 'demo' || parsed.isDemo) {
-                setDemoMode(true);
-              } else {
-                setDemoMode(false);
-              }
+            if (parsed && (parsed.role === 'demo' || parsed.isDemo)) {
+              setDemoMode(true);
               setCurrentUser(parsed);
               setBootstrapError(null);
+            } else if (parsed && parsed.role === 'owner') {
+              // If Supabase is configured but has no active session, owner session has expired
+              if (isSupabaseConfigured && supabase) {
+                localStorage.removeItem(STORAGE_USER_KEY);
+                localStorage.removeItem(STORAGE_EXPIRY_KEY);
+                setCurrentUser(null);
+                warningRef.current('Your session has expired. Please sign in again.');
+              } else {
+                setDemoMode(false);
+                setCurrentUser(parsed);
+                setBootstrapError(null);
+              }
             } else {
               localStorage.removeItem(STORAGE_USER_KEY);
             }
@@ -349,6 +357,9 @@ export const AppContent: React.FC = () => {
           setCurrentUser(null);
           localStorage.removeItem(STORAGE_USER_KEY);
           localStorage.removeItem(STORAGE_EXPIRY_KEY);
+          if (!location.pathname.startsWith('/login') && !location.pathname.startsWith('/forgot-password') && !location.pathname.startsWith('/reset-password')) {
+            navigate('/login', { replace: true });
+          }
         } else if (event === 'SIGNED_IN' && session?.user && session?.access_token) {
           if (lastVerifiedTokenRef.current !== session.access_token) {
             runInitSession();
