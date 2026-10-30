@@ -1942,16 +1942,24 @@ export function formatFilterDisplayDate(dateStr: string): string {
 export function filterBusinessRecords(records: BusinessRecord[], filters?: BusinessRecordFilters): BusinessRecord[] {
   if (!filters) return records;
   const { date, startDate, endDate, shopId, productId, status } = filters;
-  if (!date && !startDate && !endDate && !shopId && !productId && !status) return records;
+  if (!date && !startDate && !endDate && !shopId && !productId && (!status || status === 'all')) return records;
+
+  const normDate = normalizeDateString(date);
+  const normStart = normalizeDateString(startDate);
+  const normEnd = normalizeDateString(endDate);
 
   return records.filter(r => {
     const rDate = normalizeDateString(r.date);
-    if (date && rDate !== normalizeDateString(date)) return false;
-    if (startDate && rDate < normalizeDateString(startDate)) return false;
-    if (endDate && rDate > normalizeDateString(endDate)) return false;
-    if (shopId && r.shopId !== shopId) return false;
-    if (productId && r.productId !== productId) return false;
-    if (status && r.deliveryStatus !== status) return false;
+    if (normDate && rDate !== normDate) return false;
+    if (normStart && normEnd && normStart > normEnd) return false;
+    if (normStart && rDate < normStart) return false;
+    if (normEnd && rDate > normEnd) return false;
+    if (shopId && r.shopId !== shopId && (r as any).shop_id !== shopId) return false;
+    if (productId && r.productId !== productId && (r as any).product_id !== productId) return false;
+    if (status && status !== 'all') {
+      const authStatus = getAuthoritativeDeliveryStatus(r);
+      if (authStatus !== status) return false;
+    }
     return true;
   });
 }

@@ -2676,6 +2676,514 @@ describe('OwnerDashboard Component — Modern UI & Simple Delivery/Pending Manag
       expect(html).not.toContain('Gamma Mobiles');
     });
   });
+
+  describe('Comprehensive Records Filtering & Authoritative Delivery Status Regression Suite (16 Scenarios)', () => {
+    const testShops: db.Shop[] = [
+      { id: 'shop-1', name: '1dhope Accessories', code: 'SHOP-1D', address: 'Main St', phone: '9876543210', isActive: true, assignedEmployees: [] },
+      { id: 'shop-2', name: 'Gamma Mobiles', code: 'SHOP-GM', address: 'Market Rd', phone: '9876543211', isActive: true, assignedEmployees: [] },
+      { id: 'shop-3', name: 'Alpha Telecom', code: 'SHOP-AT', address: 'Cross Rd', phone: '9876543212', isActive: true, assignedEmployees: [] }
+    ];
+
+    const testProducts: db.Product[] = [
+      { id: 'prod-1', name: '65W Fast Charger', sku: 'CHG-65W', category: 'Chargers & Adapters', minStock: 10, unitPrice: 450, isActive: true },
+      { id: 'prod-2', name: 'Matte Screen Guard', sku: 'SCR-MATTE', category: 'Tempered Glass', minStock: 20, unitPrice: 80, isActive: true },
+      { id: 'prod-3', name: 'Wireless Earbuds', sku: 'EAR-WIR', category: 'Earphones & Audio', minStock: 5, unitPrice: 1200, isActive: true }
+    ];
+
+    const regressionRecords: db.BusinessRecord[] = [
+      {
+        id: 'rec-p1',
+        deliveryId: 'del-p1',
+        date: '2026-10-25',
+        shopId: 'shop-1',
+        shopName: '1dhope Accessories',
+        productId: 'prod-1',
+        productName: '65W Fast Charger',
+        productSku: 'CHG-65W',
+        quantity: 10,
+        unitPrice: 450,
+        totalAmount: 4500,
+        deliveryStatus: 'pending',
+        pendingAmount: 4500,
+        createdAt: '2026-10-25T10:00:00Z'
+      },
+      {
+        id: 'rec-p2',
+        deliveryId: 'del-p2',
+        date: '2026-10-27',
+        shopId: 'shop-2',
+        shopName: 'Gamma Mobiles',
+        productId: 'prod-2',
+        productName: 'Matte Screen Guard',
+        productSku: 'SCR-MATTE',
+        quantity: 25,
+        unitPrice: 80,
+        totalAmount: 2000,
+        deliveryStatus: 'pending',
+        pendingAmount: 0,
+        createdAt: '2026-10-27T10:00:00Z'
+      },
+      {
+        id: 'rec-d1',
+        deliveryId: 'del-d1',
+        date: '2026-10-28',
+        shopId: 'shop-1',
+        shopName: '1dhope Accessories',
+        productId: 'prod-2',
+        productName: 'Matte Screen Guard',
+        productSku: 'SCR-MATTE',
+        quantity: 30,
+        unitPrice: 80,
+        totalAmount: 2400,
+        deliveryStatus: 'delivered',
+        pendingAmount: 0,
+        createdAt: '2026-10-28T10:00:00Z'
+      },
+      {
+        id: 'rec-d2-unpaid',
+        deliveryId: 'del-d2',
+        date: '2026-10-29',
+        shopId: 'shop-2',
+        shopName: 'Gamma Mobiles',
+        productId: 'prod-1',
+        productName: '65W Fast Charger',
+        productSku: 'CHG-65W',
+        quantity: 15,
+        unitPrice: 450,
+        totalAmount: 6750,
+        deliveryStatus: 'delivered',
+        pendingAmount: 6750,
+        createdAt: '2026-10-29T10:00:00Z'
+      },
+      {
+        id: 'rec-d3-unpaid',
+        deliveryId: 'del-d3',
+        date: '2026-10-29',
+        shopId: 'shop-3',
+        shopName: 'Alpha Telecom',
+        productId: 'prod-3',
+        productName: 'Wireless Earbuds',
+        productSku: 'EAR-WIR',
+        quantity: 5,
+        unitPrice: 1200,
+        totalAmount: 6000,
+        deliveryStatus: 'delivered',
+        pendingAmount: 3000,
+        createdAt: '2026-10-29T12:00:00Z'
+      },
+      {
+        id: 'rec-cancelled',
+        deliveryId: 'del-c1',
+        date: '2026-10-30',
+        shopId: 'shop-3',
+        shopName: 'Alpha Telecom',
+        productId: 'prod-1',
+        productName: '65W Fast Charger',
+        productSku: 'CHG-65W',
+        quantity: 2,
+        unitPrice: 450,
+        totalAmount: 900,
+        deliveryStatus: 'cancelled',
+        pendingAmount: 0,
+        createdAt: '2026-10-30T10:00:00Z'
+      }
+    ];
+
+    it('Scenario 1: Pending filter shows only pending records and hides delivered/cancelled records', () => {
+      const html = renderToString(
+        <MemoryRouter>
+          <OwnerDashboard
+            initialLoading={false}
+            initialShops={testShops}
+            initialProducts={testProducts}
+            initialRecords={regressionRecords}
+            initialStatusFilter="pending"
+          />
+        </MemoryRouter>
+      );
+
+      // Pending records MUST be rendered
+      expect(html).toContain('25/10/2026'); // rec-p1
+      expect(html).toContain('27/10/2026'); // rec-p2
+
+      // Delivered records (even those with unpaid balance) and Cancelled records MUST NOT be rendered
+      expect(html).not.toContain('28/10/2026'); // rec-d1
+      expect(html).not.toContain('29/10/2026'); // rec-d2-unpaid, rec-d3-unpaid
+      expect(html).not.toContain('30/10/2026'); // rec-cancelled
+      expect(html).not.toContain('Wireless Earbuds'); // rec-d3-unpaid
+
+      // Delivered Items section separator must be hidden entirely
+      expect(html).not.toContain('Delivered Items (moved to bottom)');
+      expect(html).toMatch(/2[\s\S]*?matching[\s\S]*?records/);
+    });
+
+    it('Scenario 2: Delivered filter shows only delivered records and excludes pending/cancelled records', () => {
+      const html = renderToString(
+        <MemoryRouter>
+          <OwnerDashboard
+            initialLoading={false}
+            initialShops={testShops}
+            initialProducts={testProducts}
+            initialRecords={regressionRecords}
+            initialStatusFilter="delivered"
+          />
+        </MemoryRouter>
+      );
+
+      // Delivered records (both fully paid and unpaid) MUST be rendered
+      expect(html).toContain('28/10/2026'); // rec-d1
+      expect(html).toContain('29/10/2026'); // rec-d2-unpaid, rec-d3-unpaid
+      expect(html).toContain('Wireless Earbuds');
+
+      // Pending and Cancelled records MUST NOT be rendered
+      expect(html).not.toContain('25/10/2026'); // rec-p1
+      expect(html).not.toContain('27/10/2026'); // rec-p2
+      expect(html).not.toContain('30/10/2026'); // rec-cancelled
+      expect(html).toMatch(/3[\s\S]*?matching[\s\S]*?records/);
+    });
+
+    it('Scenario 3: All shows all permitted statuses across visual groups', () => {
+      const html = renderToString(
+        <MemoryRouter>
+          <OwnerDashboard
+            initialLoading={false}
+            initialShops={testShops}
+            initialProducts={testProducts}
+            initialRecords={regressionRecords}
+            initialStatusFilter="all"
+          />
+        </MemoryRouter>
+      );
+
+      expect(html).toContain('25/10/2026'); // rec-p1
+      expect(html).toContain('27/10/2026'); // rec-p2
+      expect(html).toContain('28/10/2026'); // rec-d1
+      expect(html).toContain('29/10/2026'); // rec-d2-unpaid, rec-d3-unpaid
+      expect(html).toContain('Delivered Items (moved to bottom)');
+    });
+
+    it('Scenario 4: Pending count equals displayed pending record count (fixes screenshot bug)', () => {
+      const html = renderToString(
+        <MemoryRouter>
+          <OwnerDashboard
+            initialLoading={false}
+            initialShops={testShops}
+            initialProducts={testProducts}
+            initialRecords={regressionRecords}
+            initialStatusFilter="pending"
+          />
+        </MemoryRouter>
+      );
+
+      // Must show exactly 2 matching records, NOT 4!
+      expect(html).toMatch(/2[\s\S]{1,30}matching[\s\S]{1,30}records/);
+      expect(html).not.toMatch(/4[\s\S]{1,30}matching[\s\S]{1,30}records/);
+    });
+
+    it('Scenario 5: Delivered count equals displayed delivered record count', () => {
+      const html = renderToString(
+        <MemoryRouter>
+          <OwnerDashboard
+            initialLoading={false}
+            initialShops={testShops}
+            initialProducts={testProducts}
+            initialRecords={regressionRecords}
+            initialStatusFilter="delivered"
+          />
+        </MemoryRouter>
+      );
+
+      // Exactly 3 delivered records match
+      expect(html).toMatch(/3[\s\S]*?matching[\s\S]*?records/);
+    });
+
+    it('Scenario 6: Exact date filter works correctly without timezone shifts', () => {
+      const html = renderToString(
+        <MemoryRouter>
+          <OwnerDashboard
+            initialLoading={false}
+            initialShops={testShops}
+            initialProducts={testProducts}
+            initialRecords={regressionRecords}
+            initialDate="2026-10-29"
+          />
+        </MemoryRouter>
+      );
+
+      // Only records on 2026-10-29
+      expect(html).toContain('29/10/2026');
+      expect(html).toContain('Wireless Earbuds');
+      expect(html).toContain('6,750');
+      expect(html).not.toContain('25/10/2026');
+      expect(html).not.toContain('27/10/2026');
+      expect(html).not.toContain('28/10/2026');
+      expect(html).toMatch(/2[\s\S]*?matching[\s\S]*?records/);
+    });
+
+    it('Scenario 7: Date range works inclusively across both boundary dates', () => {
+      const html = renderToString(
+        <MemoryRouter>
+          <OwnerDashboard
+            initialLoading={false}
+            initialShops={testShops}
+            initialProducts={testProducts}
+            initialRecords={regressionRecords}
+            initialStartDate="2026-10-25"
+            initialEndDate="2026-10-28"
+          />
+        </MemoryRouter>
+      );
+
+      // Includes 25th (start boundary), 27th, and 28th (end boundary)
+      expect(html).toContain('25/10/2026');
+      expect(html).toContain('27/10/2026');
+      expect(html).toContain('28/10/2026');
+      expect(html).not.toContain('29/10/2026');
+      expect(html).not.toContain('30/10/2026');
+      expect(html).toMatch(/3[\s\S]*?matching[\s\S]*?records/);
+    });
+
+    it('Scenario 8: Search works by shop name and shop code', () => {
+      // By name
+      const htmlName = renderToString(
+        <MemoryRouter>
+          <OwnerDashboard
+            initialLoading={false}
+            initialShops={testShops}
+            initialProducts={testProducts}
+            initialRecords={regressionRecords}
+            initialSearchQuery="Gamma Mobiles"
+          />
+        </MemoryRouter>
+      );
+      expect(htmlName).toContain('Gamma Mobiles');
+      expect(htmlName).toContain('27/10/2026');
+      expect(htmlName).toContain('29/10/2026');
+      expect(htmlName).not.toContain('1dhope Accessories');
+      expect(htmlName).toMatch(/2[\s\S]*?matching[\s\S]*?records/);
+
+      // By shop code
+      const htmlCode = renderToString(
+        <MemoryRouter>
+          <OwnerDashboard
+            initialLoading={false}
+            initialShops={testShops}
+            initialProducts={testProducts}
+            initialRecords={regressionRecords}
+            initialSearchQuery="SHOP-GM"
+          />
+        </MemoryRouter>
+      );
+      expect(htmlCode).toContain('Gamma Mobiles');
+      expect(htmlCode).not.toContain('1dhope Accessories');
+      expect(htmlCode).toMatch(/2[\s\S]*?matching[\s\S]*?records/);
+    });
+
+    it('Scenario 9: Search works by product name and product SKU', () => {
+      // By product name
+      const htmlProd = renderToString(
+        <MemoryRouter>
+          <OwnerDashboard
+            initialLoading={false}
+            initialShops={testShops}
+            initialProducts={testProducts}
+            initialRecords={regressionRecords}
+            initialSearchQuery="Wireless Earbuds"
+          />
+        </MemoryRouter>
+      );
+      expect(htmlProd).toContain('Wireless Earbuds');
+      expect(htmlProd).toContain('Alpha Telecom');
+      expect(htmlProd).not.toContain('1dhope Accessories');
+      expect(htmlProd).toMatch(/1[\s\S]*?matching[\s\S]*?record/);
+
+      // By product SKU
+      const htmlSku = renderToString(
+        <MemoryRouter>
+          <OwnerDashboard
+            initialLoading={false}
+            initialShops={testShops}
+            initialProducts={testProducts}
+            initialRecords={regressionRecords}
+            initialSearchQuery="EAR-WIR"
+          />
+        </MemoryRouter>
+      );
+      expect(htmlSku).toContain('Wireless Earbuds');
+      expect(htmlSku).toContain('Alpha Telecom');
+      expect(htmlSku).toMatch(/1[\s\S]*?matching[\s\S]*?record/);
+    });
+
+    it('Scenario 10: Search + Pending works combined', () => {
+      const html = renderToString(
+        <MemoryRouter>
+          <OwnerDashboard
+            initialLoading={false}
+            initialShops={testShops}
+            initialProducts={testProducts}
+            initialRecords={regressionRecords}
+            initialSearchQuery="1dhope"
+            initialStatusFilter="pending"
+          />
+        </MemoryRouter>
+      );
+
+      // Matches only the pending record for 1dhope on 25 Oct
+      expect(html).toContain('25/10/2026');
+      // Excludes delivered record for 1dhope on 28 Oct
+      expect(html).not.toContain('28/10/2026');
+      // Excludes other shops
+      expect(html).not.toContain('Gamma Mobiles');
+      expect(html).toMatch(/1[\s\S]*?matching[\s\S]*?record/);
+    });
+
+    it('Scenario 11: Date + Delivered works combined', () => {
+      const html = renderToString(
+        <MemoryRouter>
+          <OwnerDashboard
+            initialLoading={false}
+            initialShops={testShops}
+            initialProducts={testProducts}
+            initialRecords={regressionRecords}
+            initialDate="2026-10-29"
+            initialStatusFilter="delivered"
+          />
+        </MemoryRouter>
+      );
+
+      expect(html).toContain('29/10/2026');
+      expect(html).toContain('Wireless Earbuds');
+      expect(html).toContain('6,750');
+      expect(html).not.toContain('25/10/2026');
+      expect(html).toMatch(/2[\s\S]*?matching[\s\S]*?records/);
+    });
+
+    it('Scenario 12: Date range + Search + Pending works combined', () => {
+      const html = renderToString(
+        <MemoryRouter>
+          <OwnerDashboard
+            initialLoading={false}
+            initialShops={testShops}
+            initialProducts={testProducts}
+            initialRecords={regressionRecords}
+            initialStartDate="2026-10-25"
+            initialEndDate="2026-10-28"
+            initialSearchQuery="Fast Charger"
+            initialStatusFilter="pending"
+          />
+        </MemoryRouter>
+      );
+
+      expect(html).toContain('25/10/2026');
+      expect(html).toContain('1dhope Accessories');
+      expect(html).not.toContain('27/10/2026');
+      expect(html).not.toContain('28/10/2026');
+      expect(html).toMatch(/1[\s\S]*?matching[\s\S]*?record/);
+    });
+
+    it('Scenario 13: Clear Filters restores all records', () => {
+      // Direct unit test of db.filterBusinessRecords with active filters vs cleared filters
+      const filtered = db.filterBusinessRecords(regressionRecords, {
+        startDate: '2026-10-25',
+        endDate: '2026-10-27',
+        status: 'pending'
+      });
+      expect(filtered).toHaveLength(2);
+
+      // Cleared filters restores all records
+      const restored = db.filterBusinessRecords(regressionRecords, {});
+      expect(restored).toHaveLength(regressionRecords.length);
+    });
+
+    it('Scenario 14: Pagination does not leak nonmatching records', () => {
+      // 15 total records: 12 delivered and 3 pending
+      const largeSet: db.BusinessRecord[] = [
+        ...regressionRecords,
+        ...Array.from({ length: 9 }).map((_, i) => ({
+          id: `rec-extra-deliv-${i}`,
+          deliveryId: `del-extra-${i}`,
+          date: '2026-10-28',
+          shopId: 'shop-1',
+          shopName: '1dhope Accessories',
+          productId: 'prod-1',
+          productName: 'Extra Delivered Item',
+          quantity: 1,
+          unitPrice: 100,
+          totalAmount: 100,
+          deliveryStatus: 'delivered' as const,
+          pendingAmount: 0,
+          createdAt: `2026-10-28T12:00:0${i}Z`
+        }))
+      ];
+
+      const html = renderToString(
+        <MemoryRouter>
+          <OwnerDashboard
+            initialLoading={false}
+            initialShops={testShops}
+            initialRecords={largeSet}
+            initialStatusFilter="pending"
+            initialCurrentPage={1}
+          />
+        </MemoryRouter>
+      );
+
+      // 2 pending records match
+      expect(html).toMatch(/2[\s\S]*?matching[\s\S]*?records/);
+      expect(html).not.toContain('Extra Delivered Item');
+      expect(html).not.toContain('Delivered Items (moved to bottom)');
+    });
+
+    it('Scenario 15: Changing delivery status updates filter results immediately after confirmation', async () => {
+      let currentStatus: 'pending' | 'delivered' = 'pending';
+      const record: db.BusinessRecord = {
+        id: 'rec-dyn-1',
+        deliveryId: 'del-dyn-1',
+        date: '2026-10-30',
+        shopId: 'shop-1',
+        shopName: '1dhope Accessories',
+        productId: 'prod-1',
+        productName: '65W Fast Charger',
+        quantity: 1,
+        unitPrice: 450,
+        totalAmount: 450,
+        deliveryStatus: currentStatus,
+        pendingAmount: 450,
+        createdAt: '2026-10-30T10:00:00Z'
+      };
+
+      // Under pending filter, it matches initially
+      let result = db.filterBusinessRecords([record], { status: 'pending' });
+      expect(result).toHaveLength(1);
+
+      // Delivery completes
+      const updatedRecord = {
+        ...record,
+        deliveryStatus: 'delivered' as const
+      };
+
+      // Under pending filter, it immediately drops from the results
+      result = db.filterBusinessRecords([updatedRecord], { status: 'pending' });
+      expect(result).toHaveLength(0);
+
+      // Under delivered filter, it immediately appears
+      const deliveredResult = db.filterBusinessRecords([updatedRecord], { status: 'delivered' });
+      expect(deliveredResult).toHaveLength(1);
+    });
+
+    it('Scenario 16: Refreshing the page preserves correct filtering behavior', () => {
+      const filters = {
+        date: '2026-10-29',
+        status: 'delivered' as const
+      };
+
+      const firstLoad = db.filterBusinessRecords(regressionRecords, filters);
+      const reloaded = db.filterBusinessRecords([...regressionRecords], { ...filters });
+
+      expect(firstLoad.map(r => r.id)).toEqual(['rec-d2-unpaid', 'rec-d3-unpaid']);
+      expect(reloaded.map(r => r.id)).toEqual(firstLoad.map(r => r.id));
+    });
+  });
 });
 
 

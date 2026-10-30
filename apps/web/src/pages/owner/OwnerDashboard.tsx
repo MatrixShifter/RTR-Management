@@ -96,6 +96,7 @@ export interface OwnerDashboardProps {
   initialLoading?: boolean;
   initialError?: string | null;
   initialShops?: Shop[];
+  initialProducts?: Product[];
   initialDeliveries?: DeliveryRecord[];
   initialReports?: DailyReportRecord[];
   initialInvoices?: Invoice[];
@@ -116,6 +117,7 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
   initialLoading,
   initialError = null,
   initialShops,
+  initialProducts,
   initialDeliveries,
   initialInvoices,
   initialRecords,
@@ -185,7 +187,7 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
   });
 
   const [shops, setShops] = useState<Shop[]>(initialShops ?? []);
-  const [products, setProducts] = useState<Product[]>([]);
+  const [products, setProducts] = useState<Product[]>(initialProducts ?? []);
   const [isLoading, setIsLoading] = useState(initialLoading ?? (initialShops === undefined && initialRecords === undefined));
   const [error, setError] = useState<string | null>(initialError);
 
@@ -587,10 +589,26 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
     return map;
   }, [shops]);
 
+  const shopCodeMap = useMemo(() => {
+    const map = new Map<string, string>();
+    shops.forEach(s => {
+      if (s.id && s.code) map.set(s.id, s.code.toLowerCase());
+    });
+    return map;
+  }, [shops]);
+
   const productMap = useMemo(() => {
     const map = new Map<string, string>();
     products.forEach(p => {
       if (p.id && p.name) map.set(p.id, p.name);
+    });
+    return map;
+  }, [products]);
+
+  const productSkuMap = useMemo(() => {
+    const map = new Map<string, string>();
+    products.forEach(p => {
+      if (p.id && p.sku) map.set(p.id, p.sku.toLowerCase());
     });
     return map;
   }, [products]);
@@ -622,7 +640,11 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
     return r.productName || '';
   }, [productMap]);
 
-  // Filter records by search query, date (exact or range), shop, product, and status
+  // Unified derived filtering pipeline:
+  // 1. Text search: matches shop name, shop code, product name, product SKU
+  // 2. Dropdown shop/product filters
+  // 3. Exact date or date range filter (inclusive of boundaries, handles start > end)
+  // 4. Authoritative delivery status filter (strictly pending vs delivered vs all)
   const filteredRecords = useMemo(() => {
     const query = searchQuery.trim().toLowerCase();
     const normExact = normalizeDateString(exactDate);
@@ -630,19 +652,21 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
     const normEnd = normalizeDateString(endDate);
 
     return records.filter(r => {
-      // 1. Text Search (matches shop or product)
+      // 1. Text Search (matches shop name, shop code, product name, product SKU)
       if (query) {
         const resolvedShop = getRecordShopName(r).toLowerCase();
         const directShop = (r.shopName || '').toLowerCase();
         const anyRec = r as any;
         const extraShop = (anyRec.shop?.name || anyRec.shop_name || '').toLowerCase();
+        const shopCode = (r.shopId ? shopCodeMap.get(r.shopId) : '') || (anyRec.shopCode || anyRec.shop_code || '').toLowerCase();
 
         const resolvedProduct = getRecordProductName(r).toLowerCase();
         const directProduct = (r.productName || '').toLowerCase();
-        const extraProduct = (anyRec.product?.name || anyRec.product_name || anyRec.productSku || r.productSku || '').toLowerCase();
+        const extraProduct = (anyRec.product?.name || anyRec.product_name || '').toLowerCase();
+        const productSku = (r.productSku || anyRec.product_sku || anyRec.sku || (r.productId ? productSkuMap.get(r.productId) : '') || '').toLowerCase();
 
-        const matchesShop = resolvedShop.includes(query) || directShop.includes(query) || extraShop.includes(query);
-        const matchesProduct = resolvedProduct.includes(query) || directProduct.includes(query) || extraProduct.includes(query);
+        const matchesShop = resolvedShop.includes(query) || directShop.includes(query) || extraShop.includes(query) || shopCode.includes(query);
+        const matchesProduct = resolvedProduct.includes(query) || directProduct.includes(query) || extraProduct.includes(query) || productSku.includes(query);
 
         if (!matchesShop && !matchesProduct) {
           return false;
@@ -678,6 +702,9 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
           return false;
         }
       } else if (dateMode === 'range') {
+        if (normStart && normEnd && normStart > normEnd) {
+          return false;
+        }
         if (normStart && rDate < normStart) {
           return false;
         }
@@ -686,12 +713,17 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
         }
       }
 
-      // 5. Status filter
-      if (statusFilter === 'pending' && !isPendingRecord(r)) {
-        return false;
-      }
-      if (statusFilter === 'delivered' && isPendingRecord(r)) {
-        return false;
+      // 5. Authoritative Delivery Status filter:
+      // Uses the authoritative backend/DB delivery status, NOT unpaid balance or checkbox UI state.
+      const authStatus = getAuthoritativeDeliveryStatus(r);
+      if (statusFilter === 'pending') {
+        if (authStatus !== 'pending') {
+          return false;
+        }
+      } else if (statusFilter === 'delivered') {
+        if (authStatus !== 'delivered') {
+          return false;
+        }
       }
 
       return true;
@@ -709,12 +741,14 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
     getRecordShopName, 
     getRecordProductName,
     shopMap,
-    productMap
+    shopCodeMap,
+    productMap,
+    productSkuMap
   ]);
 
   // --------------------------------------------------------------------------
   // DYNAMIC DELIVERY GROUPING & ORDERING:
-  // - Two dynamically computed groups derived from current records:
+  // - Two dynamically computed groups derived from current filtered records:
   //   1) Pending Deliveries: All records whose authoritative status is Pending.
   //      Sorted newest date first with tie-breakers.
   //   2) Delivered Items: All records whose authoritative status is Delivered.
@@ -726,9 +760,10 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
     const deliveredList: BusinessRecord[] = [];
 
     filteredRecords.forEach(rec => {
-      if (isDelivered(rec)) {
+      const authStatus = getAuthoritativeDeliveryStatus(rec);
+      if (authStatus === 'delivered') {
         deliveredList.push(rec);
-      } else {
+      } else if (authStatus === 'pending') {
         pendingList.push(rec);
       }
     });
@@ -766,11 +801,11 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
   }, [orderedRecords, effectivePage, rowsPerPage]);
 
   const paginatedPending = useMemo(() => {
-    return paginatedRecords.filter(r => !isDelivered(r));
+    return paginatedRecords.filter(r => getAuthoritativeDeliveryStatus(r) === 'pending');
   }, [paginatedRecords]);
 
   const paginatedDelivered = useMemo(() => {
-    return paginatedRecords.filter(r => isDelivered(r));
+    return paginatedRecords.filter(r => getAuthoritativeDeliveryStatus(r) === 'delivered');
   }, [paginatedRecords]);
 
   // Date formatting helpers
