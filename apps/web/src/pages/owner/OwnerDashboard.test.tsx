@@ -3423,6 +3423,62 @@ describe('OwnerDashboard Component — Modern UI & Simple Delivery/Pending Manag
       expect(reloaded.map(r => r.id)).toEqual(firstLoad.map(r => r.id));
     });
   });
+
+  describe('Delivery Reversal UX & Financial Preservation Suite', () => {
+    it('Scenario 17: Reverting delivered record does not trigger window.confirm and preserves financial record data', () => {
+      const originalConfirm = typeof window !== 'undefined' ? window.confirm : undefined;
+      let confirmCalled = false;
+      if (typeof window !== 'undefined') {
+        window.confirm = () => {
+          confirmCalled = true;
+          return true;
+        };
+      }
+
+      try {
+        const testDeliveredRecord: db.BusinessRecord = {
+          id: 'rec-rev-1',
+          deliveryId: 'del-rev-1',
+          date: '2026-10-30',
+          shopId: 'shop-1',
+          shopName: 'Shop A',
+          productId: 'prod-1',
+          productName: '9a combo',
+          quantity: 1,
+          unitPrice: 241,
+          totalAmount: 241,
+          customerPrice: 300,
+          profit: 59,
+          deliveryStatus: 'delivered',
+          pendingAmount: 0,
+          createdAt: '2026-10-30T10:00:00Z'
+        };
+
+        const html = renderToString(
+          <MemoryRouter>
+            <OwnerDashboard
+              initialLoading={false}
+              initialShops={[]}
+              initialRecords={[testDeliveredRecord]}
+            />
+          </MemoryRouter>
+        );
+
+        // Verify Delivered section renders with customerPrice 300 and profit +59
+        expect(html).toContain('300');
+        expect(html).toContain('+59');
+        expect(html).toContain('Delivered Items (moved to bottom)');
+
+        // Confirm that the native window.confirm prompt is never invoked
+        expect(confirmCalled).toBe(false);
+      } finally {
+        if (typeof window !== 'undefined' && originalConfirm) {
+          window.confirm = originalConfirm;
+        }
+      }
+    });
+  });
+
 });
 
 

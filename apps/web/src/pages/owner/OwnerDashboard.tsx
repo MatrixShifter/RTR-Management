@@ -465,13 +465,7 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
     const isCurrentlyDelivered = isDelivered(rec);
 
     if (isCurrentlyDelivered) {
-      // Reverting from Delivered -> Pending
-      const confirmed = window.confirm(
-        `Revert delivery for "${rec.productName}" at "${rec.shopName}" back to Pending?\n\nRecorded Customer Price and Profit will be preserved in audit history.`
-      );
-      if (!confirmed) return;
-
-      // Revert to pending
+      // Revert from Delivered -> Pending directly without unnecessary browser confirm() popup
       await executeDeliveryStatusUpdate(rec, 'pending');
     } else {
       // Transitioning from Pending -> Delivered requires Customer Price entry

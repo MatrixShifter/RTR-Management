@@ -77,11 +77,15 @@ export const RecordEntryDrawer: React.FC<RecordEntryDrawerProps> = ({
   const [selectedShopId, setSelectedShopId] = useState<string>(editingRecord?.shopId || '');
   const [isNewShop, setIsNewShop] = useState<boolean>(!editingRecord?.shopId && shops.length === 0);
   const [customShopName, setCustomShopName] = useState<string>(editingRecord?.shopName || '');
+  const [shopQuery, setShopQuery] = useState<string>(editingRecord?.shopName || '');
+  const [highlightedShopIndex, setHighlightedShopIndex] = useState<number>(-1);
 
   // Product selection or inline creation
   const [selectedProductId, setSelectedProductId] = useState<string>(editingRecord?.productId || '');
   const [isNewProduct, setIsNewProduct] = useState<boolean>(!editingRecord?.productId && products.length === 0);
   const [customProductName, setCustomProductName] = useState<string>(editingRecord?.productName || '');
+  const [productQuery, setProductQuery] = useState<string>(editingRecord?.productName || '');
+  const [highlightedProductIndex, setHighlightedProductIndex] = useState<number>(-1);
 
   // Unit Price (₹)
   // Quantity (Pieces)
@@ -130,16 +134,36 @@ export const RecordEntryDrawer: React.FC<RecordEntryDrawerProps> = ({
     return localProducts.find(p => p.id === selectedProductId);
   }, [localProducts, selectedProductId]);
 
+  // Autocomplete filtered list for shops based on typed query
+  const filteredShops = useMemo(() => {
+    const q = shopQuery.trim().toLowerCase();
+    if (!q) return activeShops;
+    if (selectedShop && shopQuery === selectedShop.name) return activeShops;
+    return activeShops.filter(s => s.name.toLowerCase().includes(q));
+  }, [activeShops, shopQuery, selectedShop]);
+
+  // Autocomplete filtered list for products based on typed query
+  const filteredProducts = useMemo(() => {
+    const q = productQuery.trim().toLowerCase();
+    if (!q) return activeProducts;
+    if (selectedProduct && productQuery === selectedProduct.name) return activeProducts;
+    return activeProducts.filter(p => p.name.toLowerCase().includes(q));
+  }, [activeProducts, productQuery, selectedProduct]);
+
   // Reset form to pristine defaults
   const resetForm = () => {
     setDate(todayStr);
     setSelectedShopId('');
     setIsNewShop(shops.length === 0);
     setCustomShopName('');
+    setShopQuery('');
+    setHighlightedShopIndex(-1);
 
     setSelectedProductId('');
     setIsNewProduct(products.length === 0);
     setCustomProductName('');
+    setProductQuery('');
+    setHighlightedProductIndex(-1);
 
     setQuantity('');
     setAmount('');
@@ -163,10 +187,14 @@ export const RecordEntryDrawer: React.FC<RecordEntryDrawerProps> = ({
       setSelectedShopId(editingRecord.shopId || '');
       setIsNewShop(!editingRecord.shopId);
       setCustomShopName(editingRecord.shopName || '');
+      setShopQuery(editingRecord.shopName || '');
+      setHighlightedShopIndex(-1);
 
       setSelectedProductId(editingRecord.productId || '');
       setIsNewProduct(!editingRecord.productId);
       setCustomProductName(editingRecord.productName || '');
+      setProductQuery(editingRecord.productName || '');
+      setHighlightedProductIndex(-1);
 
       setQuantity(
         editingRecord.quantity !== undefined && editingRecord.quantity !== null && Number(editingRecord.quantity) > 0
@@ -267,32 +295,25 @@ export const RecordEntryDrawer: React.FC<RecordEntryDrawerProps> = ({
     };
   }, [isOpen, isSubmitting, isShopDropdownOpen, isProductDropdownOpen, customShopName, selectedShopId, customProductName, selectedProductId, quantity, amount]);
 
-  // Handle product selection & unit price autofill
-  const handleProductChange = (prodId: string) => {
-    setIsProductDropdownOpen(false);
-    if (prodId === '__manage__') {
-      setIsManageProductsOpen(true);
-      return;
-    }
-    if (prodId === '__new__') {
-      setIsNewProduct(true);
-      setSelectedProductId('');
-    } else {
-      setIsNewProduct(false);
-      setSelectedProductId(prodId);
-      const prod = localProducts.find(p => p.id === prodId);
-      if (prod && prod.unitPrice !== undefined && prod.unitPrice > 0) {
-        if (amount === '') {
-          const qtyNum = typeof quantity === 'number' && quantity > 0 ? quantity : 1;
-          setAmount(qtyNum * prod.unitPrice);
-        }
-      }
+  // Explicit shop selection from autocomplete or options
+  const handleShopSelect = (s: Shop) => {
+    setSelectedShopId(s.id);
+    setShopQuery(s.name);
+    setIsShopDropdownOpen(false);
+    setHighlightedShopIndex(-1);
+    if (validationErrors.shop) {
+      setValidationErrors(prev => {
+        const next = { ...prev };
+        delete next.shop;
+        return next;
+      });
     }
   };
 
-  // Handle shop selection
+  // Handle shop selection from select or action controls
   const handleShopChange = (sId: string) => {
     setIsShopDropdownOpen(false);
+    setHighlightedShopIndex(-1);
     if (sId === '__manage__') {
       setIsManageShopsOpen(true);
       return;
@@ -300,9 +321,73 @@ export const RecordEntryDrawer: React.FC<RecordEntryDrawerProps> = ({
     if (sId === '__new__') {
       setIsNewShop(true);
       setSelectedShopId('');
+      setShopQuery('');
     } else {
       setIsNewShop(false);
       setSelectedShopId(sId);
+      const s = localShops.find(sh => sh.id === sId);
+      setShopQuery(s ? s.name : '');
+    }
+    if (validationErrors.shop) {
+      setValidationErrors(prev => {
+        const next = { ...prev };
+        delete next.shop;
+        return next;
+      });
+    }
+  };
+
+  // Explicit product selection from autocomplete or options
+  const handleProductSelect = (p: Product) => {
+    setSelectedProductId(p.id);
+    setProductQuery(p.name);
+    setIsProductDropdownOpen(false);
+    setHighlightedProductIndex(-1);
+    if (p.unitPrice !== undefined && p.unitPrice > 0) {
+      if (amount === '') {
+        const qtyNum = typeof quantity === 'number' && quantity > 0 ? quantity : 1;
+        setAmount(qtyNum * p.unitPrice);
+      }
+    }
+    if (validationErrors.product) {
+      setValidationErrors(prev => {
+        const next = { ...prev };
+        delete next.product;
+        return next;
+      });
+    }
+  };
+
+  // Handle product selection & unit price autofill
+  const handleProductChange = (prodId: string) => {
+    setIsProductDropdownOpen(false);
+    setHighlightedProductIndex(-1);
+    if (prodId === '__manage__') {
+      setIsManageProductsOpen(true);
+      return;
+    }
+    if (prodId === '__new__') {
+      setIsNewProduct(true);
+      setSelectedProductId('');
+      setProductQuery('');
+    } else {
+      setIsNewProduct(false);
+      setSelectedProductId(prodId);
+      const prod = localProducts.find(p => p.id === prodId);
+      setProductQuery(prod ? prod.name : '');
+      if (prod && prod.unitPrice !== undefined && prod.unitPrice > 0) {
+        if (amount === '') {
+          const qtyNum = typeof quantity === 'number' && quantity > 0 ? quantity : 1;
+          setAmount(qtyNum * prod.unitPrice);
+        }
+      }
+    }
+    if (validationErrors.product) {
+      setValidationErrors(prev => {
+        const next = { ...prev };
+        delete next.product;
+        return next;
+      });
     }
   };
 
@@ -637,35 +722,106 @@ export const RecordEntryDrawer: React.FC<RecordEntryDrawerProps> = ({
 
               {!isNewShop && localShops.length > 0 ? (
                 <div className="relative">
-                  {/* Custom Accessible Trigger matching exact trigger width */}
-                  <button
-                    type="button"
-                    role="combobox"
-                    aria-expanded={isShopDropdownOpen}
-                    aria-haspopup="listbox"
-                    aria-labelledby="shop-name-label"
-                    onClick={() => {
-                      setIsProductDropdownOpen(false);
-                      setIsShopDropdownOpen(prev => !prev);
-                    }}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' || e.key === ' ' || e.key === 'ArrowDown') {
-                        e.preventDefault();
+                  {/* Searchable Autocomplete Input with keyboard & click/touch navigation */}
+                  <div className="relative flex items-center">
+                    <input
+                      type="text"
+                      role="combobox"
+                      aria-expanded={isShopDropdownOpen}
+                      aria-haspopup="listbox"
+                      aria-autocomplete="list"
+                      aria-labelledby="shop-name-label"
+                      placeholder="Select a retail shop..."
+                      value={shopQuery}
+                      onFocus={() => {
                         setIsProductDropdownOpen(false);
-                        setIsShopDropdownOpen(prev => !prev);
-                      }
-                    }}
-                    className={`w-full rounded-xl border px-3.5 py-2.5 text-xs sm:text-sm text-left bg-white flex items-center justify-between transition-colors cursor-pointer focus:outline-none focus:ring-2 focus:ring-[#168BFF] ${
-                      validationErrors.shop ? 'border-rose-400 bg-rose-50/20' : 'border-slate-200 hover:border-slate-300'
-                    }`}
-                  >
-                    <span className={`truncate mr-2 ${selectedShop ? 'text-slate-900 font-medium' : 'text-slate-400'}`}>
-                      {selectedShop ? selectedShop.name : 'Select a retail shop...'}
-                    </span>
-                    <ChevronDown className={`w-4 h-4 text-slate-400 flex-shrink-0 transition-transform duration-200 ${
-                      isShopDropdownOpen ? 'rotate-180 text-[#168BFF]' : ''
-                    }`} />
-                  </button>
+                        setIsShopDropdownOpen(true);
+                      }}
+                      onClick={() => {
+                        setIsProductDropdownOpen(false);
+                        setIsShopDropdownOpen(true);
+                      }}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setShopQuery(val);
+                        setIsProductDropdownOpen(false);
+                        setIsShopDropdownOpen(true);
+                        setHighlightedShopIndex(-1);
+                        // Typing alone never automatically selects or creates a shop
+                        if (selectedShopId) {
+                          setSelectedShopId('');
+                        }
+                        if (validationErrors.shop) {
+                          setValidationErrors(prev => {
+                            const next = { ...prev };
+                            delete next.shop;
+                            return next;
+                          });
+                        }
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'ArrowDown') {
+                          e.preventDefault();
+                          if (!isShopDropdownOpen) {
+                            setIsShopDropdownOpen(true);
+                          } else if (filteredShops.length > 0) {
+                            setHighlightedShopIndex(prev => (prev < filteredShops.length - 1 ? prev + 1 : 0));
+                          }
+                        } else if (e.key === 'ArrowUp') {
+                          e.preventDefault();
+                          if (!isShopDropdownOpen) {
+                            setIsShopDropdownOpen(true);
+                          } else if (filteredShops.length > 0) {
+                            setHighlightedShopIndex(prev => (prev > 0 ? prev - 1 : filteredShops.length - 1));
+                          }
+                        } else if (e.key === 'Enter') {
+                          if (isShopDropdownOpen && highlightedShopIndex >= 0 && filteredShops[highlightedShopIndex]) {
+                            e.preventDefault();
+                            handleShopSelect(filteredShops[highlightedShopIndex]);
+                          }
+                        } else if (e.key === 'Escape') {
+                          setIsShopDropdownOpen(false);
+                        }
+                      }}
+                      className={`w-full rounded-xl border pl-3.5 pr-14 py-2.5 text-xs sm:text-sm text-slate-800 bg-white transition-colors focus:outline-none focus:ring-2 focus:ring-[#168BFF] ${
+                        validationErrors.shop ? 'border-rose-400 bg-rose-50/20' : 'border-slate-200 hover:border-slate-300'
+                      }`}
+                    />
+
+                    {/* Quick Clear & Dropdown Toggle Actions */}
+                    <div className="absolute right-2.5 flex items-center gap-1">
+                      {(selectedShopId || shopQuery) && (
+                        <button
+                          type="button"
+                          aria-label="Clear shop selection"
+                          onClick={() => {
+                            setSelectedShopId('');
+                            setShopQuery('');
+                            setIsShopDropdownOpen(true);
+                            setHighlightedShopIndex(-1);
+                          }}
+                          className="p-1 rounded-md text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors cursor-pointer"
+                          title="Clear selection"
+                        >
+                          <X className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        tabIndex={-1}
+                        aria-label="Toggle shop suggestions"
+                        onClick={() => {
+                          setIsProductDropdownOpen(false);
+                          setIsShopDropdownOpen(prev => !prev);
+                        }}
+                        className="p-1 rounded-md text-slate-400 hover:text-[#168BFF] transition-colors cursor-pointer"
+                      >
+                        <ChevronDown className={`w-4 h-4 transition-transform duration-200 ${
+                          isShopDropdownOpen ? 'rotate-180 text-[#168BFF]' : ''
+                        }`} />
+                      </button>
+                    </div>
+                  </div>
 
                   {/* Hidden Synchronized Native Select for test compatibility & form accessibility */}
                   <select
@@ -685,7 +841,7 @@ export const RecordEntryDrawer: React.FC<RecordEntryDrawerProps> = ({
                     <option value="__manage__">⚙ Manage Shops...</option>
                   </select>
 
-                  {/* Custom Constrained Dropdown Menu: exactly matches trigger width, max 220px height, scrollable */}
+                  {/* Searchable Autocomplete Suggestions Menu */}
                   {isShopDropdownOpen && (
                     <div 
                       role="listbox"
@@ -693,56 +849,47 @@ export const RecordEntryDrawer: React.FC<RecordEntryDrawerProps> = ({
                       className="absolute left-0 right-0 top-full mt-1.5 z-40 w-full max-w-full rounded-xl border border-slate-200 bg-white shadow-xl overflow-hidden py-1 animate-fade-in"
                     >
                       <div className="max-h-[220px] sm:max-h-[240px] overflow-y-auto overscroll-contain divide-y divide-slate-50">
-                        {/* Empty/default unselect option */}
-                        <button
-                          type="button"
-                          role="option"
-                          aria-selected={!selectedShopId}
-                          onClick={() => {
-                            handleShopChange('');
-                            setIsShopDropdownOpen(false);
-                          }}
-                          className={`w-full px-3.5 py-2 text-xs sm:text-sm text-left flex items-center justify-between transition-colors cursor-pointer ${
-                            !selectedShopId ? 'bg-slate-50 text-slate-500 font-medium' : 'text-slate-400 hover:bg-slate-50'
-                          }`}
-                        >
-                          <span>Select a retail shop...</span>
-                          {!selectedShopId && <Check className="w-3.5 h-3.5 text-slate-400 flex-shrink-0 ml-2" />}
-                        </button>
-
-                        {/* Active Shop Options */}
-                        {activeShops.map(s => {
-                          const isSelected = s.id === selectedShopId;
-                          return (
-                            <button
-                              key={s.id}
-                              type="button"
-                              role="option"
-                              aria-selected={isSelected}
-                              onClick={() => {
-                                handleShopChange(s.id);
-                                setIsShopDropdownOpen(false);
-                              }}
-                              className={`w-full px-3.5 py-2.5 text-xs sm:text-sm text-left flex items-center justify-between transition-colors cursor-pointer ${
-                                isSelected 
-                                  ? 'bg-[#EAF4FF] text-[#168BFF] font-semibold' 
-                                  : 'text-slate-700 hover:bg-[#F4F9FF] hover:text-[#168BFF]'
-                              }`}
-                            >
-                              <span className="truncate">{s.name}</span>
-                              {isSelected && <Check className="w-4 h-4 text-[#168BFF] flex-shrink-0 ml-2" />}
-                            </button>
-                          );
-                        })}
+                        {filteredShops.length > 0 ? (
+                          filteredShops.map((s, idx) => {
+                            const isSelected = s.id === selectedShopId;
+                            const isHighlighted = idx === highlightedShopIndex;
+                            return (
+                              <button
+                                key={s.id}
+                                type="button"
+                                role="option"
+                                aria-selected={isSelected}
+                                onMouseDown={(e) => {
+                                  e.preventDefault();
+                                  handleShopSelect(s);
+                                }}
+                                className={`w-full px-3.5 py-2.5 text-xs sm:text-sm text-left flex items-center justify-between transition-colors cursor-pointer ${
+                                  isSelected 
+                                    ? 'bg-[#EAF4FF] text-[#168BFF] font-semibold' 
+                                    : isHighlighted
+                                    ? 'bg-slate-100 text-slate-900 font-medium'
+                                    : 'text-slate-700 hover:bg-[#F4F9FF] hover:text-[#168BFF]'
+                                }`}
+                              >
+                                <span className="truncate">{s.name}</span>
+                                {isSelected && <Check className="w-4 h-4 text-[#168BFF] flex-shrink-0 ml-2" />}
+                              </button>
+                            );
+                          })
+                        ) : (
+                          <div className="px-3.5 py-3 text-xs sm:text-sm text-slate-400 italic text-center">
+                            No matching shop found
+                          </div>
+                        )}
                       </div>
 
                       {/* Dropdown Action Controls */}
                       <div className="border-t border-slate-100 pt-1 mt-1 bg-slate-50/50">
                         <button
                           type="button"
-                          onClick={() => {
+                          onMouseDown={(e) => {
+                            e.preventDefault();
                             handleShopChange('__new__');
-                            setIsShopDropdownOpen(false);
                           }}
                           className="w-full px-3.5 py-2 text-xs sm:text-sm text-left font-medium text-[#168BFF] hover:bg-[#EAF4FF] flex items-center gap-2 cursor-pointer transition-colors"
                         >
@@ -751,9 +898,9 @@ export const RecordEntryDrawer: React.FC<RecordEntryDrawerProps> = ({
                         </button>
                         <button
                           type="button"
-                          onClick={() => {
+                          onMouseDown={(e) => {
+                            e.preventDefault();
                             handleShopChange('__manage__');
-                            setIsShopDropdownOpen(false);
                           }}
                           className="w-full px-3.5 py-2 text-xs sm:text-sm text-left font-medium text-slate-600 hover:bg-slate-100 flex items-center gap-2 cursor-pointer transition-colors"
                         >
@@ -826,35 +973,106 @@ export const RecordEntryDrawer: React.FC<RecordEntryDrawerProps> = ({
 
               {!isNewProduct && localProducts.length > 0 ? (
                 <div className="relative">
-                  {/* Custom Accessible Trigger matching exact trigger width */}
-                  <button
-                    type="button"
-                    role="combobox"
-                    aria-expanded={isProductDropdownOpen}
-                    aria-haspopup="listbox"
-                    aria-labelledby="product-name-label"
-                    onClick={() => {
-                      setIsShopDropdownOpen(false);
-                      setIsProductDropdownOpen(prev => !prev);
-                    }}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' || e.key === ' ' || e.key === 'ArrowDown') {
-                        e.preventDefault();
+                  {/* Searchable Autocomplete Input with keyboard & click/touch navigation */}
+                  <div className="relative flex items-center">
+                    <input
+                      type="text"
+                      role="combobox"
+                      aria-expanded={isProductDropdownOpen}
+                      aria-haspopup="listbox"
+                      aria-autocomplete="list"
+                      aria-labelledby="product-name-label"
+                      placeholder="Select a product..."
+                      value={productQuery}
+                      onFocus={() => {
                         setIsShopDropdownOpen(false);
-                        setIsProductDropdownOpen(prev => !prev);
-                      }
-                    }}
-                    className={`w-full rounded-xl border px-3.5 py-2.5 text-xs sm:text-sm text-left bg-white flex items-center justify-between transition-colors cursor-pointer focus:outline-none focus:ring-2 focus:ring-[#168BFF] ${
-                      validationErrors.product ? 'border-rose-400 bg-rose-50/20' : 'border-slate-200 hover:border-slate-300'
-                    }`}
-                  >
-                    <span className={`truncate mr-2 ${selectedProduct ? 'text-slate-900 font-medium' : 'text-slate-400'}`}>
-                      {selectedProduct ? selectedProduct.name : 'Select a product...'}
-                    </span>
-                    <ChevronDown className={`w-4 h-4 text-slate-400 flex-shrink-0 transition-transform duration-200 ${
-                      isProductDropdownOpen ? 'rotate-180 text-[#168BFF]' : ''
-                    }`} />
-                  </button>
+                        setIsProductDropdownOpen(true);
+                      }}
+                      onClick={() => {
+                        setIsShopDropdownOpen(false);
+                        setIsProductDropdownOpen(true);
+                      }}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setProductQuery(val);
+                        setIsShopDropdownOpen(false);
+                        setIsProductDropdownOpen(true);
+                        setHighlightedProductIndex(-1);
+                        // Typing alone never automatically selects or creates a product
+                        if (selectedProductId) {
+                          setSelectedProductId('');
+                        }
+                        if (validationErrors.product) {
+                          setValidationErrors(prev => {
+                            const next = { ...prev };
+                            delete next.product;
+                            return next;
+                          });
+                        }
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'ArrowDown') {
+                          e.preventDefault();
+                          if (!isProductDropdownOpen) {
+                            setIsProductDropdownOpen(true);
+                          } else if (filteredProducts.length > 0) {
+                            setHighlightedProductIndex(prev => (prev < filteredProducts.length - 1 ? prev + 1 : 0));
+                          }
+                        } else if (e.key === 'ArrowUp') {
+                          e.preventDefault();
+                          if (!isProductDropdownOpen) {
+                            setIsProductDropdownOpen(true);
+                          } else if (filteredProducts.length > 0) {
+                            setHighlightedProductIndex(prev => (prev > 0 ? prev - 1 : filteredProducts.length - 1));
+                          }
+                        } else if (e.key === 'Enter') {
+                          if (isProductDropdownOpen && highlightedProductIndex >= 0 && filteredProducts[highlightedProductIndex]) {
+                            e.preventDefault();
+                            handleProductSelect(filteredProducts[highlightedProductIndex]);
+                          }
+                        } else if (e.key === 'Escape') {
+                          setIsProductDropdownOpen(false);
+                        }
+                      }}
+                      className={`w-full rounded-xl border pl-3.5 pr-14 py-2.5 text-xs sm:text-sm text-slate-800 bg-white transition-colors focus:outline-none focus:ring-2 focus:ring-[#168BFF] ${
+                        validationErrors.product ? 'border-rose-400 bg-rose-50/20' : 'border-slate-200 hover:border-slate-300'
+                      }`}
+                    />
+
+                    {/* Quick Clear & Dropdown Toggle Actions */}
+                    <div className="absolute right-2.5 flex items-center gap-1">
+                      {(selectedProductId || productQuery) && (
+                        <button
+                          type="button"
+                          aria-label="Clear product selection"
+                          onClick={() => {
+                            setSelectedProductId('');
+                            setProductQuery('');
+                            setIsProductDropdownOpen(true);
+                            setHighlightedProductIndex(-1);
+                          }}
+                          className="p-1 rounded-md text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors cursor-pointer"
+                          title="Clear selection"
+                        >
+                          <X className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        tabIndex={-1}
+                        aria-label="Toggle product suggestions"
+                        onClick={() => {
+                          setIsShopDropdownOpen(false);
+                          setIsProductDropdownOpen(prev => !prev);
+                        }}
+                        className="p-1 rounded-md text-slate-400 hover:text-[#168BFF] transition-colors cursor-pointer"
+                      >
+                        <ChevronDown className={`w-4 h-4 transition-transform duration-200 ${
+                          isProductDropdownOpen ? 'rotate-180 text-[#168BFF]' : ''
+                        }`} />
+                      </button>
+                    </div>
+                  </div>
 
                   {/* Hidden Synchronized Native Select for test compatibility & form accessibility */}
                   <select
@@ -874,7 +1092,7 @@ export const RecordEntryDrawer: React.FC<RecordEntryDrawerProps> = ({
                     <option value="__manage__">⚙ Manage Products...</option>
                   </select>
 
-                  {/* Custom Constrained Dropdown Menu: exactly matches trigger width, max 220px height, scrollable */}
+                  {/* Searchable Autocomplete Suggestions Menu */}
                   {isProductDropdownOpen && (
                     <div 
                       role="listbox"
@@ -882,56 +1100,47 @@ export const RecordEntryDrawer: React.FC<RecordEntryDrawerProps> = ({
                       className="absolute left-0 right-0 top-full mt-1.5 z-40 w-full max-w-full rounded-xl border border-slate-200 bg-white shadow-xl overflow-hidden py-1 animate-fade-in"
                     >
                       <div className="max-h-[220px] sm:max-h-[240px] overflow-y-auto overscroll-contain divide-y divide-slate-50">
-                        {/* Empty/default unselect option */}
-                        <button
-                          type="button"
-                          role="option"
-                          aria-selected={!selectedProductId}
-                          onClick={() => {
-                            handleProductChange('');
-                            setIsProductDropdownOpen(false);
-                          }}
-                          className={`w-full px-3.5 py-2 text-xs sm:text-sm text-left flex items-center justify-between transition-colors cursor-pointer ${
-                            !selectedProductId ? 'bg-slate-50 text-slate-500 font-medium' : 'text-slate-400 hover:bg-slate-50'
-                          }`}
-                        >
-                          <span>Select a product...</span>
-                          {!selectedProductId && <Check className="w-3.5 h-3.5 text-slate-400 flex-shrink-0 ml-2" />}
-                        </button>
-
-                        {/* Active Product Options */}
-                        {activeProducts.map(p => {
-                          const isSelected = p.id === selectedProductId;
-                          return (
-                            <button
-                              key={p.id}
-                              type="button"
-                              role="option"
-                              aria-selected={isSelected}
-                              onClick={() => {
-                                handleProductChange(p.id);
-                                setIsProductDropdownOpen(false);
-                              }}
-                              className={`w-full px-3.5 py-2.5 text-xs sm:text-sm text-left flex items-center justify-between transition-colors cursor-pointer ${
-                                isSelected 
-                                  ? 'bg-[#EAF4FF] text-[#168BFF] font-semibold' 
-                                  : 'text-slate-700 hover:bg-[#F4F9FF] hover:text-[#168BFF]'
-                              }`}
-                            >
-                              <span className="truncate">{p.name}</span>
-                              {isSelected && <Check className="w-4 h-4 text-[#168BFF] flex-shrink-0 ml-2" />}
-                            </button>
-                          );
-                        })}
+                        {filteredProducts.length > 0 ? (
+                          filteredProducts.map((p, idx) => {
+                            const isSelected = p.id === selectedProductId;
+                            const isHighlighted = idx === highlightedProductIndex;
+                            return (
+                              <button
+                                key={p.id}
+                                type="button"
+                                role="option"
+                                aria-selected={isSelected}
+                                onMouseDown={(e) => {
+                                  e.preventDefault();
+                                  handleProductSelect(p);
+                                }}
+                                className={`w-full px-3.5 py-2.5 text-xs sm:text-sm text-left flex items-center justify-between transition-colors cursor-pointer ${
+                                  isSelected 
+                                    ? 'bg-[#EAF4FF] text-[#168BFF] font-semibold' 
+                                    : isHighlighted
+                                    ? 'bg-slate-100 text-slate-900 font-medium'
+                                    : 'text-slate-700 hover:bg-[#F4F9FF] hover:text-[#168BFF]'
+                                }`}
+                              >
+                                <span className="truncate">{p.name}</span>
+                                {isSelected && <Check className="w-4 h-4 text-[#168BFF] flex-shrink-0 ml-2" />}
+                              </button>
+                            );
+                          })
+                        ) : (
+                          <div className="px-3.5 py-3 text-xs sm:text-sm text-slate-400 italic text-center">
+                            No matching product found
+                          </div>
+                        )}
                       </div>
 
                       {/* Dropdown Action Controls */}
                       <div className="border-t border-slate-100 pt-1 mt-1 bg-slate-50/50">
                         <button
                           type="button"
-                          onClick={() => {
+                          onMouseDown={(e) => {
+                            e.preventDefault();
                             handleProductChange('__new__');
-                            setIsProductDropdownOpen(false);
                           }}
                           className="w-full px-3.5 py-2 text-xs sm:text-sm text-left font-medium text-[#168BFF] hover:bg-[#EAF4FF] flex items-center gap-2 cursor-pointer transition-colors"
                         >
@@ -940,9 +1149,9 @@ export const RecordEntryDrawer: React.FC<RecordEntryDrawerProps> = ({
                         </button>
                         <button
                           type="button"
-                          onClick={() => {
+                          onMouseDown={(e) => {
+                            e.preventDefault();
                             handleProductChange('__manage__');
-                            setIsProductDropdownOpen(false);
                           }}
                           className="w-full px-3.5 py-2 text-xs sm:text-sm text-left font-medium text-slate-600 hover:bg-slate-100 flex items-center gap-2 cursor-pointer transition-colors"
                         >

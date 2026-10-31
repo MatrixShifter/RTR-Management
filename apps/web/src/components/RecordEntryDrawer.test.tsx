@@ -512,4 +512,59 @@ describe('RecordEntryDrawer Component & Catalog Management Suite', () => {
       expect(html).toContain('+₹700');
     });
   });
+
+  describe('Searchable Autocomplete for Shop and Product Suite', () => {
+    it('renders searchable autocomplete input for Shop Name with accessible attributes and clear button', () => {
+      const html = renderToString(
+        <RecordEntryDrawer
+          isOpen={true}
+          onClose={() => {}}
+          onSuccess={() => {}}
+          shops={mockShops}
+          products={mockProducts}
+        />
+      );
+
+      // Verify input combobox with autocomplete list attribute
+      expect(html).toContain('role="combobox"');
+      expect(html).toContain('aria-autocomplete="list"');
+      expect(html).toContain('placeholder="Select a retail shop..."');
+      expect(html).toContain('placeholder="Select a product..."');
+      expect(html).toContain('+ Register New Shop...');
+      expect(html).toContain('+ Enter New Product...');
+    });
+
+    it('displays pre-selected shop and product in autocomplete inputs when editing record', () => {
+      const html = renderToString(
+        <RecordEntryDrawer
+          isOpen={true}
+          onClose={() => {}}
+          onSuccess={() => {}}
+          shops={mockShops}
+          products={mockProducts}
+          editingRecord={{
+            id: 'rec-autocomplete-edit',
+            deliveryId: 'del-autocomplete-edit',
+            date: '2026-10-30',
+            shopId: 'shop-2',
+            shopName: 'RTR T Nagar',
+            productId: 'prod-2',
+            productName: 'Fast Charger 25W',
+            quantity: 5,
+            unitPrice: 400,
+            totalAmount: 2000,
+            deliveryStatus: 'pending',
+            pendingAmount: 2000,
+            createdAt: '2026-10-30T10:00:00Z'
+          }}
+        />
+      );
+
+      expect(html).toContain('value="RTR T Nagar"');
+      expect(html).toContain('value="Fast Charger 25W"');
+      expect(html).toContain('aria-label="Clear shop selection"');
+      expect(html).toContain('aria-label="Clear product selection"');
+    });
+  });
+
 });
