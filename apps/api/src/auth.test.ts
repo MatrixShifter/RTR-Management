@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import request from 'supertest';
 import { app } from './app.js';
-import { INCORRECT_CREDENTIALS_MSG, RECOVERY_CONFIRMATION_MSG, supabaseAdmin } from './routes/auth.js';
+import { INCORRECT_CREDENTIALS_MSG, RECOVERY_CONFIRMATION_MSG, supabaseAdmin, supabaseAnon } from './routes/auth.js';
 
 describe('Authentication API Endpoints (/api/auth)', { timeout: 25000 }, () => {
   describe('POST /api/auth/login', () => {
@@ -59,14 +59,79 @@ describe('Authentication API Endpoints (/api/auth)', { timeout: 25000 }, () => {
       expect(res.body.user.role).toBe('owner');
     });
 
-    it('strictly denies non-owner / employee accounts from logging in', async () => {
+    it('strictly denies deactivated accounts from logging in with 403', async () => {
+      vi.spyOn(supabaseAnon.auth, 'signInWithPassword').mockResolvedValueOnce({
+        data: {
+          user: { id: 'deactivated-emp-1', email: 'inactive@rtrmobiles.com', user_metadata: {} } as any,
+          session: { access_token: 'fake-token' } as any
+        },
+        error: null
+      });
+
+      vi.spyOn(supabaseAdmin, 'from').mockImplementationOnce(() => ({
+        select: () => ({
+          eq: () => ({
+            maybeSingle: async () => ({
+              data: { business_id: 'biz-1', role: 'employee', is_active: false },
+              error: null
+            })
+          })
+        })
+      } as any));
+
       const res = await request(app)
         .post('/api/auth/login')
-        .send({ username: 'staff@rtrmobiles.com', password: 'password123' });
+        .send({ username: 'inactive@rtrmobiles.com', password: 'password123' });
 
       expect(res.status).toBe(403);
       expect(res.body.success).toBe(false);
-      expect(res.body.message).toBe('Access restricted to Business Owner only.');
+      expect(res.body.message).toContain('Account is deactivated or unauthorized');
+    });
+
+    it('strictly denies employee accounts without assigned active shop with 403', async () => {
+      vi.spyOn(supabaseAnon.auth, 'signInWithPassword').mockResolvedValueOnce({
+        data: {
+          user: { id: 'unassigned-emp-1', email: 'unassigned@rtrmobiles.com', user_metadata: {} } as any,
+          session: { access_token: 'fake-token' } as any
+        },
+        error: null
+      });
+
+      vi.spyOn(supabaseAdmin, 'from').mockImplementation(((table: string) => {
+        if (table === 'business_memberships') {
+          return {
+            select: () => ({
+              eq: () => ({
+                maybeSingle: async () => ({
+                  data: { business_id: 'biz-1', role: 'employee', is_active: true },
+                  error: null
+                })
+              })
+            })
+          } as any;
+        }
+        if (table === 'shop_memberships') {
+          return {
+            select: () => ({
+              eq: () => ({
+                maybeSingle: async () => ({
+                  data: null,
+                  error: null
+                })
+              })
+            })
+          } as any;
+        }
+        return {} as any;
+      }) as any);
+
+      const res = await request(app)
+        .post('/api/auth/login')
+        .send({ username: 'unassigned@rtrmobiles.com', password: 'password123' });
+
+      expect(res.status).toBe(403);
+      expect(res.body.success).toBe(false);
+      expect(res.body.message).toContain('not currently assigned to an active shop');
     });
 
     it('authenticates valid demo account with designated demo credentials into isolated sandbox', async () => {

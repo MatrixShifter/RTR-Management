@@ -19,13 +19,18 @@ const OwnerDashboard = lazy(() => import('./pages/owner/OwnerDashboard.js').then
 const MonthlyShopStatement = lazy(() => import('./pages/owner/MonthlyShopStatement.js').then(m => ({ default: m.MonthlyShopStatement })));
 const IndividualShopStatement = lazy(() => import('./pages/owner/IndividualShopStatement.js').then(m => ({ default: m.IndividualShopStatement })));
 const SettingsPage = lazy(() => import('./pages/owner/Settings.js').then(m => ({ default: m.SettingsPage })));
+const EmployeeDashboard = lazy(() => import('./pages/employee/EmployeeDashboard.js').then(m => ({ default: m.EmployeeDashboard })));
 
 export interface UserState {
   id: string;
   email: string;
   name: string;
-  role: 'owner' | 'demo';
+  username?: string;
+  role: 'owner' | 'demo' | 'employee';
   isDemo?: boolean;
+  assignedShopId?: string;
+  assignedShopName?: string;
+  assignedShopCode?: string;
 }
 
 const STORAGE_USER_KEY = 'rtr_current_user';
@@ -83,7 +88,7 @@ export const AppContent: React.FC = () => {
         const storedExpiry = localStorage.getItem(STORAGE_EXPIRY_KEY);
         if (stored && storedExpiry && Date.now() < parseInt(storedExpiry, 10)) {
           const parsed = JSON.parse(stored);
-          if (parsed && (parsed.role === 'owner' || parsed.role === 'demo' || parsed.isDemo)) {
+          if (parsed && (parsed.role === 'owner' || parsed.role === 'demo' || parsed.role === 'employee' || parsed.isDemo)) {
             return parsed;
           }
         }
@@ -543,23 +548,46 @@ export const AppContent: React.FC = () => {
           )
         }
       >
-        <Route path="/" element={<OwnerDashboard />} />
-        <Route path="/records" element={<OwnerDashboard />} />
-        <Route path="/statements" element={<MonthlyShopStatement />} />
-        <Route path="/statements/shop/:shopId" element={<IndividualShopStatement />} />
-        <Route path="/reports" element={<MonthlyShopStatement />} />
-        <Route path="/settings" element={<SettingsPage currentUser={currentUser!} isOnline={isOnline} onSignOut={handleSignOut} />} />
-        <Route path="/management" element={<SettingsPage currentUser={currentUser!} isOnline={isOnline} onSignOut={handleSignOut} />} />
-        {/* Cleanly redirect legacy navigation links back to central Records ledger */}
-        <Route path="/shops" element={<Navigate to="/records" replace />} />
-        <Route path="/catalog" element={<Navigate to="/records" replace />} />
-        <Route path="/products" element={<Navigate to="/records" replace />} />
-        <Route path="/analytics" element={<Navigate to="/records" replace />} />
-        <Route path="/deliveries" element={<Navigate to="/records" replace />} />
-        <Route path="/stock-ledger" element={<Navigate to="/records" replace />} />
-        <Route path="/payments" element={<Navigate to="/records" replace />} />
-        {/* Redirect legacy employee links to records */}
-        <Route path="/employee" element={<Navigate to="/records" replace />} />
+        {currentUser?.role === 'employee' ? (
+          <>
+            <Route path="/" element={<EmployeeDashboard currentUser={currentUser!} />} />
+            <Route path="/records" element={<EmployeeDashboard currentUser={currentUser!} />} />
+            <Route path="/employee" element={<EmployeeDashboard currentUser={currentUser!} />} />
+            {/* Strictly block employees from owner administration and redirect to shop dashboard */}
+            <Route path="/statements" element={<Navigate to="/records" replace />} />
+            <Route path="/statements/*" element={<Navigate to="/records" replace />} />
+            <Route path="/reports" element={<Navigate to="/records" replace />} />
+            <Route path="/settings" element={<Navigate to="/records" replace />} />
+            <Route path="/management" element={<Navigate to="/records" replace />} />
+            <Route path="/shops" element={<Navigate to="/records" replace />} />
+            <Route path="/catalog" element={<Navigate to="/records" replace />} />
+            <Route path="/products" element={<Navigate to="/records" replace />} />
+            <Route path="/analytics" element={<Navigate to="/records" replace />} />
+            <Route path="/deliveries" element={<Navigate to="/records" replace />} />
+            <Route path="/stock-ledger" element={<Navigate to="/records" replace />} />
+            <Route path="/payments" element={<Navigate to="/records" replace />} />
+          </>
+        ) : (
+          <>
+            <Route path="/" element={<OwnerDashboard />} />
+            <Route path="/records" element={<OwnerDashboard />} />
+            <Route path="/statements" element={<MonthlyShopStatement />} />
+            <Route path="/statements/shop/:shopId" element={<IndividualShopStatement />} />
+            <Route path="/reports" element={<MonthlyShopStatement />} />
+            <Route path="/settings" element={<SettingsPage currentUser={currentUser!} isOnline={isOnline} onSignOut={handleSignOut} />} />
+            <Route path="/management" element={<SettingsPage currentUser={currentUser!} isOnline={isOnline} onSignOut={handleSignOut} />} />
+            {/* Cleanly redirect legacy navigation links back to central Records ledger */}
+            <Route path="/shops" element={<Navigate to="/records" replace />} />
+            <Route path="/catalog" element={<Navigate to="/records" replace />} />
+            <Route path="/products" element={<Navigate to="/records" replace />} />
+            <Route path="/analytics" element={<Navigate to="/records" replace />} />
+            <Route path="/deliveries" element={<Navigate to="/records" replace />} />
+            <Route path="/stock-ledger" element={<Navigate to="/records" replace />} />
+            <Route path="/payments" element={<Navigate to="/records" replace />} />
+            {/* Redirect legacy employee links to records */}
+            <Route path="/employee" element={<Navigate to="/records" replace />} />
+          </>
+        )}
       </Route>
 
       {/* 3. HTTP Status and Error Showcase Routes */}

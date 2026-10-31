@@ -1,25 +1,17 @@
 import { Router, Request, Response } from 'express';
-import { createClient } from '@supabase/supabase-js';
 import { isDemoShop } from '@crimpston/shared';
-import { requireOwnerAuth } from '../middleware/auth.js';
+import { requireAuth, requireOwnerAuth } from '../middleware/auth.js';
 import { businessMutationRateLimiter } from '../middleware/rateLimiter.js';
 import { logSecurityEvent } from '../logger.js';
-import { config } from '../config.js';
+import { supabaseAdmin } from '../supabase.js';
 
 export const shopsRouter = Router();
-
-const supabaseAdmin = createClient(config.SUPABASE_URL, config.SUPABASE_SERVICE_ROLE_KEY, {
-  auth: {
-    persistSession: false,
-    autoRefreshToken: false
-  }
-});
 
 /**
  * GET /api/shops
  * Returns list of retail partner shops for the authenticated business.
  */
-shopsRouter.get('/', requireOwnerAuth, async (req: Request, res: Response) => {
+shopsRouter.get('/', requireAuth, async (req: Request, res: Response) => {
   const user = req.user!;
 
   if (user.isDemo) {
@@ -27,11 +19,21 @@ shopsRouter.get('/', requireOwnerAuth, async (req: Request, res: Response) => {
   }
 
   try {
-    const { data, error } = await supabaseAdmin
+    let query = supabaseAdmin
       .from('shops')
       .select('id, name, code, address, phone, is_active, created_at')
       .eq('business_id', user.businessId)
       .order('name');
+
+    // Strict Employee Scoping: Employee only sees their assigned shop
+    if (user.role === 'employee') {
+      if (!user.assignedShopId) {
+        return res.status(403).json({ error: 'Forbidden', message: 'No active assigned shop.' });
+      }
+      query = query.eq('id', user.assignedShopId);
+    }
+
+    const { data, error } = await query;
 
     if (error) throw error;
     const genuineShops = (data || []).filter((s: any) => !isDemoShop(s));

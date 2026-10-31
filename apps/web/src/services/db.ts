@@ -26,6 +26,8 @@ import {
   calculateRecordProfit,
   isDemoShop,
   isDemoProduct,
+  type EmployeeRecord,
+  type CreateEmployeeInput,
 } from '@crimpston/shared';
 import { supabase, isSupabaseConfigured } from '../lib/supabase.js';
 import {
@@ -688,6 +690,25 @@ async function getBusinessId(): Promise<string> {
     }
   }
   return DEFAULT_BUSINESS_ID;
+}
+
+export function getCurrentUserFromStorage(): {
+  id?: string;
+  email?: string;
+  name?: string;
+  role?: string;
+  assignedShopId?: string;
+  assignedShopName?: string;
+} | null {
+  try {
+    if (typeof localStorage !== 'undefined') {
+      const stored = localStorage.getItem('rtr_current_user');
+      if (stored) {
+        return JSON.parse(stored);
+      }
+    }
+  } catch {}
+  return null;
 }
 
 async function getCurrentUserId(): Promise<string> {
@@ -2132,6 +2153,10 @@ export function filterBusinessRecords(records: BusinessRecord[], filters?: Busin
 }
 
 export async function getBusinessRecords(filters?: BusinessRecordFilters): Promise<BusinessRecord[]> {
+  const currentUser = getCurrentUserFromStorage();
+  if (currentUser?.role === 'employee' && currentUser.assignedShopId) {
+    filters = { ...filters, shopId: currentUser.assignedShopId };
+  }
   const cacheKey = filters 
     ? `business_records_${JSON.stringify(filters)}`
     : 'business_records';
@@ -4302,3 +4327,105 @@ export async function getShopTimelineEvents(
   return events.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
 }
 
+
+// ----------------------------------------------------
+// EMPLOYEE MANAGEMENT (Owner Only)
+// ----------------------------------------------------
+export async function getEmployees(): Promise<EmployeeRecord[]> {
+  try {
+    const token = await getValidAuthToken();
+    const headers: Record<string, string> = { 'Accept': 'application/json' };
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`;
+    }
+    const res = await fetch('/api/employees', { headers });
+    if (!res.ok) {
+      throw new Error(`Failed to fetch employees: HTTP ${res.status}`);
+    }
+    const data = await res.json();
+    return data.employees || [];
+  } catch (err) {
+    console.error('getEmployees error:', err);
+    return [];
+  }
+}
+
+export async function createEmployee(input: CreateEmployeeInput): Promise<{ success: boolean; message: string; employee?: EmployeeRecord }> {
+  const token = await getValidAuthToken();
+  const headers: Record<string, string> = { 
+    'Content-Type': 'application/json',
+    'Accept': 'application/json' 
+  };
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+  const res = await fetch('/api/employees', {
+    method: 'POST',
+    headers,
+    body: JSON.stringify(input)
+  });
+  const data = await res.json();
+  if (!res.ok) {
+    throw new Error(data.message || 'Failed to create employee');
+  }
+  return data;
+}
+
+export async function reassignEmployeeShop(id: string, shopId: string): Promise<{ success: boolean; message: string }> {
+  const token = await getValidAuthToken();
+  const headers: Record<string, string> = { 
+    'Content-Type': 'application/json',
+    'Accept': 'application/json' 
+  };
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+  const res = await fetch(`/api/employees/${id}/shop`, {
+    method: 'PATCH',
+    headers,
+    body: JSON.stringify({ shopId })
+  });
+  const data = await res.json();
+  if (!res.ok) {
+    throw new Error(data.message || 'Failed to reassign shop');
+  }
+  return data;
+}
+
+export async function toggleEmployeeStatus(id: string, isActive: boolean): Promise<{ success: boolean; message: string }> {
+  const token = await getValidAuthToken();
+  const headers: Record<string, string> = { 
+    'Content-Type': 'application/json',
+    'Accept': 'application/json' 
+  };
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+  const res = await fetch(`/api/employees/${id}/status`, {
+    method: 'PATCH',
+    headers,
+    body: JSON.stringify({ isActive })
+  });
+  const data = await res.json();
+  if (!res.ok) {
+    throw new Error(data.message || 'Failed to update employee status');
+  }
+  return data;
+}
+
+export async function revokeEmployeeAccess(id: string): Promise<{ success: boolean; message: string }> {
+  const token = await getValidAuthToken();
+  const headers: Record<string, string> = { 'Accept': 'application/json' };
+  if (token) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
+  const res = await fetch(`/api/employees/${id}`, {
+    method: 'DELETE',
+    headers
+  });
+  const data = await res.json();
+  if (!res.ok) {
+    throw new Error(data.message || 'Failed to revoke employee access');
+  }
+  return data;
+}

@@ -9,8 +9,11 @@ export interface AuthUser {
   email: string;
   username: string;
   name: string;
-  role: 'owner' | 'demo';
+  role: 'owner' | 'demo' | 'employee';
   isDemo?: boolean;
+  assignedShopId?: string;
+  assignedShopName?: string;
+  assignedShopCode?: string;
 }
 
 export const INCORRECT_CREDENTIALS_MSG = "Incorrect username or password. Please try again.";
@@ -157,11 +160,43 @@ export async function signIn(username: string, password: string): Promise<AuthUs
 
       const { data: membership } = await supabase
         .from('business_memberships')
-        .select('role')
+        .select('business_id, role, is_active')
         .eq('user_id', authData.user.id)
         .maybeSingle();
 
-      if (membership?.role !== 'owner') {
+      if (!membership || !membership.is_active) {
+        await supabase.auth.signOut().catch(() => {});
+        throw new Error('Account is deactivated or unauthorized. Please contact your manager.');
+      }
+
+      if (membership.role === 'employee') {
+        const { data: sm } = await supabase
+          .from('shop_memberships')
+          .select('shop_id, shops(id, name, code, is_active)')
+          .eq('user_id', authData.user.id)
+          .maybeSingle();
+
+        const shop = (sm as any)?.shops;
+        if (!sm || !shop || !shop.is_active) {
+          await supabase.auth.signOut().catch(() => {});
+          throw new Error('Your employee account is not currently assigned to an active shop. Please contact your manager.');
+        }
+
+        setDemoMode(false);
+        return {
+          id: authData.user.id,
+          email: authData.user.email || email,
+          username: cleanUsername,
+          name: authData.user.user_metadata?.full_name || 'Shop Staff',
+          role: 'employee',
+          isDemo: false,
+          assignedShopId: sm.shop_id,
+          assignedShopName: shop.name,
+          assignedShopCode: shop.code
+        };
+      }
+
+      if (membership.role !== 'owner') {
         await supabase.auth.signOut().catch(() => {});
         throw new Error(OWNER_ONLY_ACCESS_MSG);
       }

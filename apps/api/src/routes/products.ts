@@ -1,25 +1,19 @@
 import { Router, Request, Response } from 'express';
-import { createClient } from '@supabase/supabase-js';
+import { supabaseAdmin } from '../supabase.js';
 import { isDemoProduct } from '@crimpston/shared';
-import { requireOwnerAuth } from '../middleware/auth.js';
+import { requireAuth, requireOwnerAuth } from '../middleware/auth.js';
 import { businessMutationRateLimiter } from '../middleware/rateLimiter.js';
 import { logSecurityEvent } from '../logger.js';
-import { config } from '../config.js';
+
 
 export const productsRouter = Router();
 
-const supabaseAdmin = createClient(config.SUPABASE_URL, config.SUPABASE_SERVICE_ROLE_KEY, {
-  auth: {
-    persistSession: false,
-    autoRefreshToken: false
-  }
-});
 
 /**
  * GET /api/products
  * Returns products catalog for the authenticated business.
  */
-productsRouter.get('/', requireOwnerAuth, async (req: Request, res: Response) => {
+productsRouter.get('/', requireAuth, async (req: Request, res: Response) => {
   const user = req.user!;
 
   if (user.isDemo) {

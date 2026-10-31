@@ -777,6 +777,38 @@ export const SettlePaymentSchema = z.object({
 });
 export type SettlePaymentSchemaType = z.infer<typeof SettlePaymentSchema>;
 
+// Employee Account & Shop Assignment Schemas
+export const CreateEmployeeSchema = z.object({
+  name: z.string().trim().min(1, 'Employee name is required').max(150),
+  email: z.string().trim().email('Valid email is required').toLowerCase(),
+  username: z.string().trim().min(3, 'Username must be at least 3 characters').max(60).optional(),
+  shopId: z.string().uuid('Valid shop ID is required')
+});
+export type CreateEmployeeInput = z.infer<typeof CreateEmployeeSchema>;
+
+export const UpdateEmployeeShopSchema = z.object({
+  shopId: z.string().uuid('Valid shop ID is required')
+});
+export type UpdateEmployeeShopInput = z.infer<typeof UpdateEmployeeShopSchema>;
+
+export const UpdateEmployeeStatusSchema = z.object({
+  isActive: z.boolean()
+});
+export type UpdateEmployeeStatusInput = z.infer<typeof UpdateEmployeeStatusSchema>;
+
+export interface EmployeeRecord {
+  id: string;
+  name: string;
+  email: string;
+  username?: string;
+  role: 'employee';
+  isActive: boolean;
+  assignedShopId: string;
+  assignedShopName: string;
+  assignedShopCode: string;
+  createdAt: string;
+}
+
 // Database Schema Types
 export * from './database.types.js';
 

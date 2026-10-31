@@ -13,15 +13,17 @@ import {
 import { OfflineSyncIndicator } from './OfflineSyncIndicator.js';
 
 interface NavbarProps {
-  userRole?: 'owner' | 'demo';
+  userRole?: 'owner' | 'demo' | 'employee';
   userName?: string;
   userId?: string | null;
+  assignedShopName?: string;
   isOnline?: boolean;
   onSignOut: () => void;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
   userRole = 'owner',
+  assignedShopName,
   userName = 'Business Owner',
   userId = null,
   isOnline = true,
@@ -71,12 +73,14 @@ export const Navbar: React.FC<NavbarProps> = ({
     window.addEventListener('click', handleOutsideClick);
     return () => window.removeEventListener('click', handleOutsideClick);
   }, []);
-
   // Primary navigation links for the simplified Records ledger workspace
-  const primaryOwnerLinks = [
-    { label: 'Records', to: '/', icon: ClipboardList, alias: 'Records' },
-    { label: 'Statements', to: '/statements', icon: FileSpreadsheet, alias: 'Reports' }
-  ];
+  const isEmployee = userRole === 'employee';
+  const primaryOwnerLinks = isEmployee
+    ? [{ label: 'My Shop Records', to: '/', icon: ClipboardList, alias: 'Records' }]
+    : [
+        { label: 'Records', to: '/', icon: ClipboardList, alias: 'Records' },
+        { label: 'Statements', to: '/statements', icon: FileSpreadsheet, alias: 'Reports' }
+      ];
 
   const isCurrentActive = (to: string) => {
     if (to === '/' && (location.pathname === '/' || location.pathname === '/records')) return true;
@@ -172,7 +176,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                   <div className="px-3.5 py-2 border-b border-[#1F3A60]/80">
                     <p className="font-semibold text-white truncate">{userName || 'Business Owner'}</p>
                     <span className="inline-block mt-1 px-2 py-0.5 rounded text-[10px] font-bold bg-[#168BFF]/20 text-[#7DD3FC]">
-                      {userRole.toUpperCase()}
+                      {userRole === 'employee' ? (assignedShopName ? `SHOP EMPLOYEE • ${assignedShopName}` : 'SHOP EMPLOYEE') : userRole.toUpperCase()}
                     </span>
                   </div>
                   <div className="py-1">
@@ -222,7 +226,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                 <div className="absolute right-0 mt-1 w-52 bg-[#0C1E38] text-white border border-[#1F3A60] rounded-xl shadow-xl py-2 z-50 animate-fade-in text-xs">
                   <div className="px-3 py-1.5 border-b border-[#1F3A60]/80">
                     <p className="font-semibold text-white truncate">{userName || 'Business Owner'}</p>
-                    <span className="text-[10px] text-[#7DD3FC] font-semibold">{userRole.toUpperCase()}</span>
+                    <span className="text-[10px] text-[#7DD3FC] font-semibold">{userRole === 'employee' ? (assignedShopName ? `SHOP EMPLOYEE • ${assignedShopName}` : 'SHOP EMPLOYEE') : userRole.toUpperCase()}</span>
                   </div>
                   <Link
                     to="/settings"
@@ -295,7 +299,7 @@ export const Navbar: React.FC<NavbarProps> = ({
 
         {/* Hidden screen-reader helpers to preserve accessibility & test assertions */}
         <div className="sr-only">
-          <span>{userRole.toUpperCase()}</span>
+          <span>{userRole === 'employee' ? (assignedShopName ? `SHOP EMPLOYEE • ${assignedShopName}` : 'SHOP EMPLOYEE') : userRole.toUpperCase()}</span>
           <span>Logout</span>
           <span>System connected and live</span>
           <span>Live</span>
@@ -358,7 +362,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                   <div className="flex items-center justify-between gap-1">
                     <span className="truncate font-semibold text-xs text-white max-w-[120px]">{userName}</span>
                     <span className="text-[9px] font-bold px-1.5 py-0.5 rounded uppercase tracking-wider bg-blue-400/20 text-blue-300">
-                      {userRole.toUpperCase()}
+                      {userRole === 'employee' ? (assignedShopName ? `SHOP EMPLOYEE • ${assignedShopName}` : 'SHOP EMPLOYEE') : userRole.toUpperCase()}
                     </span>
                   </div>
                   <div className="flex items-center gap-1.5 text-[10px] text-slate-400 mt-0.5">

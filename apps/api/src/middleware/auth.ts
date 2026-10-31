@@ -1,21 +1,15 @@
 import { Request, Response, NextFunction } from 'express';
-import { createClient } from '@supabase/supabase-js';
-import { config } from '../config.js';
 import { logSecurityEvent } from '../logger.js';
-
-const supabaseAdmin = createClient(config.SUPABASE_URL, config.SUPABASE_SERVICE_ROLE_KEY, {
-  auth: {
-    persistSession: false,
-    autoRefreshToken: false
-  }
-});
+import { supabaseAdmin } from '../supabase.js';
 
 export interface AuthenticatedUser {
   id: string;
   email?: string;
   businessId: string;
-  role: 'owner' | 'demo';
+  role: 'owner' | 'employee' | 'demo';
   isDemo?: boolean;
+  assignedShopId?: string;
+  assignedShopName?: string;
 }
 
 declare global {
@@ -26,7 +20,10 @@ declare global {
   }
 }
 
-export async function requireOwnerAuth(req: Request, res: Response, next: NextFunction) {
+/**
+ * Universal authentication middleware verifying token and resolving role (owner or employee).
+ */
+export async function requireAuth(req: Request, res: Response, next: NextFunction) {
   const correlationId = (req.headers['x-correlation-id'] as string);
   const authHeader = req.headers.authorization;
   if (!authHeader || !authHeader.startsWith('Bearer ')) {
@@ -64,7 +61,6 @@ export async function requireOwnerAuth(req: Request, res: Response, next: NextFu
       });
     }
 
-    // If request attempts to write / mutate production data, reject with 403 Forbidden
     if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method)) {
       logSecurityEvent({
         action: 'DEMO_MUTATION_BLOCKED',
@@ -146,30 +142,76 @@ export async function requireOwnerAuth(req: Request, res: Response, next: NextFu
       .eq('user_id', user.id)
       .maybeSingle();
 
-    if (memError || !membership || membership.role !== 'owner' || !membership.is_active) {
+    if (memError || !membership || !membership.is_active) {
       logSecurityEvent({
         action: 'UNAUTHORIZED_ROLE_ACCESS',
         category: 'access_control',
         status: 'BLOCKED',
         statusCode: 403,
         correlationId,
-        errorCategory: 'unauthorized_role'
+        errorCategory: 'unauthorized_or_inactive'
       });
       return res.status(403).json({
         error: 'Forbidden',
-        message: 'Access denied: Business Owner privileges required.'
+        message: 'Account is deactivated or unauthorized. Please contact your manager.'
       });
     }
 
-    req.user = {
-      id: user.id,
-      email: user.email,
-      businessId: membership.business_id,
-      role: 'owner',
-      isDemo: false
-    };
+    if (membership.role === 'owner') {
+      req.user = {
+        id: user.id,
+        email: user.email,
+        businessId: membership.business_id,
+        role: 'owner',
+        isDemo: false
+      };
+      return next();
+    }
 
-    return next();
+    if (membership.role === 'employee') {
+      // Resolve assigned shop
+      const { data: shopMember, error: shopErr } = await supabaseAdmin
+        .from('shop_memberships')
+        .select('shop_id, shops!inner(id, name, code, is_active, business_id)')
+        .eq('user_id', user.id)
+        .maybeSingle();
+
+      if (
+        shopErr || 
+        !shopMember || 
+        !(shopMember as any).shops?.is_active ||
+        (shopMember as any).shops?.business_id !== membership.business_id
+      ) {
+        logSecurityEvent({
+          action: 'EMPLOYEE_NO_ACTIVE_SHOP',
+          category: 'access_control',
+          status: 'BLOCKED',
+          statusCode: 403,
+          correlationId,
+          errorCategory: 'no_assigned_shop'
+        });
+        return res.status(403).json({
+          error: 'Forbidden',
+          message: 'Your employee account is not currently assigned to an active shop. Please contact your manager.'
+        });
+      }
+
+      req.user = {
+        id: user.id,
+        email: user.email,
+        businessId: membership.business_id,
+        role: 'employee',
+        isDemo: false,
+        assignedShopId: shopMember.shop_id,
+        assignedShopName: (shopMember as any).shops?.name
+      };
+      return next();
+    }
+
+    return res.status(403).json({
+      error: 'Forbidden',
+      message: 'Unknown or invalid role.'
+    });
   } catch {
     logSecurityEvent({
       action: 'API_AUTH_ERROR',
@@ -184,4 +226,42 @@ export async function requireOwnerAuth(req: Request, res: Response, next: NextFu
       message: 'Authentication verification failed.'
     });
   }
+}
+
+/**
+ * Strict owner authorization middleware ensuring only Business Owners or demo can proceed.
+ */
+export async function requireOwnerAuth(req: Request, res: Response, next: NextFunction) {
+  return requireAuth(req, res, () => {
+    if (req.user?.role !== 'owner' && req.user?.role !== 'demo') {
+      logSecurityEvent({
+        action: 'UNAUTHORIZED_ROLE_ACCESS',
+        category: 'access_control',
+        status: 'BLOCKED',
+        statusCode: 403,
+        correlationId: (req.headers['x-correlation-id'] as string),
+        errorCategory: 'unauthorized_role'
+      });
+      return res.status(403).json({
+        error: 'Forbidden',
+        message: 'Access denied: Business Owner privileges required.'
+      });
+    }
+    return next();
+  });
+}
+
+/**
+ * Strict shop employee authorization middleware ensuring only active assigned employees can proceed.
+ */
+export async function requireShopEmployeeAuth(req: Request, res: Response, next: NextFunction) {
+  return requireAuth(req, res, () => {
+    if (req.user?.role !== 'employee') {
+      return res.status(403).json({
+        error: 'Forbidden',
+        message: 'Access denied: Shop Employee privileges required.'
+      });
+    }
+    return next();
+  });
 }

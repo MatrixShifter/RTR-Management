@@ -10,6 +10,7 @@ import { authRouter } from './routes/auth.js';
 import { recordsRouter } from './routes/records.js';
 import { shopsRouter } from './routes/shops.js';
 import { productsRouter } from './routes/products.js';
+import { employeesRouter } from './routes/employees.js';
 import { type HealthResponse, type DatabaseStorageHealth, evaluateStorageHealth } from '@crimpston/shared';
 
 export const app = express();
@@ -152,6 +153,9 @@ app.use(['/api/records', '/records'], recordsRouter);
 // Catalog routes (Shops & Products management)
 app.use(['/api/shops', '/shops'], shopsRouter);
 app.use(['/api/products', '/products'], productsRouter);
+
+// Employee directory & access management routes (Owner Only)
+app.use(['/api/employees', '/employees'], employeesRouter);
 
 // Centralized error handling
 app.use(errorHandler);

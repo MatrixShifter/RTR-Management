@@ -1,35 +1,61 @@
 import { Router, Request, Response } from 'express';
-import { createClient } from '@supabase/supabase-js';
 import { 
   SaveBusinessRecordSchema, 
   SettlePaymentSchema,
   isDemoShop,
   isDemoProduct
 } from '@crimpston/shared';
-import { requireOwnerAuth } from '../middleware/auth.js';
+import { requireAuth, requireOwnerAuth } from '../middleware/auth.js';
 import { businessMutationRateLimiter, paymentRateLimiter } from '../middleware/rateLimiter.js';
 import { logger, logSecurityEvent } from '../logger.js';
-import { config } from '../config.js';
+import { supabaseAdmin } from '../supabase.js';
 
 export const recordsRouter = Router();
-
-const supabaseAdmin = createClient(config.SUPABASE_URL, config.SUPABASE_SERVICE_ROLE_KEY, {
-  auth: {
-    persistSession: false,
-    autoRefreshToken: false
-  }
-});
 
 /**
  * GET /api/records
  * Returns records for the authenticated Business Owner's business workspace.
  * Supports server-side pagination with query params (?limit=100&offset=0).
  */
-recordsRouter.get('/', requireOwnerAuth, async (req: Request, res: Response) => {
+recordsRouter.get('/', requireAuth, async (req: Request, res: Response) => {
   const user = req.user!;
   
   if (user.isDemo) {
     return res.status(200).json({ records: [], message: 'Demo records are managed in local client sandbox.' });
+  }
+
+  // Strict Shop Employee Isolation:
+  // If user is a shop employee, enforce query filter to their assigned shop ONLY.
+  // Any attempt to request a different shop ID is rejected with 403 Forbidden.
+  let effectiveShopId: string | null = null;
+  const requestedShopId = typeof req.query.shopId === 'string' && req.query.shopId.trim() ? req.query.shopId.trim() : null;
+
+  if (user.role === 'employee') {
+    if (!user.assignedShopId) {
+      return res.status(403).json({
+        error: 'Forbidden',
+        message: 'Your employee account is not currently assigned to an active shop.'
+      });
+    }
+
+    if (requestedShopId && requestedShopId !== user.assignedShopId) {
+      logSecurityEvent({
+        action: 'CROSS_SHOP_ACCESS_BLOCKED',
+        category: 'access_control',
+        status: 'BLOCKED',
+        statusCode: 403,
+        correlationId: (req.headers['x-correlation-id'] as string),
+        details: { attemptedShopId: requestedShopId, assignedShopId: user.assignedShopId }
+      });
+      return res.status(403).json({
+        error: 'Forbidden',
+        message: 'Access denied: You can only access records for your assigned shop.'
+      });
+    }
+
+    effectiveShopId = user.assignedShopId;
+  } else {
+    effectiveShopId = requestedShopId;
   }
 
   const rawLimit = req.query.limit;
@@ -53,7 +79,7 @@ recordsRouter.get('/', requireOwnerAuth, async (req: Request, res: Response) => 
     const exactDate = typeof req.query.date === 'string' && req.query.date.trim() ? req.query.date.trim() : null;
     const startDate = typeof req.query.startDate === 'string' && req.query.startDate.trim() ? req.query.startDate.trim() : null;
     const endDate = typeof req.query.endDate === 'string' && req.query.endDate.trim() ? req.query.endDate.trim() : null;
-    const shopId = typeof req.query.shopId === 'string' && req.query.shopId.trim() ? req.query.shopId.trim() : null;
+    const shopId = effectiveShopId;
     const productId = typeof req.query.productId === 'string' && req.query.productId.trim() ? req.query.productId.trim() : null;
     const status = typeof req.query.status === 'string' && req.query.status.trim() ? req.query.status.trim() : null;
 

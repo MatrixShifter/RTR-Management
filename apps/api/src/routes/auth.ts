@@ -1,5 +1,4 @@
 import { Router, Request, Response } from 'express';
-import { createClient } from '@supabase/supabase-js';
 import crypto from 'crypto';
 import { config } from '../config.js';
 import { authRateLimiter, passwordRecoveryRateLimiter } from '../middleware/rateLimiter.js';
@@ -8,22 +7,8 @@ import { DEMO_USERNAME, DEMO_PASSWORD_PLACEHOLDER } from '@crimpston/shared';
 
 export const authRouter = Router();
 
-// Supabase clients:
-// - Anon client for password authentication and recovery requests
-// - Service role client for server-side username resolution and session verification
-const supabaseAnon = createClient(config.SUPABASE_URL, config.SUPABASE_ANON_KEY, {
-  auth: {
-    persistSession: false,
-    autoRefreshToken: false
-  }
-});
-
-export const supabaseAdmin = createClient(config.SUPABASE_URL, config.SUPABASE_SERVICE_ROLE_KEY, {
-  auth: {
-    persistSession: false,
-    autoRefreshToken: false
-  }
-});
+import { supabaseAnon, supabaseAdmin } from '../supabase.js';
+export { supabaseAnon, supabaseAdmin };
 
 export const INCORRECT_CREDENTIALS_MSG = "Incorrect username or password. Please try again.";
 export const RECOVERY_CONFIRMATION_MSG = "If an account matches the information provided, password reset instructions will be sent to its registered email address.";
@@ -257,36 +242,6 @@ authRouter.post('/login', authRateLimiter, async (req: Request, res: Response) =
       });
     }
 
-    // Strictly deny employee or staff logins with 403
-    if (resolvedEmail.includes('staff') || cleanUser.includes('staff') || cleanUser.includes('employee')) {
-      return res.status(403).json({
-        success: false,
-        message: OWNER_ONLY_ACCESS_MSG
-      });
-    }
-
-    // Check membership role for non-owner accounts
-    const { data: profile } = await supabaseAdmin
-      .from('profiles')
-      .select('id')
-      .eq('email', resolvedEmail)
-      .maybeSingle();
-
-    if (profile?.id) {
-      const { data: mem } = await supabaseAdmin
-        .from('business_memberships')
-        .select('role, is_active')
-        .eq('user_id', profile.id)
-        .maybeSingle();
-
-      if (mem && mem.role !== 'owner') {
-        return res.status(403).json({
-          success: false,
-          message: OWNER_ONLY_ACCESS_MSG
-        });
-      }
-    }
-
     const { data, error } = await supabaseAnon.auth.signInWithPassword({
       email: resolvedEmail,
       password: password
@@ -294,7 +249,7 @@ authRouter.post('/login', authRateLimiter, async (req: Request, res: Response) =
 
     if (error || !data.user || !data.session) {
       logSecurityEvent({
-        action: 'OWNER_LOGIN',
+        action: 'USER_LOGIN',
         category: 'auth_login',
         status: 'FAILURE',
         statusCode: 401,
@@ -307,51 +262,115 @@ authRouter.post('/login', authRateLimiter, async (req: Request, res: Response) =
       });
     }
 
-    // Server-side verification: Strictly verify user is an active Business Owner
+    // Server-side verification: Check role and status in business_memberships
     const { data: membership } = await supabaseAdmin
       .from('business_memberships')
-      .select('role, is_active')
+      .select('business_id, role, is_active')
       .eq('user_id', data.user.id)
       .maybeSingle();
 
-    if (!membership || membership.role !== 'owner' || !membership.is_active) {
+    if (!membership || !membership.is_active) {
       logSecurityEvent({
-        action: 'EMPLOYEE_LOGIN_BLOCKED',
+        action: 'INACTIVE_USER_LOGIN_BLOCKED',
         category: 'auth_login',
         status: 'BLOCKED',
         statusCode: 403,
         correlationId: (req.headers['x-correlation-id'] as string),
-        errorCategory: 'unauthorized_role'
+        errorCategory: 'deactivated_account'
       });
       return res.status(403).json({
         success: false,
-        message: OWNER_ONLY_ACCESS_MSG
+        message: 'Account is deactivated or unauthorized. Please contact your manager.'
       });
     }
 
-    logSecurityEvent({
-      action: 'OWNER_LOGIN',
-      category: 'auth_login',
-      status: 'SUCCESS',
-      statusCode: 200,
-      correlationId: (req.headers['x-correlation-id'] as string)
-    });
+    if (membership.role === 'owner') {
+      logSecurityEvent({
+        action: 'OWNER_LOGIN',
+        category: 'auth_login',
+        status: 'SUCCESS',
+        statusCode: 200,
+        correlationId: (req.headers['x-correlation-id'] as string)
+      });
 
-    return res.status(200).json({
-      success: true,
-      session: {
-        access_token: data.session.access_token,
-        refresh_token: data.session.refresh_token,
-        expires_at: data.session.expires_at,
-        expires_in: data.session.expires_in
-      },
-      user: {
-        id: data.user.id,
-        email: data.user.email,
-        username: username.includes('@') ? (data.user.user_metadata?.username || 'owner') : username.trim(),
-        name: data.user.user_metadata?.full_name || 'Business Owner',
-        role: 'owner'
+      return res.status(200).json({
+        success: true,
+        session: {
+          access_token: data.session.access_token,
+          refresh_token: data.session.refresh_token,
+          expires_at: data.session.expires_at,
+          expires_in: data.session.expires_in
+        },
+        user: {
+          id: data.user.id,
+          email: data.user.email,
+          username: username.includes('@') ? (data.user.user_metadata?.username || 'owner') : username.trim(),
+          name: data.user.user_metadata?.full_name || 'Business Owner',
+          role: 'owner'
+        }
+      });
+    }
+
+    if (membership.role === 'employee') {
+      // Resolve assigned shop
+      const { data: shopMember, error: shopErr } = await supabaseAdmin
+        .from('shop_memberships')
+        .select('shop_id, shops!inner(id, name, code, is_active, business_id)')
+        .eq('user_id', data.user.id)
+        .maybeSingle();
+
+      if (
+        shopErr || 
+        !shopMember || 
+        !(shopMember as any).shops?.is_active ||
+        (shopMember as any).shops?.business_id !== membership.business_id
+      ) {
+        logSecurityEvent({
+          action: 'EMPLOYEE_NO_ACTIVE_SHOP_LOGIN',
+          category: 'auth_login',
+          status: 'BLOCKED',
+          statusCode: 403,
+          correlationId: (req.headers['x-correlation-id'] as string),
+          errorCategory: 'no_assigned_shop'
+        });
+        return res.status(403).json({
+          success: false,
+          message: 'Your employee account is not currently assigned to an active shop. Please contact your manager.'
+        });
       }
+
+      logSecurityEvent({
+        action: 'EMPLOYEE_LOGIN',
+        category: 'auth_login',
+        status: 'SUCCESS',
+        statusCode: 200,
+        correlationId: (req.headers['x-correlation-id'] as string)
+      });
+
+      return res.status(200).json({
+        success: true,
+        session: {
+          access_token: data.session.access_token,
+          refresh_token: data.session.refresh_token,
+          expires_at: data.session.expires_at,
+          expires_in: data.session.expires_in
+        },
+        user: {
+          id: data.user.id,
+          email: data.user.email,
+          username: username.includes('@') ? (data.user.user_metadata?.username || 'employee') : username.trim(),
+          name: data.user.user_metadata?.full_name || 'Shop Staff',
+          role: 'employee',
+          assignedShopId: shopMember.shop_id,
+          assignedShopName: (shopMember as any).shops?.name,
+          assignedShopCode: (shopMember as any).shops?.code
+        }
+      });
+    }
+
+    return res.status(403).json({
+      success: false,
+      message: 'Unknown or unauthorized account role.'
     });
   } catch (err: any) {
     logger.error('Authentication service failure during login', { 
@@ -705,23 +724,60 @@ authRouter.get('/verify-session', async (req: Request, res: Response) => {
 
     const { data: membership, error: memberErr } = await supabaseAdmin
       .from('business_memberships')
-      .select('role, is_active')
+      .select('business_id, role, is_active')
       .eq('user_id', user.id)
       .maybeSingle();
 
-    if (memberErr || !membership || membership.role !== 'owner' || !membership.is_active) {
-      return res.status(403).json({ valid: false, message: OWNER_ONLY_ACCESS_MSG });
+    if (memberErr || !membership || !membership.is_active) {
+      return res.status(403).json({ valid: false, message: 'Account is deactivated or unauthorized.' });
     }
 
-    return res.status(200).json({
-      valid: true,
-      user: {
-        id: user.id,
-        email: user.email,
-        name: user.user_metadata?.full_name || 'Business Owner',
-        role: 'owner'
+    if (membership.role === 'owner') {
+      return res.status(200).json({
+        valid: true,
+        user: {
+          id: user.id,
+          email: user.email,
+          name: user.user_metadata?.full_name || 'Business Owner',
+          role: 'owner'
+        }
+      });
+    }
+
+    if (membership.role === 'employee') {
+      const { data: shopMember, error: shopErr } = await supabaseAdmin
+        .from('shop_memberships')
+        .select('shop_id, shops!inner(id, name, code, is_active, business_id)')
+        .eq('user_id', user.id)
+        .maybeSingle();
+
+      if (
+        shopErr || 
+        !shopMember || 
+        !(shopMember as any).shops?.is_active ||
+        (shopMember as any).shops?.business_id !== membership.business_id
+      ) {
+        return res.status(403).json({
+          valid: false,
+          message: 'Your employee account is not currently assigned to an active shop. Please contact your manager.'
+        });
       }
-    });
+
+      return res.status(200).json({
+        valid: true,
+        user: {
+          id: user.id,
+          email: user.email,
+          name: user.user_metadata?.full_name || 'Shop Staff',
+          role: 'employee',
+          assignedShopId: shopMember.shop_id,
+          assignedShopName: (shopMember as any).shops?.name,
+          assignedShopCode: (shopMember as any).shops?.code
+        }
+      });
+    }
+
+    return res.status(403).json({ valid: false, message: OWNER_ONLY_ACCESS_MSG });
   } catch {
     logger.warn('Session verification caught exception', {
       correlationId: (req.headers['x-correlation-id'] as string),

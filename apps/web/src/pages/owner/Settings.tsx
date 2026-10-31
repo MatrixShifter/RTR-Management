@@ -17,6 +17,7 @@ import {
   Trash2
 } from 'lucide-react';
 import { clearMemoryCache } from '../../services/db.js';
+import { EmployeeManagementSection } from '../../components/EmployeeManagementSection.js';
 import { usePwaInstall } from '../../services/usePwaInstall.js';
 import { InstallAppModal } from '../../components/InstallAppModal.js';
 import { synchronizeUserData } from '../../services/syncEngine.js';
@@ -358,6 +359,9 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
           </div>
         </div>
       </div>
+
+      {/* Employee Management & Assigned Shop Access */}
+      <EmployeeManagementSection />
 
       {/* Mobile App & Offline Ledger Capabilities */}
       <div className="bg-white rounded-2xl border border-slate-200/80 p-6 shadow-xs space-y-5">
