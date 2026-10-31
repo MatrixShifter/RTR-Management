@@ -1,5 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { createClient } from '@supabase/supabase-js';
+import { isDemoShop } from '@crimpston/shared';
 import { requireOwnerAuth } from '../middleware/auth.js';
 import { businessMutationRateLimiter } from '../middleware/rateLimiter.js';
 import { logSecurityEvent } from '../logger.js';
@@ -33,7 +34,8 @@ shopsRouter.get('/', requireOwnerAuth, async (req: Request, res: Response) => {
       .order('name');
 
     if (error) throw error;
-    return res.status(200).json({ shops: data || [] });
+    const genuineShops = (data || []).filter((s: any) => !isDemoShop(s));
+    return res.status(200).json({ shops: genuineShops });
   } catch (err: any) {
     return res.status(500).json({
       error: 'Internal Server Error',
@@ -53,6 +55,13 @@ shopsRouter.get('/:id/usage', requireOwnerAuth, async (req: Request, res: Respon
 
   if (!shopId) {
     return res.status(400).json({ error: 'Validation Error', message: 'Shop ID is required.' });
+  }
+
+  if (isDemoShop({ id: shopId })) {
+    return res.status(403).json({
+      error: 'Forbidden',
+      message: 'Usage check and management is prohibited for confirmed demo entities.'
+    });
   }
 
   if (user.isDemo) {
@@ -184,6 +193,21 @@ shopsRouter.delete('/:id', requireOwnerAuth, businessMutationRateLimiter, async 
       return res.status(403).json({
         error: 'Forbidden',
         message: 'You do not have permission to manage this shop.'
+      });
+    }
+
+    if (isDemoShop(existingShop)) {
+      logSecurityEvent({
+        action: 'DEMO_SHOP_MUTATION_BLOCKED',
+        category: 'access_control',
+        status: 'BLOCKED',
+        statusCode: 403,
+        correlationId: (req.headers['x-correlation-id'] as string),
+        details: { shopId, reason: 'Confirmed demo shop retained for immutable audit ledger' }
+      });
+      return res.status(403).json({
+        error: 'Forbidden',
+        message: 'Confirmed demo shop cannot be mutated or deleted. It is retained to preserve immutable audit history.'
       });
     }
 

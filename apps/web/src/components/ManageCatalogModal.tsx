@@ -1,5 +1,6 @@
 import React, { useState, useMemo } from 'react';
-import { X, Trash2, Search, AlertCircle, CheckCircle2, AlertTriangle, Loader2, Archive } from 'lucide-react';
+import { X, Trash2, Search, AlertCircle, CheckCircle2, AlertTriangle, Loader2 } from 'lucide-react';
+import { isDemoShop, isDemoProduct } from '@crimpston/shared';
 import { type Shop, type Product, checkShopUsage, checkProductUsage, type DeleteCatalogResult } from '../services/db.js';
 
 export interface ManageCatalogModalProps {
@@ -32,11 +33,12 @@ export const ManageCatalogModal: React.FC<ManageCatalogModalProps> = ({
   const [isDeleting, setIsDeleting] = useState(false);
   const [feedback, setFeedback] = useState<{ type: 'success' | 'error' | 'warning'; message: string } | null>(null);
 
-  // Filter items by search query
+  // Filter items by search query (Strictly excluding confirmed demo entities)
   const filteredItems = useMemo(() => {
+    const nonDemo = items.filter(item => isShop ? !isDemoShop(item as Shop) : !isDemoProduct(item as Product));
     const q = searchQuery.trim().toLowerCase();
-    if (!q) return items;
-    return items.filter(item => {
+    if (!q) return nonDemo;
+    return nonDemo.filter(item => {
       const nameMatch = item.name?.toLowerCase().includes(q);
       const codeOrSkuMatch = isShop 
         ? (item as Shop).code?.toLowerCase().includes(q)
@@ -249,33 +251,25 @@ export const ManageCatalogModal: React.FC<ManageCatalogModalProps> = ({
             ) : (
               <div className="space-y-3">
                 <div className="flex items-start gap-2.5">
-                  {usageInfo?.inUse ? (
-                    <div className="p-2 bg-amber-100 text-amber-700 rounded-xl flex-shrink-0">
-                      <Archive className="w-4 h-4" />
-                    </div>
-                  ) : (
-                    <div className="p-2 bg-rose-100 text-rose-700 rounded-xl flex-shrink-0">
-                      <Trash2 className="w-4 h-4" />
-                    </div>
-                  )}
+                  <div className="p-2 bg-rose-100 text-rose-700 rounded-xl flex-shrink-0">
+                    <Trash2 className="w-4 h-4" />
+                  </div>
                   <div className="flex-1 min-w-0">
                     <h4 className="text-xs sm:text-sm font-bold text-slate-900">
-                      {usageInfo?.inUse 
-                        ? `Archive "${itemToDelete.name}"?` 
-                        : `Delete "${itemToDelete.name}"?`}
+                      Delete {entityTitle}?
                     </h4>
-                    <p className="text-xs text-slate-600 mt-1 leading-relaxed">
-                      {usageInfo?.inUse ? (
-                        <>
-                          This {entityTitle.toLowerCase()} is referenced by <strong>{usageInfo.count} existing record(s)</strong>. 
-                          To protect historical records and past dispatches, it will be safely <strong>deactivated and archived</strong> so it no longer appears in future dispatches.
-                        </>
-                      ) : (
-                        <>
-                          Are you sure you want to permanently delete this {entityTitle.toLowerCase()}? This action cannot be undone.
-                        </>
-                      )}
+                    <p className="text-xs font-semibold text-slate-800 mt-0.5">
+                      {entityTitle}: <span className="font-normal text-slate-600">{itemToDelete.name}</span>
                     </p>
+                    {usageInfo?.inUse ? (
+                      <p className="text-xs text-amber-700 bg-amber-50 p-2 rounded-lg border border-amber-200 mt-1.5 leading-relaxed">
+                        This {entityTitle.toLowerCase()} is used in {usageInfo.count} transaction{usageInfo.count === 1 ? '' : 's'}. If deleted, historical records remain intact.
+                      </p>
+                    ) : (
+                      <p className="text-xs text-slate-600 mt-1 leading-relaxed">
+                        If this {entityTitle.toLowerCase()} has historical transactions, deletion may be blocked to protect financial records.
+                      </p>
+                    )}
                   </div>
                 </div>
 
@@ -295,26 +289,17 @@ export const ManageCatalogModal: React.FC<ManageCatalogModalProps> = ({
                     type="button"
                     disabled={isDeleting}
                     onClick={handleConfirmDelete}
-                    className={`px-3 py-1.5 text-xs font-semibold text-white rounded-lg transition-colors cursor-pointer inline-flex items-center gap-1.5 shadow-xs ${
-                      usageInfo?.inUse 
-                        ? 'bg-amber-600 hover:bg-amber-700' 
-                        : 'bg-rose-600 hover:bg-rose-700'
-                    }`}
+                    className="px-3 py-1.5 text-xs font-semibold text-white rounded-lg transition-colors cursor-pointer inline-flex items-center gap-1.5 shadow-xs bg-rose-600 hover:bg-rose-700"
                   >
                     {isDeleting ? (
                       <>
                         <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                        <span>Processing...</span>
-                      </>
-                    ) : usageInfo?.inUse ? (
-                      <>
-                        <Archive className="w-3.5 h-3.5" />
-                        <span>Safe Archive</span>
+                        <span>Deleting...</span>
                       </>
                     ) : (
                       <>
                         <Trash2 className="w-3.5 h-3.5" />
-                        <span>Delete Permanently</span>
+                        <span>Delete {entityTitle}</span>
                       </>
                     )}
                   </button>

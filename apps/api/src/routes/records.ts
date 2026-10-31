@@ -2,7 +2,9 @@ import { Router, Request, Response } from 'express';
 import { createClient } from '@supabase/supabase-js';
 import { 
   SaveBusinessRecordSchema, 
-  SettlePaymentSchema
+  SettlePaymentSchema,
+  isDemoShop,
+  isDemoProduct
 } from '@crimpston/shared';
 import { requireOwnerAuth } from '../middleware/auth.js';
 import { businessMutationRateLimiter, paymentRateLimiter } from '../middleware/rateLimiter.js';
@@ -98,9 +100,26 @@ recordsRouter.get('/', requireOwnerAuth, async (req: Request, res: Response) => 
  * Creates a business record with server-side validation, rate limiting, and owner authorization.
  */
 recordsRouter.post('/', requireOwnerAuth, businessMutationRateLimiter, async (req: Request, res: Response) => {
-  const parsed = SaveBusinessRecordSchema.safeParse(req.body);
-
   const correlationId = (req.headers['x-correlation-id'] as string);
+
+  // Explicit defense-in-depth: Reject transactions referencing confirmed demo entities
+  if (isDemoShop({ id: req.body?.shopId, name: req.body?.shopName }) || 
+      isDemoProduct({ id: req.body?.productId, name: req.body?.productName })) {
+    logSecurityEvent({
+      action: 'DEMO_RECORD_CREATION_BLOCKED',
+      category: 'access_control',
+      status: 'BLOCKED',
+      statusCode: 400,
+      correlationId,
+      details: { shopId: req.body?.shopId, productId: req.body?.productId }
+    });
+    return res.status(400).json({
+      error: 'Validation Error',
+      message: 'Cannot create business records for demo or excluded entities.'
+    });
+  }
+
+  const parsed = SaveBusinessRecordSchema.safeParse(req.body);
 
   if (!parsed.success) {
     logSecurityEvent({

@@ -1,5 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { createClient } from '@supabase/supabase-js';
+import { isDemoProduct } from '@crimpston/shared';
 import { requireOwnerAuth } from '../middleware/auth.js';
 import { businessMutationRateLimiter } from '../middleware/rateLimiter.js';
 import { logSecurityEvent } from '../logger.js';
@@ -33,7 +34,8 @@ productsRouter.get('/', requireOwnerAuth, async (req: Request, res: Response) =>
       .order('name');
 
     if (error) throw error;
-    return res.status(200).json({ products: data || [] });
+    const genuineProducts = (data || []).filter((p: any) => !isDemoProduct(p));
+    return res.status(200).json({ products: genuineProducts });
   } catch (err: any) {
     return res.status(500).json({
       error: 'Internal Server Error',
@@ -53,6 +55,13 @@ productsRouter.get('/:id/usage', requireOwnerAuth, async (req: Request, res: Res
 
   if (!productId) {
     return res.status(400).json({ error: 'Validation Error', message: 'Product ID is required.' });
+  }
+
+  if (isDemoProduct({ id: productId })) {
+    return res.status(403).json({
+      error: 'Forbidden',
+      message: 'Usage check and management is prohibited for confirmed demo entities.'
+    });
   }
 
   if (user.isDemo) {
@@ -177,6 +186,21 @@ productsRouter.delete('/:id', requireOwnerAuth, businessMutationRateLimiter, asy
       return res.status(403).json({
         error: 'Forbidden',
         message: 'You do not have permission to manage this product.'
+      });
+    }
+
+    if (isDemoProduct(existingProduct)) {
+      logSecurityEvent({
+        action: 'DEMO_PRODUCT_MUTATION_BLOCKED',
+        category: 'access_control',
+        status: 'BLOCKED',
+        statusCode: 403,
+        correlationId: (req.headers['x-correlation-id'] as string),
+        details: { productId, reason: 'Confirmed demo product retained for immutable audit ledger' }
+      });
+      return res.status(403).json({
+        error: 'Forbidden',
+        message: 'Confirmed demo product cannot be mutated or deleted. It is retained to preserve immutable audit history.'
       });
     }
 

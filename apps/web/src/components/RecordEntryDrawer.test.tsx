@@ -565,6 +565,84 @@ describe('RecordEntryDrawer Component & Catalog Management Suite', () => {
       expect(html).toContain('aria-label="Clear shop selection"');
       expect(html).toContain('aria-label="Clear product selection"');
     });
+
+    it('strictly excludes confirmed demo shop (DEMO - Mobile Shop A) from autocomplete and active options', () => {
+      const demoShopsList: Shop[] = [
+        ...mockShops,
+        {
+          id: '4ab21b42-209a-4e16-ae77-8c869ab973ed',
+          name: 'DEMO - Mobile Shop A',
+          code: 'DEMO-SHOP-A',
+          address: 'Demo St',
+          phone: '',
+          isActive: true,
+          assignedEmployees: []
+        }
+      ];
+
+      const html = renderToString(
+        <RecordEntryDrawer
+          isOpen={true}
+          onClose={() => {}}
+          onSuccess={() => {}}
+          shops={demoShopsList}
+          products={mockProducts}
+        />
+      );
+
+      expect(html).toContain('RTR Anna Nagar');
+      expect(html).not.toContain('DEMO - Mobile Shop A');
+      expect(html).not.toContain('DEMO-SHOP-A');
+    });
+
+    it('strictly excludes confirmed demo product (DEMO - Mobile Case) from autocomplete and active options', () => {
+      const demoProductsList: Product[] = [
+        ...mockProducts,
+        {
+          id: '0cea2553-1467-4443-b329-4caf997b56d2',
+          name: 'DEMO - Mobile Case',
+          sku: 'DEMO-CASE-01',
+          category: 'Mobile Cases',
+          unitPrice: 100,
+          minStock: 5,
+          isActive: true
+        }
+      ];
+
+      const html = renderToString(
+        <RecordEntryDrawer
+          isOpen={true}
+          onClose={() => {}}
+          onSuccess={() => {}}
+          shops={mockShops}
+          products={demoProductsList}
+        />
+      );
+
+      expect(html).toContain('Tempered Glass 9D');
+      expect(html).not.toContain('DEMO - Mobile Case');
+      expect(html).not.toContain('DEMO-CASE-01');
+    });
+  });
+
+  describe('ManageCatalogModal Destructive Delete UI Verification', () => {
+    it('renders clean destructive delete dialog without Safe Archive or Archive icon', async () => {
+      const { ManageCatalogModal } = await import('./ManageCatalogModal.js');
+      const html = renderToString(
+        <ManageCatalogModal
+          isOpen={true}
+          onClose={() => {}}
+          type="products"
+          items={mockProducts}
+          onDelete={async () => ({ success: true, action: 'deleted', message: 'Deleted' })}
+        />
+      );
+
+      expect(html).toMatch(/Manage.*Products/);
+      expect(html).toContain('Tempered Glass 9D');
+      expect(html).not.toContain('Safe Archive');
+      expect(html).not.toContain('deactivated and archived');
+    });
   });
 
 });

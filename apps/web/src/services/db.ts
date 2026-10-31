@@ -23,7 +23,9 @@ import {
   SaveBusinessRecordSchema,
   UpdateBusinessRecordSchema,
   SettlePaymentSchema,
-  calculateRecordProfit
+  calculateRecordProfit,
+  isDemoShop,
+  isDemoProduct,
 } from '@crimpston/shared';
 import { supabase, isSupabaseConfigured } from '../lib/supabase.js';
 import {
@@ -733,7 +735,7 @@ export async function getShops(): Promise<Shop[]> {
           }
         }
         if (!error && Array.isArray(data)) {
-          const nonDemo = data.filter((s: any) => !s.code?.toUpperCase().startsWith('DEMO') && !s.name?.startsWith('DEMO -'));
+          const nonDemo = data.filter((s: any) => !isDemoShop(s));
           const shops: Shop[] = nonDemo.map((s: any) => ({
             id: s.id,
             name: s.name,
@@ -756,13 +758,13 @@ export async function getShops(): Promise<Shop[]> {
     try {
       const offlineShops = await getOfflineShops(userId);
       if (offlineShops && offlineShops.length > 0) {
-        return offlineShops.filter(s => !s.code?.toUpperCase().startsWith('DEMO') && !s.name?.startsWith('DEMO -'));
+        return offlineShops.filter(s => !isDemoShop(s));
       }
     } catch {
       // ignore
     }
     const local = getLocalItem<Shop[]>(STORAGE_KEYS.SHOPS, []);
-    return local.filter(s => !s.code?.toUpperCase().startsWith('DEMO') && !s.name?.startsWith('DEMO -'));
+    return local.filter(s => !isDemoShop(s));
   });
 }
 
@@ -900,7 +902,7 @@ export async function saveShop(input: Omit<Shop, 'id'> & { id?: string }): Promi
 
 export interface DeleteCatalogResult {
   success: boolean;
-  action: 'archived' | 'deleted';
+  action: 'archived' | 'deleted' | 'blocked';
   message: string;
   inUse?: boolean;
   recordsCount?: number;
@@ -955,6 +957,15 @@ export async function checkShopUsage(id: string): Promise<{ inUse: boolean; coun
 }
 
 export async function deleteShop(id: string): Promise<DeleteCatalogResult> {
+  if (isDemoShop({ id })) {
+    return {
+      success: false,
+      action: 'blocked',
+      message: 'Confirmed demo shop cannot be mutated or deleted. It is retained to preserve immutable audit history.',
+      inUse: true,
+      recordsCount: 6
+    };
+  }
   const usage = await checkShopUsage(id);
 
   if (isDemoMode()) {
@@ -1113,7 +1124,7 @@ export async function getProducts(): Promise<Product[]> {
           }
         }
         if (!error && Array.isArray(data)) {
-          const nonDemo = data.filter((p: any) => !p.sku?.toUpperCase().startsWith('DEMO') && !p.name?.startsWith('DEMO -'));
+          const nonDemo = data.filter((p: any) => !isDemoProduct(p));
           const localProds = getLocalItem<Product[]>(STORAGE_KEYS.PRODUCTS, []);
           const localMap = new Map(localProds.map(p => [p.id, p]));
 
@@ -1143,13 +1154,13 @@ export async function getProducts(): Promise<Product[]> {
     try {
       const offlineProds = await getOfflineProducts(userId);
       if (offlineProds && offlineProds.length > 0) {
-        return offlineProds.filter(p => !p.sku?.toUpperCase().startsWith('DEMO') && !p.name?.startsWith('DEMO -'));
+        return offlineProds.filter(p => !isDemoProduct(p));
       }
     } catch {
       // ignore
     }
     const local = getLocalItem<Product[]>(STORAGE_KEYS.PRODUCTS, []);
-    return local.filter(p => !p.sku?.toUpperCase().startsWith('DEMO') && !p.name?.startsWith('DEMO -'));
+    return local.filter(p => !isDemoProduct(p));
   });
 }
 
@@ -1326,6 +1337,15 @@ export async function checkProductUsage(id: string): Promise<{ inUse: boolean; c
 }
 
 export async function deleteProduct(id: string): Promise<DeleteCatalogResult> {
+  if (isDemoProduct({ id })) {
+    return {
+      success: false,
+      action: 'blocked',
+      message: 'Confirmed demo product cannot be mutated or deleted. It is retained to preserve immutable audit history.',
+      inUse: true,
+      recordsCount: 6
+    };
+  }
   const usage = await checkProductUsage(id);
 
   if (isDemoMode()) {
@@ -2270,6 +2290,15 @@ export async function saveBusinessRecord(input: SaveBusinessRecordInput): Promis
       unitPrice: input.unitPrice,
       isActive: true
     });
+  }
+
+  if (!isDemoMode()) {
+    if (isDemoShop(targetShop)) {
+      throw new Error('Cannot create or record transactions for demo or excluded shops.');
+    }
+    if (isDemoProduct(targetProduct)) {
+      throw new Error('Cannot create or record transactions for demo or excluded products.');
+    }
   }
 
   // 3. Save Delivery

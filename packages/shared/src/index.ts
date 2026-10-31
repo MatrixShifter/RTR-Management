@@ -698,8 +698,34 @@ export function calculateGrossProfit(
   };
 }
 
+// Confirmed Demo Entity Identifiers (Production Handover Exclusion)
+export const CONFIRMED_DEMO_SHOP_ID = '4ab21b42-209a-4e16-ae77-8c869ab973ed';
+export const CONFIRMED_DEMO_PRODUCT_ID = '0cea2553-1467-4443-b329-4caf997b56d2';
+
+export function isDemoShop(shop?: { id?: string | null; code?: string | null; name?: string | null } | null): boolean {
+  if (!shop) return false;
+  if (shop.id === CONFIRMED_DEMO_SHOP_ID) return true;
+  if (typeof shop.code === 'string' && shop.code.trim().toUpperCase().startsWith('DEMO')) return true;
+  if (typeof shop.name === 'string') {
+    const trimmed = shop.name.trim();
+    if (/^(\[DEMO\]|DEMO\s*-)/i.test(trimmed)) return true;
+  }
+  return false;
+}
+
+export function isDemoProduct(prod?: { id?: string | null; sku?: string | null; name?: string | null } | null): boolean {
+  if (!prod) return false;
+  if (prod.id === CONFIRMED_DEMO_PRODUCT_ID) return true;
+  if (typeof prod.sku === 'string' && prod.sku.trim().toUpperCase().startsWith('DEMO')) return true;
+  if (typeof prod.name === 'string') {
+    const trimmed = prod.name.trim();
+    if (/^(\[DEMO\]|DEMO\s*-)/i.test(trimmed)) return true;
+  }
+  return false;
+}
+
 // Record & Payment Mutation Validation Schemas
-export const SaveBusinessRecordSchema = z.object({
+export const BaseBusinessRecordSchema = z.object({
   date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Date must be formatted as YYYY-MM-DD'),
   shopName: z.string().min(1, 'Shop name is required').max(100),
   shopId: z.string().optional().nullable(),
@@ -714,7 +740,19 @@ export const SaveBusinessRecordSchema = z.object({
   paidAmount: z.number().nonnegative('Paid amount cannot be negative').optional(),
   notes: z.string().max(1000).optional().nullable()
 });
+
+export const SaveBusinessRecordSchema = BaseBusinessRecordSchema;
 export type SaveBusinessRecordSchemaType = z.infer<typeof SaveBusinessRecordSchema>;
+
+// Strict Production Schema with Demo Exclusion Enforced
+export const ProductionSaveBusinessRecordSchema = BaseBusinessRecordSchema.refine(data => !isDemoShop({ id: data.shopId, name: data.shopName }), {
+  message: 'Cannot create or record transactions for demo or excluded shops.',
+  path: ['shopName']
+}).refine(data => !isDemoProduct({ id: data.productId, name: data.productName }), {
+  message: 'Cannot create or record transactions for demo or excluded products.',
+  path: ['productName']
+});
+export type ProductionSaveBusinessRecordSchemaType = z.infer<typeof ProductionSaveBusinessRecordSchema>;
 
 /**
  * Authoritative financial profit calculation for a wholesale record:
@@ -728,7 +766,7 @@ export function calculateRecordProfit(amount: number, customerPrice?: number | n
   return Math.round((Number(customerPrice) - Number(amount)) * 100) / 100;
 }
 
-export const UpdateBusinessRecordSchema = SaveBusinessRecordSchema.extend({
+export const UpdateBusinessRecordSchema = BaseBusinessRecordSchema.extend({
   deliveryId: z.string().min(1, 'Delivery ID is required')
 });
 export type UpdateBusinessRecordSchemaType = z.infer<typeof UpdateBusinessRecordSchema>;

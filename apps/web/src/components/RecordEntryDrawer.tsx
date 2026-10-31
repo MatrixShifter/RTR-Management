@@ -25,6 +25,7 @@ import {
   DATABASE_STORAGE_FULL_TITLE,
   DATABASE_STORAGE_FULL_MESSAGE
 } from '../services/db.js';
+import { isDemoShop, isDemoProduct } from '@crimpston/shared';
 import { ManageCatalogModal } from './ManageCatalogModal.js';
 
 export interface RecordEntryDrawerProps {
@@ -50,9 +51,9 @@ export const RecordEntryDrawer: React.FC<RecordEntryDrawerProps> = ({
 }) => {
   const todayStr = new Date().toISOString().split('T')[0] || '';
 
-  // Local synced lists for immediate catalog refresh
-  const [localShops, setLocalShops] = useState<Shop[]>(shops);
-  const [localProducts, setLocalProducts] = useState<Product[]>(products);
+  // Local synced lists for immediate catalog refresh (Strictly excluding confirmed demo entities)
+  const [localShops, setLocalShops] = useState<Shop[]>(() => shops.filter(s => !isDemoShop(s)));
+  const [localProducts, setLocalProducts] = useState<Product[]>(() => products.filter(p => !isDemoProduct(p)));
   const [isManageShopsOpen, setIsManageShopsOpen] = useState<boolean>(false);
   const [isManageProductsOpen, setIsManageProductsOpen] = useState<boolean>(false);
 
@@ -116,13 +117,13 @@ export const RecordEntryDrawer: React.FC<RecordEntryDrawerProps> = ({
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [capacityError, setCapacityError] = useState<{ title: string; message: string } | null>(null);
 
-  // Filter active shops & products (hide archived ones from dropdown unless editing record that used them)
+  // Filter active shops & products (strictly excluding demo entities, and hiding archived ones unless editing record that used them)
   const activeShops = useMemo(() => {
-    return localShops.filter(s => s.isActive !== false || s.id === selectedShopId);
+    return localShops.filter(s => !isDemoShop(s) && (s.isActive !== false || s.id === selectedShopId));
   }, [localShops, selectedShopId]);
 
   const activeProducts = useMemo(() => {
-    return localProducts.filter(p => p.isActive !== false || p.id === selectedProductId);
+    return localProducts.filter(p => !isDemoProduct(p) && (p.isActive !== false || p.id === selectedProductId));
   }, [localProducts, selectedProductId]);
 
   // Find currently selected entities for trigger labels
@@ -499,6 +500,16 @@ export const RecordEntryDrawer: React.FC<RecordEntryDrawerProps> = ({
 
     const chosenProduct = isNewProduct ? undefined : localProducts.find(p => p.id === selectedProductId);
     const productName = chosenProduct ? chosenProduct.name : customProductName.trim();
+
+    // Defense-in-depth: Prohibit selecting or creating transactions for demo entities
+    if (isDemoShop({ id: chosenShop?.id, name: shopName })) {
+      setValidationErrors(prev => ({ ...prev, shop: 'Demo shops cannot be selected for new transactions.' }));
+      return;
+    }
+    if (isDemoProduct({ id: chosenProduct?.id, name: productName })) {
+      setValidationErrors(prev => ({ ...prev, product: 'Demo products cannot be selected for new transactions.' }));
+      return;
+    }
 
     const numQty = Number(quantity) || 1;
     const total = Number(amount) || 0;

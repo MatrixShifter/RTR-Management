@@ -462,5 +462,79 @@ describe('RTR Wholesale Management — 25 Business Scenarios', () => {
       expect(profit.message).toBe('Profit unavailable — cost data missing');
     });
   });
+
+  describe('Production Demo Entity Classification & Security Suite', () => {
+    it('correctly classifies confirmed demo shop by stable identifier, code prefix, and name prefix', async () => {
+      const { isDemoShop, CONFIRMED_DEMO_SHOP_ID } = await import('./index.js');
+      expect(isDemoShop({ id: CONFIRMED_DEMO_SHOP_ID })).toBe(true);
+      expect(isDemoShop({ name: 'DEMO - Mobile Shop A' })).toBe(true);
+      expect(isDemoShop({ name: '[DEMO] Apex Cellular' })).toBe(true);
+      expect(isDemoShop({ code: 'DEMO-SHOP-A' })).toBe(true);
+
+      // Genuine shops are preserved
+      expect(isDemoShop({ id: '251f7abf-3c9d-44ba-9f12-b5edeac0aee3', name: 'Shop A', code: 'RTR-SHOP-7253' })).toBe(false);
+      expect(isDemoShop({ name: '1dhope', code: 'RTR-1DHO-0173' })).toBe(false);
+      expect(isDemoShop({ name: 'vasanth', code: 'RTR-VASA-9270' })).toBe(false);
+      expect(isDemoShop({ name: 'shopa', code: 'RTR-SHOP-5533' })).toBe(false);
+    });
+
+    it('correctly classifies confirmed demo product by stable identifier, SKU prefix, and name prefix', async () => {
+      const { isDemoProduct, CONFIRMED_DEMO_PRODUCT_ID } = await import('./index.js');
+      expect(isDemoProduct({ id: CONFIRMED_DEMO_PRODUCT_ID })).toBe(true);
+      expect(isDemoProduct({ name: 'DEMO - Mobile Case' })).toBe(true);
+      expect(isDemoProduct({ name: '[DEMO] Fast Charger' })).toBe(true);
+      expect(isDemoProduct({ sku: 'DEMO-CASE-01' })).toBe(true);
+
+      // Genuine products are preserved
+      expect(isDemoProduct({ id: '84992aca-9128-45cd-82c8-38bcbd3557f7', name: '9a combo', sku: 'SKU-9ACO-9233' })).toBe(false);
+      expect(isDemoProduct({ name: '9a outter butto', sku: 'SKU-9AOU-1763' })).toBe(false);
+      expect(isDemoProduct({ name: 'a02s combo', sku: 'SKU-A02S-1222' })).toBe(false);
+      expect(isDemoProduct({ name: 'mobile', sku: 'SKU-MOBI-8529' })).toBe(false);
+      expect(isDemoProduct({ name: 'rqwrert', sku: 'SKU-RQWR-3338' })).toBe(false);
+      expect(isDemoProduct({ name: 'producta', sku: 'SKU-PROD-6167' })).toBe(false);
+    });
+
+    it('ProductionSaveBusinessRecordSchema rejects transactions referencing confirmed demo shop or product', async () => {
+      const { ProductionSaveBusinessRecordSchema, CONFIRMED_DEMO_SHOP_ID, CONFIRMED_DEMO_PRODUCT_ID } = await import('./index.js');
+      
+      // Reject demo shop
+      const demoShopPayload = {
+        date: '2026-10-31',
+        shopName: 'DEMO - Mobile Shop A',
+        shopId: CONFIRMED_DEMO_SHOP_ID,
+        productName: '9a combo',
+        quantity: 1,
+        unitPrice: 250,
+        deliveryStatus: 'pending'
+      };
+      const shopRes = ProductionSaveBusinessRecordSchema.safeParse(demoShopPayload);
+      expect(shopRes.success).toBe(false);
+
+      // Reject demo product
+      const demoProdPayload = {
+        date: '2026-10-31',
+        shopName: 'Shop A',
+        productName: 'DEMO - Mobile Case',
+        productId: CONFIRMED_DEMO_PRODUCT_ID,
+        quantity: 1,
+        unitPrice: 150,
+        deliveryStatus: 'pending'
+      };
+      const prodRes = ProductionSaveBusinessRecordSchema.safeParse(demoProdPayload);
+      expect(prodRes.success).toBe(false);
+
+      // Accept genuine transaction
+      const genuinePayload = {
+        date: '2026-10-31',
+        shopName: 'Shop A',
+        productName: '9a combo',
+        quantity: 2,
+        unitPrice: 250,
+        deliveryStatus: 'pending'
+      };
+      const genRes = ProductionSaveBusinessRecordSchema.safeParse(genuinePayload);
+      expect(genRes.success).toBe(true);
+    });
+  });
 });
 
