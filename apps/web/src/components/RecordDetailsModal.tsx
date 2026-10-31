@@ -10,6 +10,7 @@ import {
   Trash2 
 } from 'lucide-react';
 import type { BusinessRecord } from '../services/db.js';
+import { calculateRecordProfit } from '@crimpston/shared';
 
 export interface RecordDetailsModalProps {
   isOpen?: boolean;
@@ -49,7 +50,13 @@ export const RecordDetailsModal: React.FC<RecordDetailsModalProps> = ({
   if (!isOpen || !record) return null;
 
   const isDelivered = record.deliveryStatus === 'delivered';
-  const totalAmt = Number(record.totalAmount) || (Number(record.quantity || 1) * Number(record.unitPrice || 0));
+  const totalAmt = Number(record.totalAmount ?? (record as any).total_amount) || (Number(record.quantity || 1) * Number(record.unitPrice || 0));
+  const rawCp = record.customerPrice ?? (record as any).customer_price ?? null;
+  const parsedCp = rawCp !== null && rawCp !== undefined && rawCp !== '' && !isNaN(Number(rawCp)) ? Number(rawCp) : null;
+  const rawProfit = record.profit ?? (record as any).profit ?? null;
+  const resolvedProfit = (rawProfit !== null && rawProfit !== undefined && rawProfit !== '' && !isNaN(Number(rawProfit)))
+    ? Number(rawProfit)
+    : (parsedCp !== null ? calculateRecordProfit(totalAmt, parsedCp) : null);
 
   const formatDate = (iso: string) => {
     if (!iso) return '-';
@@ -164,10 +171,10 @@ export const RecordDetailsModal: React.FC<RecordDetailsModalProps> = ({
                 <span>Customer Price (CP)</span>
               </span>
               <span className={`text-xs sm:text-sm font-bold tabular-nums ${
-                record.customerPrice !== undefined && record.customerPrice !== null ? 'text-[#102A4C]' : 'text-slate-400 font-normal italic'
+                parsedCp !== null ? 'text-[#102A4C]' : 'text-slate-400 font-normal italic'
               }`}>
-                {record.customerPrice !== undefined && record.customerPrice !== null
-                  ? `₹${Number(record.customerPrice).toLocaleString('en-IN')}`
+                {parsedCp !== null
+                  ? `₹${parsedCp.toLocaleString('en-IN')}`
                   : 'Not Recorded'}
               </span>
             </div>
@@ -179,12 +186,12 @@ export const RecordDetailsModal: React.FC<RecordDetailsModalProps> = ({
                 <span>Calculated Profit</span>
               </span>
               <span className={`text-xs sm:text-sm font-bold tabular-nums ${
-                record.profit !== undefined && record.profit !== null
-                  ? (record.profit >= 0 ? 'text-emerald-700' : 'text-rose-600')
+                resolvedProfit !== null
+                  ? (resolvedProfit >= 0 ? 'text-emerald-700' : 'text-rose-600')
                   : 'text-slate-400 font-normal italic'
               }`}>
-                {record.profit !== undefined && record.profit !== null
-                  ? (record.profit >= 0 ? `+₹${record.profit.toLocaleString('en-IN')}` : `-₹${Math.abs(record.profit).toLocaleString('en-IN')}`)
+                {resolvedProfit !== null
+                  ? (resolvedProfit >= 0 ? `+₹${resolvedProfit.toLocaleString('en-IN')}` : `-₹${Math.abs(resolvedProfit).toLocaleString('en-IN')}`)
                   : 'Not Available'}
               </span>
             </div>

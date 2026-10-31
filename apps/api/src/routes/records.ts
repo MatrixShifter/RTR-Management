@@ -235,7 +235,7 @@ recordsRouter.patch('/:id/delivery-status', requireOwnerAuth, businessMutationRa
     // 2. Locate existing delivery record and verify existence
     let { data: existingDelivery, error: fetchErr } = await supabaseAdmin
       .from('deliveries')
-      .select('id, business_id, status')
+      .select('id, business_id, status, total_amount, notes')
       .eq('id', targetId)
       .maybeSingle();
 
@@ -253,7 +253,7 @@ recordsRouter.patch('/:id/delivery-status', requireOwnerAuth, businessMutationRa
         targetId = itemData.delivery_id;
         const { data: relDelivery } = await supabaseAdmin
           .from('deliveries')
-          .select('id, business_id, status')
+          .select('id, business_id, status, total_amount, notes')
           .eq('id', targetId)
           .maybeSingle();
         existingDelivery = relDelivery;
@@ -286,8 +286,32 @@ recordsRouter.patch('/:id/delivery-status', requireOwnerAuth, businessMutationRa
     }
 
     // 4. Update delivery status in database and verify affected row
+    const totalCost = Number(existingDelivery.total_amount || 0);
+    const calculatedProfit = validatedCp !== null ? Math.round((validatedCp - totalCost) * 100) / 100 : null;
+
+    let updatedNotes = existingDelivery.notes;
+    try {
+      let meta: any = {};
+      if (existingDelivery.notes && typeof existingDelivery.notes === 'string' && existingDelivery.notes.startsWith('{')) {
+        meta = JSON.parse(existingDelivery.notes);
+      }
+      if (validatedCp !== null) {
+        meta.customerPrice = validatedCp;
+        meta.profit = calculatedProfit;
+      }
+      updatedNotes = JSON.stringify(meta);
+    } catch {
+      updatedNotes = JSON.stringify({
+        memo: existingDelivery.notes || '',
+        totalAmount: totalCost,
+        customerPrice: validatedCp,
+        profit: calculatedProfit
+      });
+    }
+
     const updatePayload: any = {
       status,
+      notes: updatedNotes,
       updated_at: new Date().toISOString()
     };
     if (validatedCp !== null) {
@@ -298,16 +322,16 @@ recordsRouter.patch('/:id/delivery-status', requireOwnerAuth, businessMutationRa
       .from('deliveries')
       .update(updatePayload)
       .eq('id', targetId)
-      .select('id, status, customer_price')
+      .select('id, status, customer_price, notes')
       .maybeSingle();
 
-    // If customer_price or updated_at column is missing on older schema, gracefully fallback to updating status only
+    // If customer_price or updated_at column is missing on older schema, gracefully fallback to updating status and notes
     if (updateErr && (updateErr.message?.includes('customer_price') || updateErr.message?.includes('updated_at') || updateErr.code === '42703')) {
       const retryRes = await supabaseAdmin
         .from('deliveries')
-        .update({ status })
+        .update({ status, notes: updatedNotes, updated_at: new Date().toISOString() })
         .eq('id', targetId)
-        .select('id, status')
+        .select('id, status, notes')
         .maybeSingle();
       updatedDelivery = retryRes.data as any;
       updateErr = retryRes.error;
@@ -350,7 +374,8 @@ recordsRouter.patch('/:id/delivery-status', requireOwnerAuth, businessMutationRa
       message: `Delivery status updated to ${status}.`,
       deliveryId: targetId,
       status: updatedDelivery.status,
-      customerPrice: validatedCp ?? (updatedDelivery as any)?.customer_price ?? null
+      customerPrice: validatedCp ?? (updatedDelivery as any)?.customer_price ?? null,
+      profit: calculatedProfit
     });
   } catch (err: any) {
     const correlationId = (req.headers['x-correlation-id'] as string);

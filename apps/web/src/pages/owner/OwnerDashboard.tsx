@@ -41,7 +41,7 @@ import {
   type DeliveryRecord,
   type DailyReportRecord
 } from '../../services/db.js';
-import type { Invoice, PaymentRecord, StockBalance, DatabaseStorageHealth } from '@crimpston/shared';
+import { calculateRecordProfit, type Invoice, type PaymentRecord, type StockBalance, type DatabaseStorageHealth } from '@crimpston/shared';
 
 export type FilterMode = 'all' | 'delivery' | 'pending';
 export type SortDirection = 'asc' | 'desc';
@@ -253,7 +253,7 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
   const [storageHealth, setStorageHealth] = useState<DatabaseStorageHealth | null>(null);
   const [updatingDeliveryIds, setUpdatingDeliveryIds] = useState<Set<string>>(new Set());
   const inFlightTogglesRef = useRef<Set<string>>(new Set());
-  const recentStatusOverridesRef = useRef<Map<string, { status: 'delivered' | 'pending'; timestamp: number }>>(new Map());
+  const recentStatusOverridesRef = useRef<Map<string, { status: 'delivered' | 'pending'; customerPrice?: number | null; profit?: number | null; timestamp: number }>>(new Map());
   const recentlyDeletedIdsRef = useRef<Map<string, number>>(new Map());
   const recentlySavedRecordsRef = useRef<Map<string, { record: BusinessRecord; timestamp: number }>>(new Map());
   const [activeMenu, setActiveMenu] = useState<{ record: BusinessRecord; anchorRect: DOMRect } | null>(null);
@@ -316,12 +316,16 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
                          recentStatusOverridesRef.current.get(r.id) || 
                          (r.deliveryId ? recentStatusOverridesRef.current.get(r.deliveryId) : undefined);
         if (override && now - override.timestamp < 15000) {
+          const cpOverride = override.customerPrice !== undefined ? override.customerPrice : current.customerPrice;
+          const profitOverride = override.profit !== undefined ? override.profit : current.profit;
           return {
             ...current,
             deliveryStatus: override.status,
             delivery_status: override.status,
             status: override.status,
-            isDelivered: override.status === 'delivered'
+            isDelivered: override.status === 'delivered',
+            customerPrice: cpOverride,
+            profit: profitOverride
           };
         }
         return current;
@@ -363,16 +367,23 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
     const handleSync = (e?: Event) => {
       const customEvent = e as CustomEvent;
       if (customEvent?.detail?.key === 'deliveries' && customEvent.detail.deliveryId && customEvent.detail.status) {
-        const { deliveryId, status } = customEvent.detail;
-        recentStatusOverridesRef.current.set(deliveryId, { status, timestamp: Date.now() });
+        const { deliveryId, status, customerPrice, profit } = customEvent.detail;
+        recentStatusOverridesRef.current.set(deliveryId, { 
+          status, 
+          customerPrice: customerPrice !== undefined ? customerPrice : undefined,
+          profit: profit !== undefined ? profit : undefined,
+          timestamp: Date.now() 
+        });
         setRecords(prev => prev.map(r => {
           if (r.id === deliveryId || r.deliveryId === deliveryId) {
+            const hasCp = customerPrice !== undefined;
             return {
               ...r,
               deliveryStatus: status,
               delivery_status: status,
               status: status,
-              isDelivered: status === 'delivered'
+              isDelivered: status === 'delivered',
+              ...(hasCp ? { customerPrice, profit } : {})
             };
           }
           return r;
@@ -534,10 +545,10 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
         ? result.profit 
         : (confirmedCp !== undefined && confirmedCp !== null ? confirmedCp - totalCost : rec.profit);
 
-      recentStatusOverridesRef.current.set(rec.id, { status: confirmedStatus, timestamp: Date.now() });
-      recentStatusOverridesRef.current.set(targetDeliveryId, { status: confirmedStatus, timestamp: Date.now() });
+      recentStatusOverridesRef.current.set(rec.id, { status: confirmedStatus, customerPrice: confirmedCp, profit: confirmedProfit, timestamp: Date.now() });
+      recentStatusOverridesRef.current.set(targetDeliveryId, { status: confirmedStatus, customerPrice: confirmedCp, profit: confirmedProfit, timestamp: Date.now() });
       if (rec.deliveryId) {
-        recentStatusOverridesRef.current.set(rec.deliveryId, { status: confirmedStatus, timestamp: Date.now() });
+        recentStatusOverridesRef.current.set(rec.deliveryId, { status: confirmedStatus, customerPrice: confirmedCp, profit: confirmedProfit, timestamp: Date.now() });
       }
 
       setRecords(prev => prev.map(r => 
@@ -1480,8 +1491,14 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
                     const rowKey = rec.id || `${rec.deliveryId || 'deliv'}-${rec.productId || idx}`;
                     const pendingAmt = Number(rec.pendingAmount ?? (rec as any).pending_amount) || 0;
                     const totalAmt = Number(rec.totalAmount ?? (rec as any).total_amount) || (Number(rec.quantity || 0) * Number(rec.unitPrice || 0));
-                    const hasValidCp = rec.customerPrice !== undefined && rec.customerPrice !== null && !isNaN(Number(rec.customerPrice));
-                    const hasValidProfit = rec.profit !== undefined && rec.profit !== null && !isNaN(Number(rec.profit));
+                    const rawCp = rec.customerPrice ?? (rec as any).customer_price ?? null;
+                    const parsedCp = rawCp !== null && rawCp !== undefined && rawCp !== '' && !isNaN(Number(rawCp)) ? Number(rawCp) : null;
+                    const hasValidCp = parsedCp !== null;
+                    const rawProfit = rec.profit ?? (rec as any).profit ?? null;
+                    const resolvedProfit = (rawProfit !== null && rawProfit !== undefined && rawProfit !== '' && !isNaN(Number(rawProfit)))
+                      ? Number(rawProfit)
+                      : (hasValidCp ? calculateRecordProfit(totalAmt, parsedCp) : null);
+                    const hasValidProfit = resolvedProfit !== null && !isNaN(Number(resolvedProfit));
 
                     return (
                       <tr
@@ -1547,19 +1564,19 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
 
                         {/* 5. CP (₹) — Saved Customer Price */}
                         <td className="py-2 sm:py-3 px-2 sm:px-3 text-right text-[#102A4C] text-xs sm:text-sm font-medium tabular-nums whitespace-nowrap border-r border-[#E2E8F0] border-b border-[#E2E8F0]">
-                          {hasValidCp ? Number(rec.customerPrice).toLocaleString('en-IN') : '—'}
+                          {hasValidCp ? parsedCp.toLocaleString('en-IN') : '—'}
                           {hasValidCp && (
-                            <span className="sr-only">{`₹${Number(rec.customerPrice).toLocaleString('en-IN')}`}</span>
+                            <span className="sr-only">{`₹${parsedCp.toLocaleString('en-IN')}`}</span>
                           )}
                         </td>
 
                         {/* 6. Profit (₹) — Calculated Profit */}
                         <td className="py-2 sm:py-3 px-2 sm:px-3 text-right text-xs sm:text-sm font-medium tabular-nums whitespace-nowrap border-r border-[#E2E8F0] border-b border-[#E2E8F0]">
                           {hasValidProfit ? (
-                            <span className={`inline-flex items-center justify-end font-semibold ${Number(rec.profit) >= 0 ? 'text-emerald-700' : 'text-rose-600'}`}>
-                              {Number(rec.profit) >= 0 ? `+${Number(rec.profit).toLocaleString('en-IN')}` : `-${Math.abs(Number(rec.profit)).toLocaleString('en-IN')}`}
+                            <span className={`inline-flex items-center justify-end font-semibold ${resolvedProfit >= 0 ? 'text-emerald-700' : 'text-rose-600'}`}>
+                              {resolvedProfit >= 0 ? `+${resolvedProfit.toLocaleString('en-IN')}` : `-${Math.abs(resolvedProfit).toLocaleString('en-IN')}`}
                               <span className="sr-only">
-                                {Number(rec.profit) >= 0 ? `+₹${Number(rec.profit).toLocaleString('en-IN')}` : `-₹${Math.abs(Number(rec.profit)).toLocaleString('en-IN')}`}
+                                {resolvedProfit >= 0 ? `+₹${resolvedProfit.toLocaleString('en-IN')}` : `-₹${Math.abs(resolvedProfit).toLocaleString('en-IN')}`}
                               </span>
                             </span>
                           ) : (

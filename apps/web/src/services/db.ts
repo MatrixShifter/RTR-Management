@@ -2896,6 +2896,7 @@ export async function updateDeliveryStatus(
   let apiSuccess = false;
   let confirmedStatus: 'delivered' | 'pending' = status;
   let confirmedCp: number | null | undefined = validatedCp;
+  let confirmedProfit: number | null | undefined = undefined;
 
   if (isSupabaseConfigured && supabase && !targetId.startsWith('deliv-')) {
     try {
@@ -2915,6 +2916,9 @@ export async function updateDeliveryStatus(
           confirmedStatus = json.status || status;
           if (json.customerPrice !== undefined) {
             confirmedCp = json.customerPrice;
+          }
+          if (json.profit !== undefined) {
+            confirmedProfit = json.profit;
           }
         }
       } else {
@@ -2942,11 +2946,43 @@ export async function updateDeliveryStatus(
     if (!apiSuccess) {
       try {
         await ensureAuthenticatedSession();
+        const { data: existingD } = await supabase
+          .from('deliveries')
+          .select('id, total_amount, notes')
+          .eq('id', targetId)
+          .maybeSingle();
+
+        const totalCost = Number(existingD?.total_amount || 0);
+        if (validatedCp !== undefined && validatedCp !== null) {
+          confirmedProfit = Math.round((validatedCp - totalCost) * 100) / 100;
+        }
+
+        let updatedNotes = existingD?.notes;
+        try {
+          let meta: any = {};
+          if (existingD?.notes && typeof existingD.notes === 'string' && existingD.notes.startsWith('{')) {
+            meta = JSON.parse(existingD.notes);
+          }
+          if (validatedCp !== undefined) {
+            meta.customerPrice = validatedCp;
+            meta.profit = confirmedProfit;
+          }
+          updatedNotes = JSON.stringify(meta);
+        } catch {
+          updatedNotes = JSON.stringify({
+            memo: existingD?.notes || '',
+            totalAmount: totalCost,
+            customerPrice: validatedCp ?? null,
+            profit: confirmedProfit
+          });
+        }
+
         const updatePayload: any = {
           status,
+          notes: updatedNotes,
           updated_at: new Date().toISOString()
         };
-        if (validatedCp !== undefined) {
+        if (validatedCp !== undefined && validatedCp !== null) {
           updatePayload.customer_price = validatedCp;
         }
 
@@ -2954,17 +2990,17 @@ export async function updateDeliveryStatus(
           .from('deliveries')
           .update(updatePayload)
           .eq('id', targetId)
-          .select('id, status')
-          .single();
+          .select('id, status, notes')
+          .maybeSingle();
 
         if (error && (error.message?.includes('customer_price') || error.code === '42703')) {
-          // If customer_price column not present in deliveries, fallback without it
+          // If customer_price column not present in deliveries, fallback updating status and notes
           const retryRes = await supabase
             .from('deliveries')
-            .update({ status, updated_at: new Date().toISOString() })
+            .update({ status, notes: updatedNotes, updated_at: new Date().toISOString() })
             .eq('id', targetId)
-            .select('id, status')
-            .single();
+            .select('id, status, notes')
+            .maybeSingle();
           data = retryRes.data;
           error = retryRes.error;
         }
@@ -2999,10 +3035,13 @@ export async function updateDeliveryStatus(
   const resolvedId = resolveDeliveryIdFromList(targetId, deliveries) || targetId;
   const idx = deliveries.findIndex(d => d.id === resolvedId || d.id === targetId || d.id === cleanId);
   if (idx >= 0 && deliveries[idx]) {
+    const existing = deliveries[idx]!;
+    const totalCost = (existing.items || []).reduce((acc, it) => acc + (it.quantity * (it.unitPrice || 0)), 0) || Number(existing.pendingAmount || 0);
+    const profitToSet = confirmedProfit !== undefined ? confirmedProfit : (confirmedCp !== undefined && confirmedCp !== null ? Math.round((confirmedCp - totalCost) * 100) / 100 : existing.profit);
     deliveries[idx] = { 
-      ...deliveries[idx]!, 
+      ...existing, 
       status: confirmedStatus,
-      ...(confirmedCp !== undefined ? { customerPrice: confirmedCp } : {})
+      ...(confirmedCp !== undefined ? { customerPrice: confirmedCp, profit: profitToSet } : {})
     };
     setLocalItem(STORAGE_KEYS.DELIVERIES, deliveries);
   } else {
@@ -3012,6 +3051,7 @@ export async function updateDeliveryStatus(
       deliveryDate: new Date().toISOString().split('T')[0] || '',
       status: confirmedStatus,
       customerPrice: confirmedCp ?? null,
+      profit: confirmedProfit ?? null,
       createdBy: 'Business Owner',
       items: [],
       createdAt: new Date().toISOString()
@@ -3023,7 +3063,7 @@ export async function updateDeliveryStatus(
   // Dispatch sync event with confirmed details
   if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function') {
     window.dispatchEvent(new CustomEvent('rtr_data_sync', { 
-      detail: { key: 'deliveries', deliveryId: targetId, status: confirmedStatus, customerPrice: confirmedCp } 
+      detail: { key: 'deliveries', deliveryId: targetId, status: confirmedStatus, customerPrice: confirmedCp, profit: confirmedProfit } 
     }));
   }
 
@@ -3032,6 +3072,7 @@ export async function updateDeliveryStatus(
     deliveryId: targetId,
     status: confirmedStatus,
     customerPrice: confirmedCp,
+    profit: confirmedProfit,
     message: `Delivery status updated to ${confirmedStatus}.`
   };
 }

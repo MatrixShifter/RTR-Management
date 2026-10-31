@@ -480,6 +480,110 @@ describe('OwnerDashboard Component — Modern UI & Simple Delivery/Pending Manag
       expect(res.status).toBe('delivered');
       expect(res.customerPrice).toBe(3500);
     });
+
+    it('verifies the 3 required customer price and profit test cases in main table (Amount ₹25, CP ₹35 → Profit ₹10; Amount ₹234, CP ₹300 → Profit ₹66; Amount ₹241, CP ₹300 → Profit ₹59)', () => {
+      // Test Case 1: Amount ₹25, CP ₹35 → Profit ₹10
+      const testCase1: db.BusinessRecord = {
+        id: 'rec-tc-1',
+        deliveryId: 'deliv-tc-1',
+        date: '2026-10-30',
+        shopId: 'shop-tc-1',
+        shopName: 'Shop A',
+        productId: 'prod-tc-1',
+        productName: '9a combo',
+        quantity: 1,
+        unitPrice: 25,
+        totalAmount: 25,
+        customerPrice: 35,
+        profit: 10,
+        deliveryStatus: 'delivered',
+        pendingAmount: 0,
+        createdAt: '2026-10-30T10:00:00Z'
+      };
+
+      // Test Case 2: Amount ₹234, CP ₹300 → Profit ₹66
+      const testCase2: db.BusinessRecord = {
+        id: 'rec-tc-2',
+        deliveryId: 'deliv-tc-2',
+        date: '2026-10-30',
+        shopId: 'shop-tc-2',
+        shopName: 'shopa',
+        productId: 'prod-tc-2',
+        productName: '9a combo',
+        quantity: 1,
+        unitPrice: 234,
+        totalAmount: 234,
+        customerPrice: 300,
+        profit: 66,
+        deliveryStatus: 'delivered',
+        pendingAmount: 0,
+        createdAt: '2026-10-30T10:01:00Z'
+      };
+
+      // Test Case 3: Amount ₹241, CP ₹300 → Profit ₹59 (tests dynamic calculation when profit field is omitted)
+      const testCase3: db.BusinessRecord = {
+        id: 'rec-tc-3',
+        deliveryId: 'deliv-tc-3',
+        date: '2026-10-30',
+        shopId: 'shop-tc-3',
+        shopName: 'Shop A',
+        productId: 'prod-tc-3',
+        productName: '9a combo',
+        quantity: 1,
+        unitPrice: 241,
+        totalAmount: 241,
+        customerPrice: 300,
+        profit: null,
+        deliveryStatus: 'delivered',
+        pendingAmount: 0,
+        createdAt: '2026-10-30T10:02:00Z'
+      };
+
+      // Case 4: Delivered without recorded CP -> displays em dash, does NOT fabricate
+      const testCaseMissingCp: db.BusinessRecord = {
+        id: 'rec-tc-4',
+        deliveryId: 'deliv-tc-4',
+        date: '2026-10-30',
+        shopId: 'shop-tc-4',
+        shopName: 'Shop B',
+        productId: 'prod-tc-4',
+        productName: '9a combo',
+        quantity: 1,
+        unitPrice: 123,
+        totalAmount: 123,
+        customerPrice: null,
+        profit: null,
+        deliveryStatus: 'delivered',
+        pendingAmount: 0,
+        createdAt: '2026-10-30T10:03:00Z'
+      };
+
+      const html = renderToString(
+        <MemoryRouter>
+          <OwnerDashboard
+            initialLoading={false}
+            initialShops={[]}
+            initialRecords={[testCase1, testCase2, testCase3, testCaseMissingCp]}
+          />
+        </MemoryRouter>
+      );
+
+      // TC1 assertions: Amount 25, CP 35, Profit +10
+      expect(html).toContain('35');
+      expect(html).toContain('+10');
+
+      // TC2 assertions: Amount 234, CP 300, Profit +66
+      expect(html).toContain('234');
+      expect(html).toContain('300');
+      expect(html).toContain('+66');
+
+      // TC3 assertions: Amount 241, CP 300, dynamically calculated Profit +59
+      expect(html).toContain('241');
+      expect(html).toContain('+59');
+
+      // Missing CP assertions: renders em dash, no fabricated value
+      expect(html).toContain('—');
+    });
   });
 
   describe('Financial Accounting & Dashboard Metrics Verification (Scenarios A through F)', () => {
