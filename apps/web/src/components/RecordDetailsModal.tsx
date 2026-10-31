@@ -182,16 +182,30 @@ export const RecordDetailsModal: React.FC<RecordDetailsModalProps> = ({
             {/* Field 3c: Calculated Profit */}
             <div className="flex items-center justify-between p-3.5 bg-[#F8FAFC]">
               <span className="text-xs font-semibold text-[#556982] flex items-center gap-1.5">
-                <IndianRupee className="w-4 h-4 text-emerald-600" />
-                <span>Calculated Profit</span>
+                <IndianRupee className={`w-4 h-4 ${
+                  resolvedProfit !== null && resolvedProfit < 0 
+                    ? 'text-rose-600' 
+                    : resolvedProfit === 0 
+                      ? 'text-slate-500' 
+                      : 'text-emerald-600'
+                }`} />
+                <span>
+                  {resolvedProfit !== null
+                    ? (resolvedProfit > 0 ? 'Calculated Profit' : resolvedProfit === 0 ? 'Break-Even' : 'Calculated Loss')
+                    : 'Calculated Profit'}
+                </span>
               </span>
               <span className={`text-xs sm:text-sm font-bold tabular-nums ${
                 resolvedProfit !== null
-                  ? (resolvedProfit >= 0 ? 'text-emerald-700' : 'text-rose-600')
+                  ? (resolvedProfit > 0 ? 'text-emerald-700' : resolvedProfit === 0 ? 'text-slate-600' : 'text-rose-600')
                   : 'text-slate-400 font-normal italic'
               }`}>
                 {resolvedProfit !== null
-                  ? (resolvedProfit >= 0 ? `+₹${resolvedProfit.toLocaleString('en-IN')}` : `-₹${Math.abs(resolvedProfit).toLocaleString('en-IN')}`)
+                  ? (resolvedProfit > 0 
+                      ? `+₹${resolvedProfit.toLocaleString('en-IN')}` 
+                      : resolvedProfit === 0 
+                        ? '₹0' 
+                        : `-₹${Math.abs(resolvedProfit).toLocaleString('en-IN')}`)
                   : 'Not Available'}
               </span>
             </div>

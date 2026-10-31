@@ -1571,10 +1571,24 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
                         {/* 6. Profit (₹) — Calculated Profit */}
                         <td className="py-2 sm:py-3 px-2 sm:px-3 text-right text-xs sm:text-sm font-medium tabular-nums whitespace-nowrap border-r border-[#E2E8F0] border-b border-[#E2E8F0]">
                           {hasValidProfit ? (
-                            <span className={`inline-flex items-center justify-end font-semibold ${resolvedProfit >= 0 ? 'text-emerald-700' : 'text-rose-600'}`}>
-                              {resolvedProfit >= 0 ? `+${resolvedProfit.toLocaleString('en-IN')}` : `-${Math.abs(resolvedProfit).toLocaleString('en-IN')}`}
+                            <span className={`inline-flex items-center justify-end font-semibold ${
+                              resolvedProfit > 0 
+                                ? 'text-emerald-700' 
+                                : resolvedProfit === 0 
+                                  ? 'text-slate-600' 
+                                  : 'text-rose-600'
+                            }`}>
+                              {resolvedProfit > 0 
+                                ? `+${resolvedProfit.toLocaleString('en-IN')}` 
+                                : resolvedProfit === 0 
+                                  ? '0' 
+                                  : `-${Math.abs(resolvedProfit).toLocaleString('en-IN')}`}
                               <span className="sr-only">
-                                {resolvedProfit >= 0 ? `+₹${resolvedProfit.toLocaleString('en-IN')}` : `-₹${Math.abs(resolvedProfit).toLocaleString('en-IN')}`}
+                                {resolvedProfit > 0 
+                                  ? `+₹${resolvedProfit.toLocaleString('en-IN')}` 
+                                  : resolvedProfit === 0 
+                                    ? '₹0' 
+                                    : `-₹${Math.abs(resolvedProfit).toLocaleString('en-IN')}`}
                               </span>
                             </span>
                           ) : (

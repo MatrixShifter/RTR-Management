@@ -1274,21 +1274,25 @@ export const RecordEntryDrawer: React.FC<RecordEntryDrawerProps> = ({
                 <div 
                   data-testid="live-profit-indicator"
                   className={`p-2.5 rounded-xl border flex items-center justify-between text-xs sm:text-sm transition-all ${
-                    liveProfit >= 0 
+                    liveProfit > 0 
                       ? 'bg-emerald-50/90 border-emerald-200 text-emerald-900' 
-                      : 'bg-rose-50/90 border-rose-200 text-rose-900'
+                      : liveProfit === 0
+                        ? 'bg-slate-50 border-slate-200 text-slate-800'
+                        : 'bg-rose-50/90 border-rose-200 text-rose-900'
                   }`}
                 >
                   <div className="flex items-center gap-1.5 font-medium">
-                    {liveProfit >= 0 ? (
+                    {liveProfit > 0 ? (
                       <span className="w-2 h-2 rounded-full bg-emerald-500 inline-block"></span>
+                    ) : liveProfit === 0 ? (
+                      <span className="w-2 h-2 rounded-full bg-slate-400 inline-block"></span>
                     ) : (
                       <AlertTriangle className="w-3.5 h-3.5 text-rose-600 flex-shrink-0" />
                     )}
-                    <span>{liveProfit >= 0 ? 'Estimated Profit' : 'Loss Warning (Selling Below Cost)'}</span>
+                    <span>{liveProfit > 0 ? 'Estimated Profit' : liveProfit === 0 ? 'Break-Even' : 'Loss Warning (Selling Below Cost)'}</span>
                   </div>
                   <div className="font-bold tracking-tight text-xs sm:text-sm">
-                    {liveProfit >= 0 ? `+₹${liveProfit.toLocaleString('en-IN')}` : `-₹${Math.abs(liveProfit).toLocaleString('en-IN')}`}
+                    {liveProfit > 0 ? `+₹${liveProfit.toLocaleString('en-IN')}` : liveProfit === 0 ? '₹0' : `-₹${Math.abs(liveProfit).toLocaleString('en-IN')}`}
                   </div>
                 </div>
               )}

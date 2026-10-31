@@ -700,19 +700,33 @@ export const IndividualShopStatement: React.FC<IndividualShopStatementProps> = (
           </div>
         </div>
 
-        {/* Card 3: Gross Profit */}
+        {/* Card 3: Gross Profit / Loss */}
         <div className="bg-white p-4 sm:p-5 rounded-2xl border border-[#DCE4EC] shadow-2xs">
           <span className="text-[11px] sm:text-xs font-bold text-slate-400 uppercase tracking-wider block">
-            Gross Profit
+            Gross Profit / Loss
           </span>
           <div className={`text-lg sm:text-2xl font-black mt-1 tabular-nums ${
-            summaryMetrics.totalProfit >= 0 ? 'text-emerald-600' : 'text-rose-600'
+            summaryMetrics.totalProfit > 0 
+              ? 'text-emerald-600' 
+              : summaryMetrics.totalProfit === 0 
+                ? 'text-slate-700' 
+                : 'text-rose-600'
           }`}>
-            {`${summaryMetrics.totalProfit >= 0 ? '+' : '-'}₹${Math.abs(summaryMetrics.totalProfit).toLocaleString('en-IN')}`}
+            {summaryMetrics.totalProfit > 0 
+              ? `+₹${summaryMetrics.totalProfit.toLocaleString('en-IN')}` 
+              : summaryMetrics.totalProfit === 0 
+                ? '₹0' 
+                : `-₹${Math.abs(summaryMetrics.totalProfit).toLocaleString('en-IN')}`}
           </div>
           <div className="text-[11px] text-slate-500 mt-1 font-semibold">
             {summaryMetrics.profitMarginPercent !== null ? (
-              <span className={summaryMetrics.profitMarginPercent >= 0 ? 'text-emerald-700' : 'text-rose-600'}>
+              <span className={
+                summaryMetrics.profitMarginPercent > 0 
+                  ? 'text-emerald-700' 
+                  : summaryMetrics.profitMarginPercent === 0 
+                    ? 'text-slate-600' 
+                    : 'text-rose-600'
+              }>
                 {`${summaryMetrics.profitMarginPercent}% Margin on Cost`}
               </span>
             ) : (
@@ -892,10 +906,14 @@ export const IndividualShopStatement: React.FC<IndividualShopStatementProps> = (
                         <td className={`py-3 px-3 sm:px-4 text-right font-bold tabular-nums ${
                           prod.recordsWithCpCount === 0 
                             ? 'text-slate-400' 
-                            : (prod.totalProfit >= 0 ? 'text-emerald-700' : 'text-rose-600')
+                            : (prod.totalProfit > 0 ? 'text-emerald-700' : prod.totalProfit === 0 ? 'text-slate-600' : 'text-rose-600')
                         }`}>
                           {prod.recordsWithCpCount > 0 ? (
-                            `${prod.totalProfit >= 0 ? '+' : '-'}₹${Math.abs(prod.totalProfit).toLocaleString('en-IN')}`
+                            prod.totalProfit > 0 
+                              ? `+₹${prod.totalProfit.toLocaleString('en-IN')}` 
+                              : prod.totalProfit === 0 
+                                ? '₹0' 
+                                : `-₹${Math.abs(prod.totalProfit).toLocaleString('en-IN')}`
                           ) : (
                             <span className="text-slate-400 italic">N/A</span>
                           )}
@@ -905,7 +923,11 @@ export const IndividualShopStatement: React.FC<IndividualShopStatementProps> = (
                         <td className="py-3 px-3 sm:px-4 text-center font-bold">
                           {prod.profitMarginPercent !== null ? (
                             <span className={`px-2 py-0.5 rounded-full text-xs ${
-                              prod.profitMarginPercent >= 0 ? 'bg-emerald-50 text-emerald-800' : 'bg-rose-50 text-rose-800'
+                              prod.profitMarginPercent > 0 
+                                ? 'bg-emerald-50 text-emerald-800' 
+                                : prod.profitMarginPercent === 0 
+                                  ? 'bg-slate-100 text-slate-700' 
+                                  : 'bg-rose-50 text-rose-800'
                             }`}>
                               {prod.profitMarginPercent}%
                             </span>
@@ -1144,10 +1166,14 @@ export const IndividualShopStatement: React.FC<IndividualShopStatementProps> = (
                         <td className={`py-3 px-3 sm:px-4 text-right font-bold tabular-nums ${
                           !hasCp 
                             ? 'text-slate-400' 
-                            : (profitVal >= 0 ? 'text-emerald-700' : 'text-rose-600')
+                            : (profitVal > 0 ? 'text-emerald-700' : profitVal === 0 ? 'text-slate-600' : 'text-rose-600')
                         }`}>
                           {hasCp ? (
-                            `${profitVal >= 0 ? '+' : '-'}₹${Math.abs(profitVal).toLocaleString('en-IN')}`
+                            profitVal > 0 
+                              ? `+₹${profitVal.toLocaleString('en-IN')}` 
+                              : profitVal === 0 
+                                ? '₹0' 
+                                : `-₹${Math.abs(profitVal).toLocaleString('en-IN')}`
                           ) : (
                             <span className="text-slate-400 italic">Not Available</span>
                           )}
