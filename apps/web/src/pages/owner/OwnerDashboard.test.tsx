@@ -581,8 +581,9 @@ describe('OwnerDashboard Component — Modern UI & Simple Delivery/Pending Manag
       expect(html).toContain('241');
       expect(html).toContain('+59');
 
-      // Missing CP assertions: renders em dash, no fabricated value
-      expect(html).toContain('—');
+      // Missing CP assertions: renders Not Recorded / Not Available, no fabricated value
+      expect(html).toContain('Not Recorded');
+      expect(html).toContain('Not Available');
     });
   });
 

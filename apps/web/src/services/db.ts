@@ -2946,11 +2946,30 @@ export async function updateDeliveryStatus(
     if (!apiSuccess) {
       try {
         await ensureAuthenticatedSession();
-        const { data: existingD } = await supabase
+        let resolvedDeliveryId = targetId;
+        let { data: existingD } = await supabase
           .from('deliveries')
           .select('id, total_amount, notes')
-          .eq('id', targetId)
+          .eq('id', resolvedDeliveryId)
           .maybeSingle();
+
+        // If targetId was a delivery_items row ID, resolve parent delivery
+        if (!existingD) {
+          const { data: itemD } = await supabase
+            .from('delivery_items')
+            .select('delivery_id')
+            .eq('id', targetId)
+            .maybeSingle();
+          if (itemD?.delivery_id) {
+            resolvedDeliveryId = itemD.delivery_id;
+            const { data: relD } = await supabase
+              .from('deliveries')
+              .select('id, total_amount, notes')
+              .eq('id', resolvedDeliveryId)
+              .maybeSingle();
+            existingD = relD;
+          }
+        }
 
         const totalCost = Number(existingD?.total_amount || 0);
         if (validatedCp !== undefined && validatedCp !== null) {
@@ -2967,6 +2986,7 @@ export async function updateDeliveryStatus(
             meta.customerPrice = validatedCp;
             meta.profit = confirmedProfit;
           }
+          meta.totalAmount = meta.totalAmount ?? totalCost;
           updatedNotes = JSON.stringify(meta);
         } catch {
           updatedNotes = JSON.stringify({
@@ -2989,7 +3009,7 @@ export async function updateDeliveryStatus(
         let { data, error } = await supabase
           .from('deliveries')
           .update(updatePayload)
-          .eq('id', targetId)
+          .eq('id', resolvedDeliveryId)
           .select('id, status, notes')
           .maybeSingle();
 
@@ -2998,7 +3018,7 @@ export async function updateDeliveryStatus(
           const retryRes = await supabase
             .from('deliveries')
             .update({ status, notes: updatedNotes, updated_at: new Date().toISOString() })
-            .eq('id', targetId)
+            .eq('id', resolvedDeliveryId)
             .select('id, status, notes')
             .maybeSingle();
           data = retryRes.data;
@@ -3008,9 +3028,12 @@ export async function updateDeliveryStatus(
         if (error) {
           throw new Error(error.message);
         }
+        if (Array.isArray(data) && (data as any[]).length > 0) {
+          data = (data as any[])[0];
+        }
         if (data) {
           apiSuccess = true;
-          confirmedStatus = (data.status as 'delivered' | 'pending') || status;
+          confirmedStatus = ((data as any).status as 'delivered' | 'pending') || status;
         }
       } catch (dbErr: any) {
         console.error('Direct Supabase updateDeliveryStatus error:', dbErr);

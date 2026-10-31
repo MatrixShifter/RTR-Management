@@ -1564,7 +1564,11 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
 
                         {/* 5. CP (₹) — Saved Customer Price */}
                         <td className="py-2 sm:py-3 px-2 sm:px-3 text-right text-[#102A4C] text-xs sm:text-sm font-medium tabular-nums whitespace-nowrap border-r border-[#E2E8F0] border-b border-[#E2E8F0]">
-                          {hasValidCp ? parsedCp.toLocaleString('en-IN') : '—'}
+                          {hasValidCp ? (
+                            <span>{parsedCp.toLocaleString('en-IN')}</span>
+                          ) : (
+                            <span className="text-slate-400 font-normal italic">Not Recorded</span>
+                          )}
                           {hasValidCp && (
                             <span className="sr-only">{`₹${parsedCp.toLocaleString('en-IN')}`}</span>
                           )}
@@ -1580,7 +1584,7 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
                               </span>
                             </span>
                           ) : (
-                            <span className="text-[#64748B]">—</span>
+                            <span className="text-slate-400 font-normal italic">Not Available</span>
                           )}
                         </td>
 
