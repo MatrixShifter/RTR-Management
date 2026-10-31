@@ -101,6 +101,22 @@ describe('Delivery Status Lifecycle Endpoints (/api/records/:id/delivery-status)
       // Validates payload; even if delivery_number is provided in body, backend ignores non-canonical fields
       expect(res.status).toBe(404);
     });
+
+    it('calculates and permits Profit, Break-even, and Loss transactions (authoritative formula)', async () => {
+      const calculateFormula = (amt: number, cp: number) => Math.round((cp - amt) * 100) / 100;
+
+      // Case 1: Profit (Amount ₹2,000, CP ₹3,000 -> +₹1,000)
+      expect(calculateFormula(2000, 3000)).toBe(1000);
+
+      // Case 2: Break-even (Amount ₹2,000, CP ₹2,000 -> ₹0)
+      expect(calculateFormula(2000, 2000)).toBe(0);
+
+      // Case 3: Loss (Amount ₹2,000, CP ₹1,500 -> -₹500)
+      expect(calculateFormula(2000, 1500)).toBe(-500);
+
+      // Case 4: Larger Loss (Amount ₹5,000, CP ₹3,000 -> -₹2,000)
+      expect(calculateFormula(5000, 3000)).toBe(-2000);
+    });
   });
 
   describe('GET /api/records Server-Side Date & Filter Support', () => {

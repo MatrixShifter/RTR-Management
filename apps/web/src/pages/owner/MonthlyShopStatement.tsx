@@ -429,7 +429,9 @@ export const MonthlyShopStatement: React.FC<MonthlyShopStatementProps> = ({
       csvContent += `Date,Product Name,Quantity,Unit Price (₹),Total Cost (₹),Customer Price (₹),Profit (₹),Delivery Status\n`;
       (currentSingleShopData?.records || []).forEach(r => {
         const cpStr = r.customerPrice !== undefined && r.customerPrice !== null ? `₹${r.customerPrice}` : 'Not Recorded';
-        const profitStr = r.profit !== undefined && r.profit !== null ? `₹${r.profit}` : 'Not Available';
+        const profitStr = r.profit !== undefined && r.profit !== null 
+          ? (Number(r.profit) > 0 ? `+₹${Number(r.profit)}` : Number(r.profit) === 0 ? '₹0' : `-₹${Math.abs(Number(r.profit))}`)
+          : 'Not Available';
         csvContent += `"${r.date}","${r.productName}",${r.quantity},${r.unitPrice},${r.totalAmount},"${cpStr}","${profitStr}","${r.deliveryStatus}"\n`;
       });
     }

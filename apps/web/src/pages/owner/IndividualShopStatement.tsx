@@ -436,7 +436,7 @@ export const IndividualShopStatement: React.FC<IndividualShopStatementProps> = (
     filteredTransactions.forEach(r => {
       const cpStr = r.customerPrice !== undefined && r.customerPrice !== null ? `₹${r.customerPrice}` : 'Not Recorded';
       const profitStr = r.profit !== undefined && r.profit !== null 
-        ? `${Number(r.profit) >= 0 ? '+' : '-'}₹${Math.abs(Number(r.profit))}` 
+        ? (Number(r.profit) > 0 ? `+₹${Number(r.profit)}` : Number(r.profit) === 0 ? '₹0' : `-₹${Math.abs(Number(r.profit))}`) 
         : 'Not Available';
       csv += `"${r.date}","${r.productName}",${r.quantity},${r.unitPrice},${r.totalAmount},"${cpStr}","${profitStr}","${r.deliveryStatus}"\n`;
     });

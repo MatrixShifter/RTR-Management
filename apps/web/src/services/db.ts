@@ -1879,21 +1879,26 @@ export function mapViewRecordToBusinessRecord(row: any): BusinessRecord {
   let rawCp = row.customer_price ?? row.customerPrice ?? null;
   let parsedCp: number | null = rawCp !== null && rawCp !== undefined && rawCp !== '' && !isNaN(Number(rawCp)) ? Number(rawCp) : null;
 
-  // Fallback: Check if notes contains JSON metadata with customerPrice
-  if (parsedCp === null && row.notes && typeof row.notes === 'string' && row.notes.startsWith('{')) {
+  let profit: number | null = null;
+  if (row.profit !== undefined && row.profit !== null && row.profit !== '' && !isNaN(Number(row.profit))) {
+    profit = Number(row.profit);
+  }
+
+  // Fallback: Check if notes contains JSON metadata with customerPrice and profit
+  if (row.notes && typeof row.notes === 'string' && row.notes.startsWith('{')) {
     try {
       const meta = JSON.parse(row.notes);
-      if (meta.customerPrice !== undefined && meta.customerPrice !== null && !isNaN(Number(meta.customerPrice))) {
+      if (parsedCp === null && meta.customerPrice !== undefined && meta.customerPrice !== null && !isNaN(Number(meta.customerPrice))) {
         parsedCp = Number(meta.customerPrice);
+      }
+      if (profit === null && meta.profit !== undefined && meta.profit !== null && !isNaN(Number(meta.profit))) {
+        profit = Number(meta.profit);
       }
     } catch {}
   }
 
   const totalAmount = Number(row.total_amount ?? row.totalAmount ?? 0);
-  let profit: number | null = null;
-  if (row.profit !== undefined && row.profit !== null && row.profit !== '' && !isNaN(Number(row.profit))) {
-    profit = Number(row.profit);
-  } else if (parsedCp !== null) {
+  if (profit === null && parsedCp !== null) {
     profit = calculateRecordProfit(totalAmount, parsedCp);
   }
 
