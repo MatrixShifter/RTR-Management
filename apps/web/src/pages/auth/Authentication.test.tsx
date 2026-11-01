@@ -79,6 +79,22 @@ describe('Secure Owner Authentication Suite', () => {
       expect(html).not.toContain('Development Testing Accounts');
     });
 
+    it('initially renders with completely empty username and password fields on fresh load', () => {
+      localStorage.clear();
+      const html = renderToString(
+        <Login onLoginSuccess={() => {}} onNavigateToForgot={() => {}} />
+      );
+
+      // Verify input values are empty string and no default credentials are leaked
+      expect(html).toContain('name="username"');
+      expect(html).toContain('name="password"');
+      expect(html).toContain('value=""');
+      expect(html).not.toContain('owner@rtrmobiles.com');
+      expect(html).not.toContain('vinov042007@gmail.com');
+      expect(html).not.toContain('demo-owner');
+      expect(html).not.toContain('password123');
+    });
+
     it('displays exact required message on authentication failure', () => {
       expect(INCORRECT_CREDENTIALS_MSG).toBe("Incorrect username or password. Please try again.");
       expect(NETWORK_ERROR_MSG).toBe("Unable to connect to authentication service. Please check your connection and try again.");

@@ -115,6 +115,19 @@ export function logSecurityEvent(event: SecurityEvent): void {
     }
   }
 
+  const isTest = process.env.NODE_ENV === 'test';
+  const isVerbose = process.env.VERBOSE_LOGS === 'true' || process.env.DEBUG_SECURITY === 'true';
+
+  // Logging level enforcement:
+  // - Critical security failures (status: 'FAILURE') and access denials (status: 'BLOCKED') are ALWAYS logged.
+  // - Critical financial/data mutations and employee revocations are ALWAYS logged.
+  // - Routine successful authentications (OWNER_LOGIN, EMPLOYEE_LOGIN, DEMO_LOGIN) are suppressed
+  //   from terminal noise in production and standard development, unless verbose debugging or test verification is active.
+  const isRoutineAuthSuccess = event.status === 'SUCCESS' && (category === 'auth_login' || category === 'auth_session');
+  if (isRoutineAuthSuccess && !isTest && !isVerbose) {
+    return;
+  }
+
   const payload = {
     level: 'security',
     timestamp: new Date().toISOString(),
@@ -127,6 +140,15 @@ export function logSecurityEvent(event: SecurityEvent): void {
 
 export const logger = {
   info: (message: string, meta?: unknown) => {
+    const isProd = process.env.NODE_ENV === 'production';
+    const isVerbose = process.env.VERBOSE_LOGS === 'true';
+    const isLifecycleMessage = message.includes('listening') || message.includes('ready') || message.includes('Shutting down') || message.includes('closed');
+
+    // In production, omit routine debug info unless it is a primary lifecycle message or verbose mode is enabled
+    if (isProd && !isVerbose && !isLifecycleMessage) {
+      return;
+    }
+
     // eslint-disable-next-line no-console
     console.log(JSON.stringify({
       level: 'info',

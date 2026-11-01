@@ -165,7 +165,7 @@ export async function provisionOwnerAccount() {
   console.log(`======================================================`);
   console.log(`Username: ${OWNER_USERNAME}`);
   console.log(`Email:    ${OWNER_EMAIL}`);
-  console.log(`Password: ${OWNER_PASSWORD}`);
+  console.log(`Password: [CONFIGURED - NEVER LOGGED TO TERMINAL]`);
   console.log(`\nThe owner can now sign in immediately at the Login page.`);
   console.log(`After initial login, the owner can change their password at any`);
   console.log(`time using the 'Forgot Password' link or Settings page.\n`);

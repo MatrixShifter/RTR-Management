@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import { DEMO_PASSWORD_PLACEHOLDER } from '@crimpston/shared';
 import healthHandler from '../api/health.js';
 import loginHandler from '../api/auth/login.js';
 import verifySessionHandler from '../api/auth/verify-session.js';
@@ -75,7 +76,7 @@ describe('Vercel Serverless API Endpoints Suite (/api/*)', () => {
   it('POST /api/auth/login authenticates demo owner into isolated sandbox', async () => {
     const { req, res } = createMockReqRes({
       method: 'POST',
-      body: { username: 'demo-owner', password: 'demo-password-2026' }
+      body: { username: 'demo-owner', password: DEMO_PASSWORD_PLACEHOLDER }
     });
     await loginHandler(req, res);
 
