@@ -87,7 +87,7 @@ export const Login: React.FC<LoginProps> = ({
           RTR Wholesale Management
         </h1>
         <p className="mt-1.5 text-xs sm:text-sm text-slate-500">
-          Owner Portal &bull; Mobile Accessories Distribution &amp; Settlement Ledger
+          Mobile Accessories Distribution &amp; Settlement Ledger
         </p>
       </div>
 
@@ -95,10 +95,10 @@ export const Login: React.FC<LoginProps> = ({
         <div className="bg-white py-6 sm:py-8 px-4 sm:px-10 shadow-sm border border-slate-200/90 rounded-2xl">
           <div className="mb-6 pb-3 border-b border-slate-100">
             <h2 className="text-base sm:text-lg font-bold text-[#102A4C]">
-              Business Owner Sign In
+              Sign In to RTR Wholesale
             </h2>
             <p className="text-xs text-slate-500 mt-0.5">
-              Enter your credentials to access your wholesale records
+              Enter your credentials to access your workspace
             </p>
           </div>
 

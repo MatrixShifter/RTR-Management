@@ -107,6 +107,8 @@ describe('MonthlyShopStatement Component Suite', () => {
       <MonthlyShopStatement
         initialShops={mockShops}
         initialRecords={mockRecords}
+        initialMonth={10}
+        initialYear={2026}
       />
     );
 
@@ -124,6 +126,8 @@ describe('MonthlyShopStatement Component Suite', () => {
       <MonthlyShopStatement
         initialShops={mockShops}
         initialRecords={mockRecords}
+        initialMonth={10}
+        initialYear={2026}
       />
     );
 
@@ -157,6 +161,8 @@ describe('MonthlyShopStatement Component Suite', () => {
         initialShops={mockShops}
         initialRecords={mockRecords}
         initialShopId="shop-alpha"
+        initialMonth={10}
+        initialYear={2026}
       />
     );
 
@@ -180,6 +186,8 @@ describe('MonthlyShopStatement Component Suite', () => {
         initialShops={mockShops}
         initialRecords={mockRecords}
         initialShopId="shop-beta"
+        initialMonth={10}
+        initialYear={2026}
       />
     );
 
@@ -199,6 +207,8 @@ describe('MonthlyShopStatement Component Suite', () => {
         initialShops={mockShops}
         initialRecords={mockRecords}
         initialShopId="shop-gamma"
+        initialMonth={10}
+        initialYear={2026}
       />
     );
 

@@ -32,6 +32,8 @@ export interface MonthlyShopStatementProps {
   initialShops?: Shop[];
   initialRecords?: BusinessRecord[];
   initialShopId?: string;
+  initialMonth?: number;
+  initialYear?: number;
 }
 
 interface ProductBreakdownItem {
@@ -69,15 +71,17 @@ interface ShopBreakdownItem {
 export const MonthlyShopStatement: React.FC<MonthlyShopStatementProps> = ({
   initialShops,
   initialRecords,
-  initialShopId
+  initialShopId,
+  initialMonth,
+  initialYear
 }) => {
   const currentDate = new Date();
   const currentYear = currentDate.getFullYear();
   const currentMonth = currentDate.getMonth() + 1; // 1-12
 
   // Filter States
-  const [selectedYear, setSelectedYear] = useState<number>(currentYear);
-  const [selectedMonth, setSelectedMonth] = useState<number>(currentMonth);
+  const [selectedYear, setSelectedYear] = useState<number>(initialYear ?? currentYear);
+  const [selectedMonth, setSelectedMonth] = useState<number>(initialMonth ?? currentMonth);
   const [selectedShopId, setSelectedShopId] = useState<string>(initialShopId || '__all__');
   const [statusFilter, setStatusFilter] = useState<'all' | 'delivered' | 'pending'>('all');
   const [searchTerm, setSearchTerm] = useState<string>('');

@@ -58,7 +58,7 @@ describe('Secure Owner Authentication Suite', () => {
 
       // RTR Branding
       expect(html).toContain('RTR Wholesale Management');
-      expect(html).toContain('Owner Portal');
+      expect(html).toContain('Mobile Accessories Distribution');
 
       // Required Input Fields
       expect(html).toContain('Username or Email');
@@ -190,7 +190,7 @@ describe('Secure Owner Authentication Suite', () => {
         <Login onLoginSuccess={() => {}} onNavigateToForgot={() => {}} />
       );
 
-      expect(html).toContain('Business Owner Sign In');
+      expect(html).toContain('Sign In to RTR Wholesale');
       expect(html).toContain('Username or Email');
       expect(html).toContain('Password');
       expect(html).toContain('Remember my username');
@@ -335,7 +335,7 @@ describe('Secure Owner Authentication Suite', () => {
       );
 
       // Renders Login form
-      expect(html).toContain('Business Owner Sign In');
+      expect(html).toContain('Sign In to RTR Wholesale');
       expect(html).toContain('Sign In to Workspace');
 
       // Does NOT render protected workspace elements

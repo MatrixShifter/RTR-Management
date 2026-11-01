@@ -187,19 +187,38 @@ export const AppContent: React.FC = () => {
 
               if (res.ok) {
                 const data = await res.json();
-                if (data.user?.role !== 'owner' && data.user?.role !== 'demo') {
+                // Accept owner, demo, and employee roles — reject unknown roles only
+                const verifiedRole = data.user?.role;
+                if (verifiedRole !== 'owner' && verifiedRole !== 'demo' && verifiedRole !== 'employee') {
                   throw new Error('Unauthorized account role');
                 }
-                const isDemo = data.user?.role === 'demo' || isDemoAccount;
+                const isDemo = verifiedRole === 'demo' || isDemoAccount;
                 setDemoMode(isDemo);
                 lastVerifiedTokenRef.current = session.access_token;
-                const userState: UserState = {
-                  id: session.user.id,
-                  email: session.user.email || '',
-                  name: data.user?.name || session.user.user_metadata?.full_name || (isDemo ? 'Demo Owner (Sandbox)' : 'Business Owner'),
-                  role: isDemo ? 'demo' : 'owner',
-                  isDemo
-                };
+
+                let userState: UserState;
+                if (verifiedRole === 'employee') {
+                  // Employee: preserve assigned shop from trusted verify-session response
+                  userState = {
+                    id: session.user.id,
+                    email: session.user.email || '',
+                    name: data.user?.name || session.user.user_metadata?.full_name || 'Shop Staff',
+                    role: 'employee',
+                    isDemo: false,
+                    assignedShopId: data.user?.assignedShopId,
+                    assignedShopName: data.user?.assignedShopName,
+                    assignedShopCode: data.user?.assignedShopCode
+                  };
+                } else {
+                  userState = {
+                    id: session.user.id,
+                    email: session.user.email || '',
+                    name: data.user?.name || session.user.user_metadata?.full_name || (isDemo ? 'Demo Owner (Sandbox)' : 'Business Owner'),
+                    role: isDemo ? 'demo' : 'owner',
+                    isDemo
+                  };
+                }
+
                 setCurrentUser(userState);
                 setBootstrapError(null);
                 localStorage.setItem(STORAGE_USER_KEY, JSON.stringify(userState));
@@ -274,14 +293,48 @@ export const AppContent: React.FC = () => {
                 localStorage.setItem(STORAGE_USER_KEY, JSON.stringify(userState));
                 localStorage.setItem(STORAGE_EXPIRY_KEY, String(Date.now() + SESSION_TTL_MS));
                 return;
-              } else if (membership && membership.role !== 'owner') {
-                // Found membership but not owner: access restricted
+              } else if (!membershipErr && membership?.role === 'employee') {
+                // Employee fallback: resolve assigned shop directly from Supabase
+                setDemoMode(false);
+                const { data: sm } = await supabase
+                  .from('shop_memberships')
+                  .select('shop_id, shops(id, name, code, is_active)')
+                  .eq('user_id', session.user.id)
+                  .maybeSingle();
+                const shop = (sm as any)?.shops;
+                if (!sm || !shop?.is_active) {
+                  lastVerifiedTokenRef.current = null;
+                  await supabase.auth.signOut().catch(() => {});
+                  localStorage.removeItem(STORAGE_USER_KEY);
+                  localStorage.removeItem(STORAGE_EXPIRY_KEY);
+                  setCurrentUser(null);
+                  setBootstrapError('Your employee account is not currently assigned to an active shop. Please contact your manager.');
+                  return;
+                }
+                lastVerifiedTokenRef.current = session.access_token;
+                const userState: UserState = {
+                  id: session.user.id,
+                  email: session.user.email || '',
+                  name: session.user.user_metadata?.full_name || 'Shop Staff',
+                  role: 'employee',
+                  isDemo: false,
+                  assignedShopId: sm.shop_id,
+                  assignedShopName: shop.name,
+                  assignedShopCode: shop.code
+                };
+                setCurrentUser(userState);
+                setBootstrapError(null);
+                localStorage.setItem(STORAGE_USER_KEY, JSON.stringify(userState));
+                localStorage.setItem(STORAGE_EXPIRY_KEY, String(Date.now() + SESSION_TTL_MS));
+                return;
+              } else if (membership && membership.role !== 'owner' && membership.role !== 'employee') {
+                // Found membership but unknown role: access restricted
                 lastVerifiedTokenRef.current = null;
                 await supabase.auth.signOut().catch(() => {});
                 localStorage.removeItem(STORAGE_USER_KEY);
                 localStorage.removeItem(STORAGE_EXPIRY_KEY);
                 setCurrentUser(null);
-                setBootstrapError('Access restricted to Business Owner only.');
+                setBootstrapError('Access restricted. Please contact your manager.');
                 return;
               }
             } catch (fallbackErr) {
@@ -317,6 +370,18 @@ export const AppContent: React.FC = () => {
               setBootstrapError(null);
             } else if (parsed && parsed.role === 'owner') {
               // If Supabase is configured but has no active session, owner session has expired
+              if (isSupabaseConfigured && supabase) {
+                localStorage.removeItem(STORAGE_USER_KEY);
+                localStorage.removeItem(STORAGE_EXPIRY_KEY);
+                setCurrentUser(null);
+                warningRef.current('Your session has expired. Please sign in again.');
+              } else {
+                setDemoMode(false);
+                setCurrentUser(parsed);
+                setBootstrapError(null);
+              }
+            } else if (parsed && parsed.role === 'employee') {
+              // Employee: same rule — if Supabase configured but no live session, clear and force re-login
               if (isSupabaseConfigured && supabase) {
                 localStorage.removeItem(STORAGE_USER_KEY);
                 localStorage.removeItem(STORAGE_EXPIRY_KEY);
@@ -442,7 +507,9 @@ export const AppContent: React.FC = () => {
     } catch (err) {
       console.error('Failed to save session to localStorage:', err);
     }
-    success(`Welcome back, ${user.name}`);
+    const welcomeName = user.name || (user.role === 'employee' ? 'Shop Staff' : 'Business Owner');
+    success(`Welcome back, ${welcomeName}`);
+    // Both owner and employee land on /records — employee routes are role-gated in WorkspaceLayout
     navigate('/records', { replace: true });
   };
 

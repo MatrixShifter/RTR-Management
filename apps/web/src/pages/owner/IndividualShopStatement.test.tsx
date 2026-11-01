@@ -134,6 +134,8 @@ describe('IndividualShopStatement Component Suite', () => {
         <MonthlyShopStatement
           initialShops={mockShops}
           initialRecords={mockRecords}
+          initialMonth={10}
+          initialYear={2026}
         />
       </MemoryRouter>
     );
