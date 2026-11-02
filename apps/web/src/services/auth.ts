@@ -89,7 +89,7 @@ export async function signIn(username: string, password: string): Promise<AuthUs
 
     if (res.status === 403) {
       const data = await res.json().catch(() => ({}));
-      throw new Error(data.message || 'Access restricted. Please contact your system administrator.');
+      throw new Error(data.message || data.error || 'Access restricted. Please contact your system administrator.');
     }
 
     if (res.status === 429) {

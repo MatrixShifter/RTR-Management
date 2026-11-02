@@ -265,11 +265,39 @@ authRouter.post('/login', authRateLimiter, async (req: Request, res: Response) =
     }
 
     // Server-side verification: Check role and status in business_memberships
-    const { data: membership } = await supabaseAdmin
+    let { data: membership } = await supabaseAdmin
       .from('business_memberships')
       .select('business_id, role, is_active')
       .eq('user_id', data.user.id)
       .maybeSingle();
+
+    // Auto-link authoritative owner to tenant business if membership record is missing
+    if (!membership && data.user.email?.toLowerCase() === configuredOwnerEmail) {
+      const { data: biz } = await supabaseAdmin
+        .from('businesses')
+        .select('id')
+        .eq('is_active', true)
+        .order('created_at', { ascending: true })
+        .limit(1)
+        .maybeSingle();
+
+      if (biz) {
+        await supabaseAdmin
+          .from('business_memberships')
+          .upsert({
+            business_id: biz.id,
+            user_id: data.user.id,
+            role: 'owner',
+            is_active: true
+          }, { onConflict: 'business_id,user_id' });
+
+        membership = {
+          business_id: biz.id,
+          role: 'owner',
+          is_active: true
+        };
+      }
+    }
 
     if (!membership) {
       logSecurityEvent({

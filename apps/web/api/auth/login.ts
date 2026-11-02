@@ -1,7 +1,8 @@
 import { 
   supabaseAnon, 
   supabaseAdmin, 
-  resolveIdentifierToEmail 
+  resolveIdentifierToEmail,
+  configuredOwnerEmail 
 } from '../_supabase.js';
 import { DEMO_USERNAME, DEMO_PASSWORD_PLACEHOLDER } from '@crimpston/shared';
 
@@ -90,20 +91,52 @@ export default async function handler(req: any, res: any) {
 
     // Verify User Role & Active Status via business_memberships
     const clientForRole = supabaseAdmin || supabaseAnon;
-    const { data: membership, error: memErr } = await clientForRole
+    let { data: membership, error: memErr } = await clientForRole
       .from('business_memberships')
       .select('business_id, role, is_active')
       .eq('user_id', authData.user.id)
       .maybeSingle();
 
+    // Auto-link authoritative owner to tenant business if membership record is missing
+    if ((!membership || memErr) && email.toLowerCase() === configuredOwnerEmail) {
+      const adminClient = supabaseAdmin || supabaseAnon;
+      const { data: biz } = await adminClient
+        .from('businesses')
+        .select('id')
+        .eq('is_active', true)
+        .order('created_at', { ascending: true })
+        .limit(1)
+        .maybeSingle();
+
+      if (biz) {
+        await adminClient
+          .from('business_memberships')
+          .upsert({
+            business_id: biz.id,
+            user_id: authData.user.id,
+            role: 'owner',
+            is_active: true
+          }, { onConflict: 'business_id,user_id' });
+
+        membership = {
+          business_id: biz.id,
+          role: 'owner',
+          is_active: true
+        };
+        memErr = null;
+      }
+    }
+
     if (memErr || !membership) {
       await supabaseAnon.auth.signOut().catch(() => {});
-      return res.status(403).json({ error: 'Employee profile is not associated with an active business organization.' });
+      const msg = 'Employee profile is not associated with an active business organization.';
+      return res.status(403).json({ error: msg, message: msg });
     }
 
     if (!membership.is_active) {
       await supabaseAnon.auth.signOut().catch(() => {});
-      return res.status(403).json({ error: 'Account is deactivated or unauthorized. Please contact your manager.' });
+      const msg = 'Account is deactivated or unauthorized. Please contact your manager.';
+      return res.status(403).json({ error: msg, message: msg });
     }
 
     if (membership.role === 'owner') {
