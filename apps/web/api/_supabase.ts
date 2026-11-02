@@ -50,12 +50,13 @@ export const VERIFIED_USERNAME_MAP: Record<string, string> = {
 export function resolveIdentifierToEmail(identifier: string): string | null {
   const clean = identifier.trim().toLowerCase();
   if (!clean) return null;
-  if (VERIFIED_USERNAME_MAP[clean]) return VERIFIED_USERNAME_MAP[clean];
+  // If it's a known owner username alias (e.g. 'owner', 'vino', 'rtrowner', 'demo-owner')
+  if (VERIFIED_USERNAME_MAP[clean]) {
+    return VERIFIED_USERNAME_MAP[clean];
+  }
+  // If it's an email address, preserve it exactly as entered (unless owner alias)
   if (clean.includes('@')) {
-    if (clean === configuredOwnerEmail || clean === 'demo-owner@rtrmobiles.com') {
-      return clean;
-    }
-    if (clean.includes('vino') || clean.includes('rtrmobiles')) {
+    if (clean === 'owner@rtrmobiles.com') {
       return configuredOwnerEmail;
     }
     return clean;

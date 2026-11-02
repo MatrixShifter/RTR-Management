@@ -68,7 +68,6 @@ export async function resolveIdentifierToEmail(identifier: string): Promise<stri
   if (
     clean === 'owner@rtrmobiles.com' ||
     clean === 'vinov042007@gmail.com' ||
-    clean === 'vinoth42007@gmail.com' ||
     clean === configuredOwnerEmail
   ) {
     return configuredOwnerEmail;
@@ -271,7 +270,22 @@ authRouter.post('/login', authRateLimiter, async (req: Request, res: Response) =
       .eq('user_id', data.user.id)
       .maybeSingle();
 
-    if (!membership || !membership.is_active) {
+    if (!membership) {
+      logSecurityEvent({
+        action: 'UNKNOWN_USER_LOGIN_BLOCKED',
+        category: 'auth_login',
+        status: 'BLOCKED',
+        statusCode: 403,
+        correlationId: (req.headers['x-correlation-id'] as string),
+        errorCategory: 'no_membership'
+      });
+      return res.status(403).json({
+        success: false,
+        message: 'Employee profile is not associated with an active business organization.'
+      });
+    }
+
+    if (!membership.is_active) {
       logSecurityEvent({
         action: 'INACTIVE_USER_LOGIN_BLOCKED',
         category: 'auth_login',
@@ -321,12 +335,7 @@ authRouter.post('/login', authRateLimiter, async (req: Request, res: Response) =
         .eq('user_id', data.user.id)
         .maybeSingle();
 
-      if (
-        shopErr || 
-        !shopMember || 
-        !(shopMember as any).shops?.is_active ||
-        (shopMember as any).shops?.business_id !== membership.business_id
-      ) {
+      if (shopErr || !shopMember || !(shopMember as any).shops) {
         logSecurityEvent({
           action: 'EMPLOYEE_NO_ACTIVE_SHOP_LOGIN',
           category: 'auth_login',
@@ -338,6 +347,36 @@ authRouter.post('/login', authRateLimiter, async (req: Request, res: Response) =
         return res.status(403).json({
           success: false,
           message: 'Your employee account is not currently assigned to an active shop. Please contact your manager.'
+        });
+      }
+
+      if (!(shopMember as any).shops?.is_active) {
+        logSecurityEvent({
+          action: 'EMPLOYEE_INACTIVE_SHOP_LOGIN',
+          category: 'auth_login',
+          status: 'BLOCKED',
+          statusCode: 403,
+          correlationId: (req.headers['x-correlation-id'] as string),
+          errorCategory: 'inactive_shop'
+        });
+        return res.status(403).json({
+          success: false,
+          message: 'Your assigned retail shop is currently inactive. Please contact your manager.'
+        });
+      }
+
+      if ((shopMember as any).shops?.business_id !== membership.business_id) {
+        logSecurityEvent({
+          action: 'EMPLOYEE_SHOP_TENANT_MISMATCH',
+          category: 'auth_login',
+          status: 'BLOCKED',
+          statusCode: 403,
+          correlationId: (req.headers['x-correlation-id'] as string),
+          errorCategory: 'cross_tenant_mismatch'
+        });
+        return res.status(403).json({
+          success: false,
+          message: 'Store assignment authorization mismatch. Please contact your manager.'
         });
       }
 

@@ -581,14 +581,31 @@ employeesRouter.post('/:id/reset-password', requireOwnerAuth, async (req: Reques
       });
     }
 
-    const { error: updateErr } = await supabaseAdmin.auth.admin.updateUserById(employeeId!, {
-      password
+    // 2. Verify Supabase Auth user exists and retrieve profile
+    const { data: authUser, error: authUserErr } = await supabaseAdmin.auth.admin.getUserById(employeeId!);
+    if (authUserErr || !authUser?.user) {
+      return res.status(404).json({
+        error: 'Not Found',
+        message: 'Auth account for this employee was not found in Supabase Auth.'
+      });
+    }
+
+    const { data: profile } = await supabaseAdmin
+      .from('profiles')
+      .select('full_name, email')
+      .eq('id', employeeId!)
+      .maybeSingle();
+
+    // 3. Update password in Supabase Auth and ensure email is confirmed
+    const { data: updateData, error: updateErr } = await supabaseAdmin.auth.admin.updateUserById(employeeId!, {
+      password,
+      email_confirm: true
     });
 
-    if (updateErr) {
+    if (updateErr || !updateData?.user) {
       return res.status(500).json({
         error: 'Update Error',
-        message: updateErr.message || 'Failed to reset employee password.'
+        message: updateErr?.message || 'Failed to reset employee password in Supabase Auth.'
       });
     }
 
@@ -602,9 +619,10 @@ employeesRouter.post('/:id/reset-password', requireOwnerAuth, async (req: Reques
       details: { employeeId }
     });
 
+    const displayName = profile?.full_name || authUser.user.email || 'Employee';
     return res.status(200).json({
       success: true,
-      message: 'Employee password reset successfully.'
+      message: `Password for ${displayName} updated successfully.`
     });
   } catch (err: any) {
     return res.status(500).json({

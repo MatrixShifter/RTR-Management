@@ -96,7 +96,12 @@ export default async function handler(req: any, res: any) {
       .eq('user_id', authData.user.id)
       .maybeSingle();
 
-    if (memErr || !membership || !membership.is_active) {
+    if (memErr || !membership) {
+      await supabaseAnon.auth.signOut().catch(() => {});
+      return res.status(403).json({ error: 'Employee profile is not associated with an active business organization.' });
+    }
+
+    if (!membership.is_active) {
       await supabaseAnon.auth.signOut().catch(() => {});
       return res.status(403).json({ error: 'Account is deactivated or unauthorized. Please contact your manager.' });
     }
@@ -126,24 +131,39 @@ export default async function handler(req: any, res: any) {
         .eq('user_id', authData.user.id)
         .maybeSingle();
 
-      if (
-        shopErr || 
-        !shopMember || 
-        !(shopMember as any).shops?.is_active ||
-        (shopMember as any).shops?.business_id !== membership.business_id
-      ) {
+      if (shopErr || !shopMember || !(shopMember as any).shops) {
         await supabaseAnon.auth.signOut().catch(() => {});
         return res.status(403).json({
           error: 'Your employee account is not currently assigned to an active shop. Please contact your manager.'
         });
       }
 
+      if (!(shopMember as any).shops?.is_active) {
+        await supabaseAnon.auth.signOut().catch(() => {});
+        return res.status(403).json({
+          error: 'Your assigned retail shop is currently inactive. Please contact your manager.'
+        });
+      }
+
+      if ((shopMember as any).shops?.business_id !== membership.business_id) {
+        await supabaseAnon.auth.signOut().catch(() => {});
+        return res.status(403).json({
+          error: 'Store assignment authorization mismatch. Please contact your manager.'
+        });
+      }
+
+      const { data: profile } = await clientForRole
+        .from('profiles')
+        .select('full_name, username')
+        .eq('id', authData.user.id)
+        .maybeSingle();
+
       return res.status(200).json({
         user: {
           id: authData.user.id,
           email: authData.user.email || email,
-          username: cleanUsername.includes('@') ? (authData.user.user_metadata?.username || cleanUsername.split('@')[0]) : cleanUsername,
-          name: authData.user.user_metadata?.full_name || 'Shop Staff',
+          username: cleanUsername.includes('@') ? (profile?.username || authData.user.user_metadata?.username || cleanUsername.split('@')[0]) : cleanUsername,
+          name: profile?.full_name || authData.user.user_metadata?.full_name || 'Shop Staff',
           role: 'employee',
           isDemo: false,
           assignedShopId: shopMember.shop_id,

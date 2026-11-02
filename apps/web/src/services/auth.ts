@@ -32,17 +32,22 @@ export const VERIFIED_USERNAME_MAP: Record<string, string> = {
   'vino': configuredOwnerEmail,
   'rtrowner': configuredOwnerEmail,
   'rtrmobiles': configuredOwnerEmail,
-  'owner@rtrmobiles.com': configuredOwnerEmail,
-  'vinoth42007@gmail.com': configuredOwnerEmail,
-  'vinov042007@gmail.com': configuredOwnerEmail,
   'demo-owner': 'demo-owner@rtrmobiles.com'
 };
 
 export function resolveLoginEmail(identifier: string): string | null {
   const clean = identifier.trim().toLowerCase();
   if (!clean) return null;
-  if (clean.includes('@')) return clean;
-  return VERIFIED_USERNAME_MAP[clean] || null;
+  // If it's a known owner username alias (without @)
+  if (VERIFIED_USERNAME_MAP[clean]) {
+    return VERIFIED_USERNAME_MAP[clean];
+  }
+  // If it's an email address, preserve it (unless owner alias)
+  if (clean.includes('@')) {
+    if (clean === 'owner@rtrmobiles.com') return configuredOwnerEmail;
+    return clean;
+  }
+  return null;
 }
 
 /**
@@ -183,7 +188,12 @@ export async function signIn(username: string, password: string): Promise<AuthUs
         .eq('user_id', authData.user.id)
         .maybeSingle();
 
-      if (!membership || !membership.is_active) {
+      if (!membership) {
+        await supabase.auth.signOut().catch(() => {});
+        throw new Error('Employee profile is not associated with an active business organization.');
+      }
+
+      if (!membership.is_active) {
         await supabase.auth.signOut().catch(() => {});
         throw new Error('Account is deactivated or unauthorized. Please contact your manager.');
       }
@@ -191,22 +201,38 @@ export async function signIn(username: string, password: string): Promise<AuthUs
       if (membership.role === 'employee') {
         const { data: sm } = await supabase
           .from('shop_memberships')
-          .select('shop_id, shops(id, name, code, is_active)')
+          .select('shop_id, shops(id, name, code, is_active, business_id)')
           .eq('user_id', authData.user.id)
           .maybeSingle();
 
         const shop = (sm as any)?.shops;
-        if (!sm || !shop || !shop.is_active) {
+        if (!sm || !shop) {
           await supabase.auth.signOut().catch(() => {});
           throw new Error('Your employee account is not currently assigned to an active shop. Please contact your manager.');
         }
+
+        if (!shop.is_active) {
+          await supabase.auth.signOut().catch(() => {});
+          throw new Error('Your assigned retail shop is currently inactive. Please contact your manager.');
+        }
+
+        if (shop.business_id !== membership.business_id) {
+          await supabase.auth.signOut().catch(() => {});
+          throw new Error('Store assignment authorization mismatch. Please contact your manager.');
+        }
+
+        const { data: profile } = await supabase
+          .from('profiles')
+          .select('full_name, username')
+          .eq('id', authData.user.id)
+          .maybeSingle();
 
         setDemoMode(false);
         return {
           id: authData.user.id,
           email: authData.user.email || email,
           username: cleanUsername,
-          name: authData.user.user_metadata?.full_name || 'Shop Staff',
+          name: profile?.full_name || authData.user.user_metadata?.full_name || 'Shop Staff',
           role: 'employee',
           isDemo: false,
           assignedShopId: sm.shop_id,
