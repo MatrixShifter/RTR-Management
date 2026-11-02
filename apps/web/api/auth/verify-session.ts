@@ -19,7 +19,24 @@ export default async function handler(req: any, res: any) {
   }
 
   // 1. Handle Demo Token
-  if (token.startsWith('demo-access-token-')) {
+  if (token.startsWith('demo-access-token-') || token.startsWith('demo-employee-token-')) {
+    const isEmployee = token.startsWith('demo-employee-token-');
+    if (isEmployee) {
+      return res.status(200).json({
+        user: {
+          id: 'demo-employee-00000000-0000-0000-0000-000000000001',
+          email: 'demo-employee@rtrmobiles.com',
+          username: 'demo-employee',
+          name: 'Demo Employee (Sandbox)',
+          role: 'employee',
+          isDemo: true,
+          assignedShopId: 'demo-shop-00000000-0000-0000-0000-000000000001',
+          assignedShopName: 'Demo Retail Outlet',
+          assignedShopCode: 'SH-DEMO'
+        }
+      });
+    }
+
     return res.status(200).json({
       user: {
         id: 'deae5634-055a-4045-a6ac-fc00ed9e247a',
@@ -42,24 +59,58 @@ export default async function handler(req: any, res: any) {
     const clientForRole = supabaseAdmin || supabaseAnon;
     const { data: membership } = await clientForRole
       .from('business_memberships')
-      .select('role')
+      .select('business_id, role, is_active')
       .eq('user_id', user.id)
       .maybeSingle();
 
-    if (membership && membership.role !== 'owner') {
-      return res.status(403).json({ error: 'Access restricted to Business Owner only.' });
+    if (!membership || !membership.is_active) {
+      return res.status(403).json({ error: 'Account is deactivated or unauthorized.' });
     }
 
-    return res.status(200).json({
-      user: {
-        id: user.id,
-        email: user.email || '',
-        name: user.user_metadata?.full_name || 'Business Owner',
-        role: 'owner',
-        isDemo: false
+    if (membership.role === 'owner') {
+      return res.status(200).json({
+        user: {
+          id: user.id,
+          email: user.email || '',
+          name: user.user_metadata?.full_name || 'Business Owner',
+          role: 'owner',
+          isDemo: false
+        }
+      });
+    }
+
+    if (membership.role === 'employee') {
+      const { data: shopMember, error: shopErr } = await clientForRole
+        .from('shop_memberships')
+        .select('shop_id, shops!inner(id, name, code, is_active, business_id)')
+        .eq('user_id', user.id)
+        .maybeSingle();
+
+      if (
+        shopErr || 
+        !shopMember || 
+        !(shopMember as any).shops?.is_active ||
+        (shopMember as any).shops?.business_id !== membership.business_id
+      ) {
+        return res.status(403).json({ error: 'Your employee account is not currently assigned to an active shop.' });
       }
-    });
-  } catch (err: any) {
+
+      return res.status(200).json({
+        user: {
+          id: user.id,
+          email: user.email || '',
+          name: user.user_metadata?.full_name || 'Shop Staff',
+          role: 'employee',
+          isDemo: false,
+          assignedShopId: shopMember.shop_id,
+          assignedShopName: (shopMember as any).shops?.name,
+          assignedShopCode: (shopMember as any).shops?.code
+        }
+      });
+    }
+
+    return res.status(403).json({ error: 'Access restricted: unauthorized account role.' });
+  } catch {
     return res.status(500).json({ error: 'Authentication service temporarily unavailable.' });
   }
 }

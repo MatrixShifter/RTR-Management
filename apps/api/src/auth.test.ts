@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import request from 'supertest';
 import { app } from './app.js';
-import { INCORRECT_CREDENTIALS_MSG, RECOVERY_CONFIRMATION_MSG, supabaseAdmin, supabaseAnon } from './routes/auth.js';
+import { INCORRECT_CREDENTIALS_MSG, RECOVERY_CONFIRMATION_MSG, EMPLOYEE_OTP_CONFIRMATION_MSG, INVALID_OTP_MSG, supabaseAdmin, supabaseAnon } from './routes/auth.js';
 
 describe('Authentication API Endpoints (/api/auth)', { timeout: 25000 }, () => {
   describe('POST /api/auth/login', () => {
@@ -459,4 +459,85 @@ describe('Authentication API Endpoints (/api/auth)', { timeout: 25000 }, () => {
       }
     }, 45000);
   });
+
+  describe('Passwordless Employee OTP Endpoints', () => {
+    describe('POST /api/auth/employee/request-otp', () => {
+      it('rejects empty or missing email with 400', async () => {
+        const res = await request(app)
+          .post('/api/auth/employee/request-otp')
+          .send({});
+
+        expect(res.status).toBe(400);
+        expect(res.body.success).toBe(false);
+        expect(res.body.message).toContain('valid employee email');
+      });
+
+      it('rejects invalid email format with 400', async () => {
+        const res = await request(app)
+          .post('/api/auth/employee/request-otp')
+          .send({ email: 'not-an-email' });
+
+        expect(res.status).toBe(400);
+        expect(res.body.success).toBe(false);
+        expect(res.body.message).toContain('valid email format');
+      });
+
+      it('returns neutral confirmation for unknown email without creating accounts', async () => {
+        const res = await request(app)
+          .post('/api/auth/employee/request-otp')
+          .send({ email: 'nonexistent_emp_9999@rtrmobiles.com' });
+
+        expect(res.status).toBe(200);
+        expect(res.body.success).toBe(true);
+        expect(res.body.message).toBe(EMPLOYEE_OTP_CONFIRMATION_MSG);
+      });
+
+      it('returns neutral confirmation for demo employee email', async () => {
+        const res = await request(app)
+          .post('/api/auth/employee/request-otp')
+          .send({ email: 'demo-employee@rtrmobiles.com' });
+
+        expect(res.status).toBe(200);
+        expect(res.body.success).toBe(true);
+        expect(res.body.message).toBe(EMPLOYEE_OTP_CONFIRMATION_MSG);
+      });
+    });
+
+    describe('POST /api/auth/employee/verify-otp', () => {
+      it('rejects missing email or token with 400', async () => {
+        const res = await request(app)
+          .post('/api/auth/employee/verify-otp')
+          .send({ email: 'demo-employee@rtrmobiles.com' });
+
+        expect(res.status).toBe(400);
+        expect(res.body.success).toBe(false);
+      });
+
+      it('rejects invalid OTP with 401', async () => {
+        const res = await request(app)
+          .post('/api/auth/employee/verify-otp')
+          .send({ email: 'demo-employee@rtrmobiles.com', token: '999999' });
+
+        expect(res.status).toBe(401);
+        expect(res.body.success).toBe(false);
+        expect(res.body.message).toBe(INVALID_OTP_MSG);
+      });
+
+      it('authenticates demo employee with valid OTP and returns employee user state with assigned shop', async () => {
+        const res = await request(app)
+          .post('/api/auth/employee/verify-otp')
+          .send({ email: 'demo-employee@rtrmobiles.com', token: '123456' });
+
+        expect(res.status).toBe(200);
+        expect(res.body.success).toBe(true);
+        expect(res.body.session).toBeDefined();
+        expect(res.body.session.access_token).toBeDefined();
+        expect(res.body.user).toBeDefined();
+        expect(res.body.user.role).toBe('employee');
+        expect(res.body.user.assignedShopId).toBeDefined();
+        expect(res.body.user.assignedShopName).toBe('Demo Retail Outlet');
+      });
+    });
+  });
+
 });
