@@ -274,7 +274,7 @@ employeesRouter.post('/', requireOwnerAuth, async (req: Request, res: Response) 
         
         emailStatus = isRateLimit ? 'rate_limited' : 'failed';
         emailMessage = isRateLimit
-          ? 'Default Supabase email rate limit exceeded (~3 emails/hour). Configure Custom SMTP in Supabase Dashboard for unlimited delivery.'
+          ? 'Default Supabase email rate limit reached (~3-4 emails/hour). Please wait before requesting another verification code.'
           : (otpErr.message || 'Email delivery failed.');
       }
     } catch (sendErr: any) {
@@ -307,7 +307,7 @@ employeesRouter.post('/', requireOwnerAuth, async (req: Request, res: Response) 
 
     return res.status(201).json({
       success: true,
-      message: `Employee account created and assigned to ${shop.name}.${emailStatus === 'rate_limited' ? ' (Note: Default Supabase email rate limit was exceeded; configure Custom SMTP in Supabase Dashboard)' : ''}`,
+      message: `Employee account created and assigned to ${shop.name}.${emailStatus === 'rate_limited' ? ' (Note: Default Supabase email rate limit was exceeded; please wait before requesting another code)' : ''}`,
       emailStatus,
       emailMessage,
       employee: newEmployee
@@ -625,7 +625,7 @@ employeesRouter.post('/:id/send-otp', requireOwnerAuth, async (req: Request, res
       if (isRateLimit) {
         return res.status(429).json({
           error: 'Rate Limit Exceeded',
-          message: 'Default Supabase email rate limit exceeded (~3 emails/hour). Please wait or configure Custom SMTP in Supabase Dashboard.'
+          message: 'Default Supabase email rate limit exceeded (~3 emails/hour). Please wait or please wait before requesting another code.'
         });
       }
 

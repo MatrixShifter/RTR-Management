@@ -408,7 +408,7 @@ export async function requestEmployeeOtp(email: string): Promise<string> {
 
     if (res.status === 429) {
       const data = await res.json().catch(() => ({}));
-      throw new Error(data.message || 'Supabase email delivery rate limit exceeded (~3 emails/hour). Configure Custom SMTP in Supabase Dashboard for unlimited delivery.');
+      throw new Error(data.message || 'Supabase email delivery rate limit exceeded (default mail pool is limited to ~3-4 emails/hour). Please wait a few minutes before requesting another verification code.');
     }
 
     if (res.status === 502 || res.status === 503) {
@@ -448,7 +448,7 @@ export async function requestEmployeeOtp(email: string): Promise<string> {
         (error as any).code === 'over_email_send_rate_limit' || 
         error.message?.toLowerCase().includes('rate limit');
       if (isRateLimit) {
-        throw new Error('Supabase email delivery rate limit exceeded (~3 emails/hour). Configure Custom SMTP in Supabase Dashboard for unlimited delivery.');
+        throw new Error('Supabase email delivery rate limit exceeded (default mail pool is limited to ~3-4 emails/hour). Please wait a few minutes before requesting another verification code.');
       }
       // Never reveal non-existence; return generic neutral message
     }

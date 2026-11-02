@@ -535,7 +535,7 @@ authRouter.post('/employee/request-otp', authRateLimiter, async (req: Request, r
       if (isRateLimit) {
         return res.status(429).json({
           success: false,
-          message: 'Supabase email delivery rate limit exceeded (~3 emails/hour). Configure Custom SMTP in Supabase Dashboard for unlimited delivery.'
+          message: 'Supabase email delivery rate limit exceeded (default mail pool is limited to ~3-4 emails/hour). Please wait a few minutes before requesting another verification code.'
         });
       }
 
