@@ -11,7 +11,7 @@ This guide details how to install and synchronize our professional, custom-brand
 
 All transactional emails use Supabase's built-in default mail service. By adding our custom HTML and plain-text templates to the Supabase Dashboard, every authentication email sent to owners and employees reflects official RTR Wholesale Management branding without requiring a third-party SMTP provider.
 
-In the [Supabase Dashboard](https://supabase.com/dashboard/project/lwyxzmrxxviiuzztpwar):
+In the [Supabase Dashboard](https://supabase.com/dashboard/project/xjlnoxbkcyymtdtallzu):
 Navigate to **Authentication** &rarr; **Email Templates**.
 
 ### Template 1: Reset Password (Owner Password Recovery)
@@ -44,7 +44,7 @@ Navigate to **Authentication** &rarr; **Email Templates**.
 
 ## 2. Supabase Auth — URL Configuration
 
-In the [Supabase Dashboard](https://supabase.com/dashboard/project/lwyxzmrxxviiuzztpwar):
+In the [Supabase Dashboard](https://supabase.com/dashboard/project/xjlnoxbkcyymtdtallzu):
 Navigate to **Authentication** &rarr; **URL Configuration**:
 
 1. **Site URL:**

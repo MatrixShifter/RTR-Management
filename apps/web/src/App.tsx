@@ -129,6 +129,8 @@ export const AppContent: React.FC = () => {
   const lastVerifiedTokenRef = useRef<string | null>(null);
   const warningRef = useRef(warning);
   warningRef.current = warning;
+  const currentUserRef = useRef(currentUser);
+  currentUserRef.current = currentUser;
 
   // 1. Session verification & hydration
   const runInitSession = useCallback(async () => {
@@ -160,7 +162,7 @@ export const AppContent: React.FC = () => {
 
         if (session?.user && session?.access_token) {
           // If this token was already verified, skip duplicate network call
-          if (lastVerifiedTokenRef.current === session.access_token && currentUser) {
+          if (lastVerifiedTokenRef.current === session.access_token && currentUserRef.current) {
             return;
           }
 
@@ -227,18 +229,9 @@ export const AppContent: React.FC = () => {
                 localStorage.setItem(STORAGE_USER_KEY, JSON.stringify(userState));
                 localStorage.setItem(STORAGE_EXPIRY_KEY, String(Date.now() + SESSION_TTL_MS));
                 return;
-              } else if (res.status === 401 || res.status === 403) {
-                // Definitive auth rejection (token expired or revoked) — do not retry
-                lastVerifiedTokenRef.current = null;
-                await supabase.auth.signOut().catch(() => {});
-                localStorage.removeItem(STORAGE_USER_KEY);
-                localStorage.removeItem(STORAGE_EXPIRY_KEY);
-                setCurrentUser(null);
-                setBootstrapError(null);
-                return;
-              } else if (res.status === 404) {
-                // Backend API route not hosted on static deployment (e.g. Vercel without serverless route)
-                // Proceed immediately to direct Supabase session validation
+              } else if (res.status === 401 || res.status === 403 || res.status === 404) {
+                // If backend verification route is not available or rejected token,
+                // fall through to validate directly against authoritative Supabase
                 break;
               } else {
                 // 502, 503, or temporary server error: retry if attempts remain
@@ -411,7 +404,7 @@ export const AppContent: React.FC = () => {
       isVerifyingRef.current = false;
       setIsBootstrapping(false);
     }
-  }, [currentUser]);
+  }, []);
 
   useEffect(() => {
     let isMounted = true;

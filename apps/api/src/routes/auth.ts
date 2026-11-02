@@ -792,11 +792,40 @@ authRouter.get('/verify-session', async (req: Request, res: Response) => {
       });
     }
 
-    const { data: membership, error: memberErr } = await supabaseAdmin
+    let { data: membership, error: memberErr } = await supabaseAdmin
       .from('business_memberships')
       .select('business_id, role, is_active')
       .eq('user_id', user.id)
       .maybeSingle();
+
+    // Auto-link authoritative owner to tenant business if membership record is missing
+    if ((!membership || memberErr) && user.email?.toLowerCase() === configuredOwnerEmail) {
+      const { data: biz } = await supabaseAdmin
+        .from('businesses')
+        .select('id')
+        .eq('is_active', true)
+        .order('created_at', { ascending: true })
+        .limit(1)
+        .maybeSingle();
+
+      if (biz) {
+        await supabaseAdmin
+          .from('business_memberships')
+          .upsert({
+            business_id: biz.id,
+            user_id: user.id,
+            role: 'owner',
+            is_active: true
+          }, { onConflict: 'business_id,user_id' });
+
+        membership = {
+          business_id: biz.id,
+          role: 'owner',
+          is_active: true
+        };
+        memberErr = null;
+      }
+    }
 
     if (memberErr || !membership || !membership.is_active) {
       return res.status(403).json({ valid: false, message: 'Account is deactivated or unauthorized.' });

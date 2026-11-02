@@ -1,4 +1,11 @@
-import { supabaseAnon, supabaseAdmin } from '../_supabase.js';
+import { 
+  supabaseAnon, 
+  supabaseAdmin, 
+  supabaseUrl, 
+  supabaseAnonKey, 
+  configuredOwnerEmail 
+} from '../_supabase.js';
+import { createClient } from '@supabase/supabase-js';
 import { DEMO_USERNAME } from '@crimpston/shared';
 
 export default async function handler(req: any, res: any) {
@@ -56,12 +63,46 @@ export default async function handler(req: any, res: any) {
       return res.status(401).json({ error: 'Invalid or expired session token' });
     }
 
-    const clientForRole = supabaseAdmin || supabaseAnon;
-    const { data: membership } = await clientForRole
+    const userClient = createClient(supabaseUrl, supabaseAnonKey, {
+      global: { headers: { Authorization: `Bearer ${token}` } },
+      auth: { persistSession: false, autoRefreshToken: false }
+    });
+    const clientForRole = supabaseAdmin || userClient;
+
+    let { data: membership } = await clientForRole
       .from('business_memberships')
       .select('business_id, role, is_active')
       .eq('user_id', user.id)
       .maybeSingle();
+
+    // Auto-link authoritative owner to tenant business if membership record is missing
+    if (!membership && user.email?.toLowerCase() === configuredOwnerEmail) {
+      const adminClient = supabaseAdmin || userClient;
+      const { data: biz } = await adminClient
+        .from('businesses')
+        .select('id')
+        .eq('is_active', true)
+        .order('created_at', { ascending: true })
+        .limit(1)
+        .maybeSingle();
+
+      if (biz) {
+        await adminClient
+          .from('business_memberships')
+          .upsert({
+            business_id: biz.id,
+            user_id: user.id,
+            role: 'owner',
+            is_active: true
+          }, { onConflict: 'business_id,user_id' });
+
+        membership = {
+          business_id: biz.id,
+          role: 'owner',
+          is_active: true
+        };
+      }
+    }
 
     if (!membership || !membership.is_active) {
       return res.status(403).json({ error: 'Account is deactivated or unauthorized.' });
