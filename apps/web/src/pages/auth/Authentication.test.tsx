@@ -10,9 +10,13 @@ import {
   INCORRECT_CREDENTIALS_MSG, 
   RECOVERY_CONFIRMATION_MSG,
   NETWORK_ERROR_MSG,
+  EMPLOYEE_OTP_CONFIRMATION_MSG,
+  INVALID_OTP_MSG,
   getRememberedUsername,
   setRememberedUsername,
   signIn,
+  requestEmployeeOtp,
+  verifyEmployeeOtp,
   DEMO_USERNAME,
   DEMO_PASSWORD_PLACEHOLDER
 } from '../../services/auth.js';
@@ -56,11 +60,15 @@ describe('Secure Owner Authentication Suite', () => {
         <Login onLoginSuccess={() => {}} onNavigateToForgot={() => {}} />
       );
 
-      // RTR Branding
-      expect(html).toContain('RTR Wholesale Management');
-      expect(html).toContain('Mobile Accessories Distribution');
+      // RTR Branding & Headings
+      expect(html).toContain('Welcome to RTR Wholesale Management');
+      expect(html).toContain('Sign in to access your workspace.');
 
-      // Required Input Fields
+      // Two Tabs
+      expect(html).toContain('Owner Login');
+      expect(html).toContain('Employee Login');
+
+      // Required Owner Input Fields
       expect(html).toContain('Username or Email');
       expect(html).toContain('name="username"');
       expect(html).toContain('Password');
@@ -77,6 +85,22 @@ describe('Secure Owner Authentication Suite', () => {
       // No insecure dummy login buttons
       expect(html).not.toContain('Sign In as Employee');
       expect(html).not.toContain('Development Testing Accounts');
+    });
+
+    it('initially renders with completely empty username and password fields on fresh load', () => {
+      localStorage.clear();
+      const html = renderToString(
+        <Login onLoginSuccess={() => {}} onNavigateToForgot={() => {}} />
+      );
+
+      // Verify input values are empty string and no default credentials are leaked
+      expect(html).toContain('name="username"');
+      expect(html).toContain('name="password"');
+      expect(html).toContain('value=""');
+      expect(html).not.toContain('owner@rtrmobiles.com');
+      expect(html).not.toContain('vinov042007@gmail.com');
+      expect(html).not.toContain('demo-owner');
+      expect(html).not.toContain('password123');
     });
 
     it('displays exact required message on authentication failure', () => {
@@ -190,7 +214,7 @@ describe('Secure Owner Authentication Suite', () => {
         <Login onLoginSuccess={() => {}} onNavigateToForgot={() => {}} />
       );
 
-      expect(html).toContain('Sign In to RTR Wholesale');
+      expect(html).toContain('Welcome to RTR Wholesale Management');
       expect(html).toContain('Username or Email');
       expect(html).toContain('Password');
       expect(html).toContain('Remember my username');
@@ -335,7 +359,7 @@ describe('Secure Owner Authentication Suite', () => {
       );
 
       // Renders Login form
-      expect(html).toContain('Sign In to RTR Wholesale');
+      expect(html).toContain('Welcome to RTR Wholesale Management');
       expect(html).toContain('Sign In to Workspace');
 
       // Does NOT render protected workspace elements
@@ -450,4 +474,75 @@ describe('Secure Owner Authentication Suite', () => {
       expect(html).not.toContain('lg:pl-[205px]');
     });
   });
+
+  describe('Passwordless Employee Login Suite', () => {
+    it('renders Employee Login tab with assigned email input and no password field', () => {
+      const html = renderToString(
+        <Login onLoginSuccess={() => {}} onNavigateToForgot={() => {}} initialTab="employee" />
+      );
+
+      // Verify Employee Login Tab is active
+      expect(html).toContain('Shop Employee Passwordless Login');
+      expect(html).toContain('Assigned Employee Email');
+      expect(html).toContain('name="employeeEmail"');
+      expect(html).toContain('Send Verification Code');
+
+      // Strictly verify NO password field is rendered in employee tab
+      expect(html).not.toContain('name="password"');
+      expect(html).not.toContain('Forgot Password?');
+      expect(html).not.toContain('Remember my username');
+    });
+
+    it('enforces generic confirmation message on requestEmployeeOtp to prevent account enumeration', async () => {
+      const msg = await requestEmployeeOtp('unknown_employee_999@rtrmobiles.com');
+      expect(msg).toBe(EMPLOYEE_OTP_CONFIRMATION_MSG);
+    });
+
+    it('validates email format before sending employee OTP', async () => {
+      await expect(requestEmployeeOtp('')).rejects.toThrow('Please enter a valid email address.');
+    });
+
+    it('authenticates valid employee OTP and returns employee user state with assigned shop', async () => {
+      const user = await verifyEmployeeOtp('demo-employee@rtrmobiles.com', '123456');
+      expect(user).toBeDefined();
+      expect(user.role).toBe('employee');
+      expect(user.assignedShopId).toBeDefined();
+      expect(user.assignedShopName).toBe('Demo Retail Outlet');
+      expect(user.assignedShopCode).toBe('SH-DEMO');
+    });
+
+    it('rejects invalid verification code with standard error message', async () => {
+      expect(INVALID_OTP_MSG).toBe('Invalid or expired verification code. Please request a new code.');
+      await expect(
+        verifyEmployeeOtp('employee@rtrmobiles.com', '999999')
+      ).rejects.toThrow();
+    });
+
+    it('renders workspace with employee dashboard when employee session is restored', () => {
+      mockLocalStorage.setItem('rtr_current_user', JSON.stringify({
+        id: 'test-employee-id',
+        email: 'employee@rtrmobiles.com',
+        name: 'Shop Staff',
+        role: 'employee',
+        assignedShopId: 'shop-uuid-123',
+        assignedShopName: 'Branch 1',
+        assignedShopCode: 'SH-01'
+      }));
+      mockLocalStorage.setItem('rtr_session_expiry', String(Date.now() + 86400000));
+
+      const html = renderToString(
+        <ToastProvider>
+          <MemoryRouter initialEntries={['/employee']}>
+            <AppContent />
+          </MemoryRouter>
+        </ToastProvider>
+      );
+
+      // Workspace layout with Navbar elements is rendered
+      expect(html).toContain('lg:pl-[205px]');
+      expect(html).toContain('Shop Staff');
+      expect(html).not.toContain('Business Owner');
+    });
+  });
+
 });

@@ -509,8 +509,9 @@ export const AppContent: React.FC = () => {
     }
     const welcomeName = user.name || (user.role === 'employee' ? 'Shop Staff' : 'Business Owner');
     success(`Welcome back, ${welcomeName}`);
-    // Both owner and employee land on /records — employee routes are role-gated in WorkspaceLayout
-    navigate('/records', { replace: true });
+    // Redirect owner to Owner Dashboard (/records) and employee to Employee Dashboard (/employee)
+    const targetRoute = user.role === 'employee' ? '/employee' : '/records';
+    navigate(targetRoute, { replace: true });
   };
 
   const handleSignOut = async () => {

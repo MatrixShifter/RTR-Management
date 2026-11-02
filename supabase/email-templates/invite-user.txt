@@ -1,0 +1,19 @@
+RTR WHOLESALE MANAGEMENT
+Mobile Accessories Distribution & Settlement
+==================================================
+
+Welcome to the Team
+
+You have been invited to access the RTR Wholesale Management staff portal as an authorized employee for {{ .Email }}.
+
+Accept your invitation using the link below:
+{{ .ConfirmationURL }}
+
+After accepting your invitation, you can log in at any time using your registered email and a secure one-time verification code on the Employee Login tab.
+
+SECURITY NOTICE:
+This invitation is intended only for {{ .Email }}. If you received this by mistake, please contact your RTR administrator.
+
+==================================================
+RTR Wholesale Management • Internal Operations Portal
+Confidential • Authorized Personnel Only

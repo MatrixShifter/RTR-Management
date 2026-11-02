@@ -1,0 +1,19 @@
+RTR WHOLESALE MANAGEMENT
+Mobile Accessories Distribution & Settlement
+==================================================
+
+Confirm Email Change
+
+Confirm that you want to update your registered email address for RTR Wholesale Management.
+
+Confirm your email using the link below:
+{{ .ConfirmationURL }}
+
+Or use confirmation code: {{ .Token }}
+
+SECURITY NOTICE:
+If you did not request this email change, please contact your RTR administrator immediately.
+
+==================================================
+RTR Wholesale Management • Internal Operations Portal
+Confidential • Authorized Personnel Only

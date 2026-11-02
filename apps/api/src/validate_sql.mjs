@@ -3,7 +3,7 @@ import path from 'path';
 
 const migrationPath = path.resolve('supabase/migrations/0001_initial_schema.sql');
 const seedPath = path.resolve('supabase/seed.sql');
-const canonicalSqlPath = path.resolve('database/rtr_complete.sql');
+const canonicalSqlPath = path.resolve('supabase/schema.sql');
 
 function validateSqlFile(filePath) {
   const content = fs.readFileSync(filePath, 'utf8');
@@ -32,7 +32,8 @@ function validateSqlFile(filePath) {
   }
 
   // Verify key tables are present in migration & canonical SQL
-  if (filePath.includes('0001_initial_schema.sql') || filePath.includes('rtr_complete.sql')) {
+  const baseName = path.basename(filePath);
+  if (baseName === '0001_initial_schema.sql' || baseName === 'schema.sql' || baseName === 'rtr_complete.sql') {
     const requiredTables = [
       'businesses',
       'profiles',

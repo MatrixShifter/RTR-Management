@@ -1,8 +1,10 @@
 import { describe, it, expect } from 'vitest';
+import { DEMO_PASSWORD_PLACEHOLDER } from '@crimpston/shared';
 import healthHandler from '../api/health.js';
 import loginHandler from '../api/auth/login.js';
 import verifySessionHandler from '../api/auth/verify-session.js';
 import forgotPasswordHandler from '../api/auth/forgot-password.js';
+import settingsHandler from '../api/settings.js';
 
 function createMockReqRes(options: {
   method?: string;
@@ -75,7 +77,7 @@ describe('Vercel Serverless API Endpoints Suite (/api/*)', () => {
   it('POST /api/auth/login authenticates demo owner into isolated sandbox', async () => {
     const { req, res } = createMockReqRes({
       method: 'POST',
-      body: { username: 'demo-owner', password: 'demo-password-2026' }
+      body: { username: 'demo-owner', password: DEMO_PASSWORD_PLACEHOLDER }
     });
     await loginHandler(req, res);
 
@@ -114,5 +116,46 @@ describe('Vercel Serverless API Endpoints Suite (/api/*)', () => {
 
     expect(res.getStatus()).toBe(200);
     expect(res.getBody().message).toBe('If an account matches the information provided, password reset instructions will be sent to its registered email address.');
+  });
+
+  it('GET /api/settings rejects missing authorization with 401', async () => {
+    const { req, res } = createMockReqRes({ method: 'GET' });
+    await settingsHandler(req, res);
+
+    expect(res.getStatus()).toBe(401);
+    expect(res.getBody().error).toBe('Unauthorized');
+  });
+
+  it('GET /api/settings returns isolated demo settings for demo token (200)', async () => {
+    const { req, res } = createMockReqRes({
+      method: 'GET',
+      headers: { authorization: 'Bearer demo-access-token-12345678' }
+    });
+    await settingsHandler(req, res);
+
+    expect(res.getStatus()).toBe(200);
+    expect(res.getBody().success).toBe(true);
+    expect(res.getBody().data.isDemo).toBe(true);
+    expect(res.getBody().data.name).toContain('Demo Sandbox');
+  });
+
+  it('PATCH /api/settings blocks demo sessions from modifying settings with 403', async () => {
+    const { req, res } = createMockReqRes({
+      method: 'PATCH',
+      headers: { authorization: 'Bearer demo-access-token-12345678' },
+      body: { name: 'Hacked Store' }
+    });
+    await settingsHandler(req, res);
+
+    expect(res.getStatus()).toBe(403);
+    expect(res.getBody().error).toBe('Forbidden');
+  });
+
+  it('POST /api/settings rejects unsupported HTTP method with 405', async () => {
+    const { req, res } = createMockReqRes({ method: 'POST' });
+    await settingsHandler(req, res);
+
+    expect(res.getStatus()).toBe(405);
+    expect(res.getBody().error).toBe('Method Not Allowed');
   });
 });

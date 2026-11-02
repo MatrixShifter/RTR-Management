@@ -205,7 +205,8 @@ shopsRouter.delete('/:id', requireOwnerAuth, businessMutationRateLimiter, async 
         status: 'BLOCKED',
         statusCode: 403,
         correlationId: (req.headers['x-correlation-id'] as string),
-        details: { shopId, reason: 'Confirmed demo shop retained for immutable audit ledger' }
+        resourceType: 'shop',
+        details: { reason: 'demo_shop_retained' }
       });
       return res.status(403).json({
         error: 'Forbidden',
@@ -244,11 +245,12 @@ shopsRouter.delete('/:id', requireOwnerAuth, businessMutationRateLimiter, async 
 
       logSecurityEvent({
         action: 'ARCHIVE_SHOP',
-        actorId: user.id,
-        targetId: shopId,
+        category: 'record_mutation',
         status: 'SUCCESS',
-        ip: req.ip,
-        details: { shopName: existingShop.name, totalRecords }
+        statusCode: 200,
+        correlationId: (req.headers['x-correlation-id'] as string),
+        resourceType: 'shop',
+        details: { reason: 'referenced_by_historical_records', isActive: false }
       });
 
       return res.status(200).json({
@@ -268,11 +270,11 @@ shopsRouter.delete('/:id', requireOwnerAuth, businessMutationRateLimiter, async 
 
     logSecurityEvent({
       action: 'DELETE_SHOP',
-      actorId: user.id,
-      targetId: shopId,
+      category: 'record_mutation',
       status: 'SUCCESS',
-      ip: req.ip,
-      details: { shopName: existingShop.name }
+      statusCode: 200,
+      correlationId: (req.headers['x-correlation-id'] as string),
+      resourceType: 'shop'
     });
 
     return res.status(200).json({

@@ -1,22 +1,15 @@
 -- ==============================================================================
 -- RTR WHOLESALE MANAGEMENT SYSTEM
--- MASTER CANONICAL DATABASE INITIALIZATION & SECURITY SCHEMA
--- FILE: database/rtr_complete.sql
+-- MASTER CANONICAL DATABASE ARCHITECTURE & SECURITY SCHEMA
+-- FILE: supabase/schema.sql
+-- AGENCY: Crimpston | CLIENT: RTR Mobiles
 -- ==============================================================================
 -- CONSOLIDATED DATABASE DEFINITION & MASTER SETUP:
 -- This file serves as the canonical single-file source of truth for the RTR
--- Wholesale Management PostgreSQL database running on Supabase.
--- It safely encapsulates:
---   1. Extensions (uuid-ossp, pgcrypto)
---   2. Enums, domains, and check constraints
---   3. Relational tables & foreign key relationships
---   4. Primary keys, foreign keys, unique constraints, and performance indexes
---   5. Database functions & automation triggers (delivery totals, payment syncing)
---   6. Updated-at timestamp automation & audit ledger immutability
---   7. Payment, invoicing, and outstanding balance calculations
---   8. Row-Level Security (RLS) enablement & granular tenant/role policies
---   9. Analytical database views (v_business_records, v_shop_payment_balances, v_shop_inventory_balances)
---  10. Least-privilege permissions, table grants, and verification queries
+-- Wholesale Management PostgreSQL database on Supabase.
+-- It is structured into 26 comprehensive logical sections covering extensions,
+-- schemas, core tables, transactions, stock ledger, RLS policies, views,
+-- triggers, and baseline configuration.
 --
 -- INSTRUCTIONS FOR SUPABASE SQL EDITOR:
 -- 1. Open your Supabase Project Dashboard (https://supabase.com/dashboard).
@@ -29,77 +22,27 @@
 -- ==============================================================================
 
 -- ==============================================================================
--- 1. EXTENSIONS & PREREQUISITES
+-- SECTION 1: EXTENSIONS
 -- ==============================================================================
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 
 -- ==============================================================================
--- 2. SYSTEM UTILITY & AUDIT FUNCTIONS
+-- SECTION 2: CUSTOM TYPES AND ENUMS
 -- ==============================================================================
-
--- 2.1. Automatically updates 'updated_at' timestamp on record mutation
-CREATE OR REPLACE FUNCTION public.set_updated_at()
-RETURNS TRIGGER
-LANGUAGE plpgsql
-AS $$
-BEGIN
-  NEW.updated_at = timezone('utc'::text, now());
-  RETURN NEW;
-END;
-$$;
-
--- 2.2. Prevents updates or deletes on append-only immutable audit ledgers
-CREATE OR REPLACE FUNCTION public.prevent_immutable_mutation()
-RETURNS TRIGGER
-LANGUAGE plpgsql
-AS $$
-BEGIN
-  RAISE EXCEPTION 'Action rejected: Table % is an append-only immutable audit ledger.', TG_TABLE_NAME
-    USING ERRCODE = '23505';
-END;
-$$;
-
--- 2.3. Automatic profile generation upon Supabase Auth signup
-CREATE OR REPLACE FUNCTION public.handle_new_user()
-RETURNS TRIGGER
-LANGUAGE plpgsql
-SECURITY DEFINER
-SET search_path = public, auth
-AS $$
-DECLARE
-  active_biz_id UUID;
-BEGIN
-  INSERT INTO public.profiles (id, email, full_name, username, avatar_url)
-  VALUES (
-    NEW.id,
-    COALESCE(NEW.email, ''),
-    COALESCE(NEW.raw_user_meta_data->>'full_name', NEW.raw_user_meta_data->>'name', NEW.email, 'User'),
-    LOWER(TRIM(NEW.raw_user_meta_data->>'username')),
-    NEW.raw_user_meta_data->>'avatar_url'
-  )
-  ON CONFLICT (id) DO UPDATE
-  SET email = EXCLUDED.email,
-      full_name = EXCLUDED.full_name,
-      username = COALESCE(EXCLUDED.username, public.profiles.username),
-      avatar_url = EXCLUDED.avatar_url;
-
-  -- Automatically bind authorized owner accounts to the active business workspace
-  IF NEW.email = 'owner@rtrmobiles.com' OR LOWER(TRIM(COALESCE(NEW.raw_user_meta_data->>'username', ''))) IN ('owner', 'vino', 'rtrowner', 'rtrmobiles') THEN
-    SELECT id INTO active_biz_id FROM public.businesses WHERE is_active = true ORDER BY created_at ASC LIMIT 1;
-    IF active_biz_id IS NOT NULL THEN
-      INSERT INTO public.business_memberships (business_id, user_id, role, is_active)
-      VALUES (active_biz_id, NEW.id, 'owner', true)
-      ON CONFLICT (business_id, user_id) DO UPDATE SET role = 'owner', is_active = true;
-    END IF;
-  END IF;
-
-  RETURN NEW;
-END;
-$$;
+-- Domain value checks are maintained through standard SQL check constraints
+-- for optimal compatibility across PostgreSQL versions and Supabase Studio:
+-- 1. Membership Roles: 'owner', 'employee'
+-- 2. Product Categories: 'Mobile Cases', 'Tempered Glass', 'Chargers & Adapters',
+--    'USB Cables', 'Earphones & Audio', 'Holders & Mounts', 'Power Banks', 'Other Accessories'
+-- 3. Delivery Status: 'pending', 'delivered', 'cancelled'
+-- 4. Payment Status: 'unpaid', 'partially_paid', 'fully_paid'
+-- 5. Payment Methods: 'CASH', 'UPI', 'BANK_TRANSFER', 'CHEQUE', 'OTHER'
+-- 6. Stock Movement Types: 'OPENING_STOCK', 'DELIVERY_IN', 'SALE_OUT',
+--    'TRANSFER_IN', 'TRANSFER_OUT', 'AUDIT_ADJUSTMENT', 'RETURN_IN', 'RETURN_OUT', 'DAMAGED_OUT'
 
 -- ==============================================================================
--- 3. CORE RELATIONAL TABLES
+-- SECTION 3: CORE BUSINESS TABLES (businesses, profiles)
 -- ==============================================================================
 
 -- 3.1. Tenant Business Entity (Tenant isolation root)
@@ -124,20 +67,9 @@ CREATE TABLE IF NOT EXISTS public.profiles (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now())
 );
 
--- Ensure username column and unique index exist if migrating existing schema
-ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS username VARCHAR(60) UNIQUE;
-CREATE UNIQUE INDEX IF NOT EXISTS uq_profiles_username ON public.profiles(LOWER(username)) WHERE username IS NOT NULL;
-
--- Initial default username seeding for system owner and store staff
-UPDATE public.profiles
-SET username = 'owner'
-WHERE email = 'owner@rtrmobiles.com' AND username IS NULL;
-
-UPDATE public.profiles
-SET username = 'staff'
-WHERE email = 'staff@rtrmobiles.com' AND username IS NULL;
-
--- 3.3. Business Memberships (Owner vs Employee role mapping)
+-- ==============================================================================
+-- SECTION 4: USER AND BUSINESS MEMBERSHIPS (business_memberships)
+-- ==============================================================================
 CREATE TABLE IF NOT EXISTS public.business_memberships (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     business_id UUID NOT NULL REFERENCES public.businesses(id) ON DELETE CASCADE,
@@ -148,7 +80,20 @@ CREATE TABLE IF NOT EXISTS public.business_memberships (
     CONSTRAINT uq_business_user UNIQUE (business_id, user_id)
 );
 
--- 3.4. Retail Partner Shops
+-- ==============================================================================
+-- SECTION 5: SHOP MEMBERSHIPS AND EMPLOYEE ASSIGNMENTS (shop_memberships)
+-- ==============================================================================
+CREATE TABLE IF NOT EXISTS public.shop_memberships (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    shop_id UUID NOT NULL,
+    user_id UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now()),
+    CONSTRAINT uq_shop_user UNIQUE (shop_id, user_id)
+);
+
+-- ==============================================================================
+-- SECTION 6: SHOP TABLES (shops)
+-- ==============================================================================
 CREATE TABLE IF NOT EXISTS public.shops (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     business_id UUID NOT NULL REFERENCES public.businesses(id) ON DELETE CASCADE,
@@ -167,16 +112,22 @@ CREATE TABLE IF NOT EXISTS public.shops (
     CONSTRAINT uq_business_shop_code UNIQUE (business_id, code)
 );
 
--- 3.5. Shop Memberships (Scoped access for store employees)
-CREATE TABLE IF NOT EXISTS public.shop_memberships (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    shop_id UUID NOT NULL REFERENCES public.shops(id) ON DELETE CASCADE,
-    user_id UUID NOT NULL REFERENCES public.profiles(id) ON DELETE CASCADE,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now()),
-    CONSTRAINT uq_shop_user UNIQUE (shop_id, user_id)
-);
+-- Add foreign key constraint for shop_memberships referencing shops
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.table_constraints
+    WHERE constraint_name = 'fk_shop_memberships_shop' AND table_name = 'shop_memberships'
+  ) THEN
+    ALTER TABLE public.shop_memberships
+      ADD CONSTRAINT fk_shop_memberships_shop
+      FOREIGN KEY (shop_id) REFERENCES public.shops(id) ON DELETE CASCADE;
+  END IF;
+END $$;
 
--- 3.6. Products Catalog
+-- ==============================================================================
+-- SECTION 7: PRODUCT TABLES (products)
+-- ==============================================================================
 CREATE TABLE IF NOT EXISTS public.products (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     business_id UUID NOT NULL REFERENCES public.businesses(id) ON DELETE CASCADE,
@@ -204,11 +155,9 @@ CREATE TABLE IF NOT EXISTS public.products (
     CONSTRAINT uq_business_product_sku UNIQUE (business_id, sku)
 );
 
--- Ensure unit_price and cost_price columns exist if migrating an older schema
-ALTER TABLE public.products ADD COLUMN IF NOT EXISTS unit_price NUMERIC(12, 2) NOT NULL DEFAULT 0.00 CHECK (unit_price >= 0);
-ALTER TABLE public.products ADD COLUMN IF NOT EXISTS cost_price NUMERIC(12, 2) DEFAULT NULL CHECK (cost_price >= 0);
-
--- 3.7. Wholesale Deliveries (Primary Wholesale Records Ledger)
+-- ==============================================================================
+-- SECTION 8: DELIVERY AND TRANSACTION TABLES (deliveries, delivery_items)
+-- ==============================================================================
 CREATE TABLE IF NOT EXISTS public.deliveries (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     business_id UUID NOT NULL REFERENCES public.businesses(id) ON DELETE CASCADE,
@@ -218,6 +167,7 @@ CREATE TABLE IF NOT EXISTS public.deliveries (
     total_amount NUMERIC(12, 2) NOT NULL DEFAULT 0.00 CHECK (total_amount >= 0),
     amount_paid NUMERIC(12, 2) NOT NULL DEFAULT 0.00 CHECK (amount_paid >= 0),
     outstanding_amount NUMERIC(12, 2) GENERATED ALWAYS AS (GREATEST(0.00, total_amount - amount_paid)) STORED,
+    customer_price NUMERIC(12, 2) DEFAULT NULL,
     payment_status VARCHAR(20) NOT NULL DEFAULT 'unpaid' CHECK (payment_status IN ('unpaid', 'partially_paid', 'fully_paid')),
     notes TEXT,
     created_by UUID NOT NULL REFERENCES public.profiles(id),
@@ -225,25 +175,23 @@ CREATE TABLE IF NOT EXISTS public.deliveries (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now())
 );
 
--- Ensure financial columns exist if migrating an existing deliveries table
-ALTER TABLE public.deliveries ALTER COLUMN status SET DEFAULT 'pending';
-ALTER TABLE public.deliveries ADD COLUMN IF NOT EXISTS total_amount NUMERIC(12, 2) NOT NULL DEFAULT 0.00 CHECK (total_amount >= 0);
-ALTER TABLE public.deliveries ADD COLUMN IF NOT EXISTS amount_paid NUMERIC(12, 2) NOT NULL DEFAULT 0.00 CHECK (amount_paid >= 0);
-ALTER TABLE public.deliveries ADD COLUMN IF NOT EXISTS payment_status VARCHAR(20) NOT NULL DEFAULT 'unpaid' CHECK (payment_status IN ('unpaid', 'partially_paid', 'fully_paid'));
-ALTER TABLE public.deliveries ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now());
-
-DO $$ 
+-- Stored generated profit column: customer_price - total_amount
+DO $$
 BEGIN
   IF NOT EXISTS (
-    SELECT 1 FROM information_schema.columns 
-    WHERE table_schema = 'public' AND table_name = 'deliveries' AND column_name = 'outstanding_amount'
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = 'deliveries' AND column_name = 'profit'
   ) THEN
-    ALTER TABLE public.deliveries 
-      ADD COLUMN outstanding_amount NUMERIC(12, 2) GENERATED ALWAYS AS (GREATEST(0.00, total_amount - amount_paid)) STORED;
+    ALTER TABLE public.deliveries
+      ADD COLUMN profit NUMERIC(12, 2) GENERATED ALWAYS AS (
+        CASE
+          WHEN customer_price IS NOT NULL THEN customer_price - total_amount
+          ELSE NULL
+        END
+      ) STORED;
   END IF;
 END $$;
 
--- 3.8. Delivery Line Items
 CREATE TABLE IF NOT EXISTS public.delivery_items (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     delivery_id UUID NOT NULL REFERENCES public.deliveries(id) ON DELETE CASCADE,
@@ -256,22 +204,9 @@ CREATE TABLE IF NOT EXISTS public.delivery_items (
     CONSTRAINT uq_delivery_product UNIQUE (delivery_id, product_id)
 );
 
--- Ensure unit_price and total_price exist on delivery_items
-ALTER TABLE public.delivery_items ADD COLUMN IF NOT EXISTS unit_price NUMERIC(12, 2) NOT NULL DEFAULT 0.00 CHECK (unit_price >= 0);
-ALTER TABLE public.delivery_items ADD COLUMN IF NOT EXISTS unit_cost NUMERIC(12, 2) DEFAULT NULL CHECK (unit_cost >= 0);
-
-DO $$ 
-BEGIN
-  IF NOT EXISTS (
-    SELECT 1 FROM information_schema.columns 
-    WHERE table_schema = 'public' AND table_name = 'delivery_items' AND column_name = 'total_price'
-  ) THEN
-    ALTER TABLE public.delivery_items 
-      ADD COLUMN total_price NUMERIC(12, 2) GENERATED ALWAYS AS (quantity * unit_price) STORED;
-  END IF;
-END $$;
-
--- 3.9. Invoices & Billing Memos
+-- ==============================================================================
+-- SECTION 9: PAYMENT AND INVOICE TABLES (payments, invoices)
+-- ==============================================================================
 CREATE TABLE IF NOT EXISTS public.invoices (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     business_id UUID NOT NULL REFERENCES public.businesses(id) ON DELETE CASCADE,
@@ -290,7 +225,6 @@ CREATE TABLE IF NOT EXISTS public.invoices (
     CONSTRAINT uq_business_invoice_number UNIQUE (business_id, invoice_number)
 );
 
--- 3.10. Payments Received (Cash, UPI, Bank Transfers)
 CREATE TABLE IF NOT EXISTS public.payments (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     business_id UUID NOT NULL REFERENCES public.businesses(id) ON DELETE CASCADE,
@@ -314,41 +248,10 @@ CREATE TABLE IF NOT EXISTS public.payments (
     created_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now())
 );
 
--- Ensure delivery_id exists on payments if migrating from earlier schema
-ALTER TABLE public.payments ADD COLUMN IF NOT EXISTS delivery_id UUID REFERENCES public.deliveries(id) ON DELETE CASCADE;
-
--- 3.11. Daily Sales Reports
-CREATE TABLE IF NOT EXISTS public.daily_reports (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    business_id UUID NOT NULL REFERENCES public.businesses(id) ON DELETE CASCADE,
-    shop_id UUID NOT NULL REFERENCES public.shops(id) ON DELETE CASCADE,
-    report_date DATE NOT NULL,
-    is_zero_sales BOOLEAN NOT NULL DEFAULT false,
-    status VARCHAR(20) NOT NULL DEFAULT 'submitted' CHECK (status IN ('submitted', 'approved', 'rejected')),
-    notes TEXT,
-    submitted_by UUID NOT NULL REFERENCES public.profiles(id),
-    reviewed_by UUID REFERENCES public.profiles(id),
-    reviewed_at TIMESTAMPTZ,
-    rejection_reason TEXT,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now()),
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now()),
-    CONSTRAINT uq_shop_report_date UNIQUE (shop_id, report_date)
-);
-
--- 3.12. Daily Report Line Items
-CREATE TABLE IF NOT EXISTS public.daily_report_items (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    report_id UUID NOT NULL REFERENCES public.daily_reports(id) ON DELETE CASCADE,
-    product_id UUID NOT NULL REFERENCES public.products(id) ON DELETE RESTRICT,
-    quantity_sold INTEGER NOT NULL CHECK (quantity_sold >= 0),
-    unit_price NUMERIC(12, 2) DEFAULT NULL CHECK (unit_price >= 0),
-    unit_cost NUMERIC(12, 2) DEFAULT NULL CHECK (unit_cost >= 0),
-    physical_count INTEGER CHECK (physical_count >= 0),
-    notes VARCHAR(255),
-    CONSTRAINT uq_report_product UNIQUE (report_id, product_id)
-);
-
--- 3.13. Immutable Stock Movement Ledger
+-- ==============================================================================
+-- SECTION 10: STOCK AND INVENTORY TABLES
+-- (stock_movements, daily_reports, daily_report_items, stock_counts, stock_adjustments, stock_transfers)
+-- ==============================================================================
 CREATE TABLE IF NOT EXISTS public.stock_movements (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     business_id UUID NOT NULL REFERENCES public.businesses(id) ON DELETE CASCADE,
@@ -373,7 +276,35 @@ CREATE TABLE IF NOT EXISTS public.stock_movements (
     created_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now())
 );
 
--- 3.14. Physical Stock Audit Counts
+CREATE TABLE IF NOT EXISTS public.daily_reports (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    business_id UUID NOT NULL REFERENCES public.businesses(id) ON DELETE CASCADE,
+    shop_id UUID NOT NULL REFERENCES public.shops(id) ON DELETE CASCADE,
+    report_date DATE NOT NULL,
+    is_zero_sales BOOLEAN NOT NULL DEFAULT false,
+    status VARCHAR(20) NOT NULL DEFAULT 'submitted' CHECK (status IN ('submitted', 'approved', 'rejected')),
+    notes TEXT,
+    submitted_by UUID NOT NULL REFERENCES public.profiles(id),
+    reviewed_by UUID REFERENCES public.profiles(id),
+    reviewed_at TIMESTAMPTZ,
+    rejection_reason TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now()),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now()),
+    CONSTRAINT uq_shop_report_date UNIQUE (shop_id, report_date)
+);
+
+CREATE TABLE IF NOT EXISTS public.daily_report_items (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    report_id UUID NOT NULL REFERENCES public.daily_reports(id) ON DELETE CASCADE,
+    product_id UUID NOT NULL REFERENCES public.products(id) ON DELETE RESTRICT,
+    quantity_sold INTEGER NOT NULL CHECK (quantity_sold >= 0),
+    unit_price NUMERIC(12, 2) DEFAULT NULL CHECK (unit_price >= 0),
+    unit_cost NUMERIC(12, 2) DEFAULT NULL CHECK (unit_cost >= 0),
+    physical_count INTEGER CHECK (physical_count >= 0),
+    notes VARCHAR(255),
+    CONSTRAINT uq_report_product UNIQUE (report_id, product_id)
+);
+
 CREATE TABLE IF NOT EXISTS public.stock_counts (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     business_id UUID NOT NULL REFERENCES public.businesses(id) ON DELETE CASCADE,
@@ -387,7 +318,6 @@ CREATE TABLE IF NOT EXISTS public.stock_counts (
     created_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now())
 );
 
--- 3.15. Inter-Shop Stock Transfers
 CREATE TABLE IF NOT EXISTS public.stock_transfers (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     business_id UUID NOT NULL REFERENCES public.businesses(id) ON DELETE CASCADE,
@@ -401,7 +331,6 @@ CREATE TABLE IF NOT EXISTS public.stock_transfers (
     CONSTRAINT chk_different_transfer_shops CHECK (from_shop_id <> to_shop_id)
 );
 
--- 3.16. Authorized Stock Adjustments
 CREATE TABLE IF NOT EXISTS public.stock_adjustments (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     business_id UUID NOT NULL REFERENCES public.businesses(id) ON DELETE CASCADE,
@@ -422,7 +351,10 @@ CREATE TABLE IF NOT EXISTS public.stock_adjustments (
     created_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now())
 );
 
--- 3.17. Security & Activity Audit Logs
+-- ==============================================================================
+-- SECTION 11: AUDIT-RELATED TABLES
+-- (audit_logs, idempotency_records, maintenance_audit_ledger)
+-- ==============================================================================
 CREATE TABLE IF NOT EXISTS public.audit_logs (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     business_id UUID NOT NULL REFERENCES public.businesses(id) ON DELETE CASCADE,
@@ -436,7 +368,6 @@ CREATE TABLE IF NOT EXISTS public.audit_logs (
     created_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now())
 );
 
--- 3.18. API Idempotency Records
 CREATE TABLE IF NOT EXISTS public.idempotency_records (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     business_id UUID NOT NULL REFERENCES public.businesses(id) ON DELETE CASCADE,
@@ -448,8 +379,79 @@ CREATE TABLE IF NOT EXISTS public.idempotency_records (
     CONSTRAINT uq_business_idempotency UNIQUE (business_id, idempotency_key)
 );
 
+CREATE TABLE IF NOT EXISTS public.maintenance_audit_ledger (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    operation_name TEXT NOT NULL,
+    executed_at TIMESTAMPTZ NOT NULL DEFAULT timezone('utc'::text, now()),
+    details JSONB NOT NULL
+);
+
 -- ==============================================================================
--- 4. PERFORMANCE & LOOKUP INDEXES
+-- SECTION 12: PRIMARY KEYS
+-- ==============================================================================
+-- Primary keys are declared inline in CREATE TABLE definitions above:
+-- - businesses(id)
+-- - profiles(id)
+-- - business_memberships(id)
+-- - shops(id)
+-- - shop_memberships(id)
+-- - products(id)
+-- - deliveries(id)
+-- - delivery_items(id)
+-- - invoices(id)
+-- - payments(id)
+-- - daily_reports(id)
+-- - daily_report_items(id)
+-- - stock_movements(id)
+-- - stock_counts(id)
+-- - stock_transfers(id)
+-- - stock_adjustments(id)
+-- - audit_logs(id)
+-- - idempotency_records(id)
+-- - maintenance_audit_ledger(id)
+
+-- ==============================================================================
+-- SECTION 13: FOREIGN KEYS WITH APPROPRIATE DELETE ACTIONS
+-- ==============================================================================
+-- Referenced foreign key policies:
+-- - Parent business deletion cascades to all tenant entities (ON DELETE CASCADE)
+-- - Delivery line item products are protected against accidental catalog deletion (ON DELETE RESTRICT)
+-- - Daily report items and stock movements enforce catalog referential integrity (ON DELETE RESTRICT)
+-- - User deletion cascades to profile and active memberships (ON DELETE CASCADE)
+-- - Invoices and payments cleanly cascade when deliveries are removed (ON DELETE CASCADE)
+
+-- ==============================================================================
+-- SECTION 14: UNIQUE CONSTRAINTS
+-- ==============================================================================
+CREATE UNIQUE INDEX IF NOT EXISTS uq_profiles_username
+  ON public.profiles(LOWER(username)) WHERE username IS NOT NULL;
+
+-- uq_business_user: business_memberships(business_id, user_id)
+-- uq_shop_user: shop_memberships(shop_id, user_id)
+-- uq_business_shop_code: shops(business_id, code)
+-- uq_business_product_sku: products(business_id, sku)
+-- uq_delivery_product: delivery_items(delivery_id, product_id)
+-- uq_business_invoice_number: invoices(business_id, invoice_number)
+-- uq_shop_report_date: daily_reports(shop_id, report_date)
+-- uq_report_product: daily_report_items(report_id, product_id)
+-- uq_business_idempotency: idempotency_records(business_id, idempotency_key)
+
+-- ==============================================================================
+-- SECTION 15: CHECK CONSTRAINTS
+-- ==============================================================================
+-- Numerical constraints defined on tables:
+-- - products: unit_price >= 0, cost_price >= 0, min_stock_threshold >= 0
+-- - deliveries: total_amount >= 0, amount_paid >= 0
+-- - delivery_items: quantity > 0, unit_price >= 0, unit_cost >= 0
+-- - invoices: total_amount >= 0, amount_paid >= 0
+-- - payments: amount > 0
+-- - stock_movements: quantity != 0
+-- - stock_counts: counted_quantity >= 0
+-- - stock_transfers: quantity > 0, from_shop_id <> to_shop_id
+-- - stock_adjustments: adjustment_quantity != 0
+
+-- ==============================================================================
+-- SECTION 16: INDEXES
 -- ==============================================================================
 CREATE INDEX IF NOT EXISTS idx_shops_business ON public.shops(business_id);
 CREATE INDEX IF NOT EXISTS idx_shops_code ON public.shops(code);
@@ -489,16 +491,148 @@ CREATE INDEX IF NOT EXISTS idx_stock_movements_movement_type ON public.stock_mov
 CREATE INDEX IF NOT EXISTS idx_stock_movements_shop_created_desc ON public.stock_movements(shop_id, created_at DESC);
 
 -- ==============================================================================
--- 5. DATABASE FUNCTIONS & AUTOMATION TRIGGERS
+-- SECTION 17: DATABASE HELPER FUNCTIONS
 -- ==============================================================================
 
--- 5.1. Auth user profile creation trigger
+-- 17.1. Automatically updates 'updated_at' timestamp on record mutation
+CREATE OR REPLACE FUNCTION public.set_updated_at()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  NEW.updated_at = timezone('utc'::text, now());
+  RETURN NEW;
+END;
+$$;
+
+-- 17.2. Prevents updates or deletes on append-only immutable audit ledgers
+CREATE OR REPLACE FUNCTION public.prevent_immutable_mutation()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  RAISE EXCEPTION 'Action rejected: Table % is an append-only immutable audit ledger.', TG_TABLE_NAME
+    USING ERRCODE = '23505';
+END;
+$$;
+
+-- 17.3. Automatic profile generation upon Supabase Auth signup
+CREATE OR REPLACE FUNCTION public.handle_new_user()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, auth
+AS $$
+BEGIN
+  INSERT INTO public.profiles (id, email, full_name, username, avatar_url)
+  VALUES (
+    NEW.id,
+    COALESCE(NEW.email, ''),
+    COALESCE(NEW.raw_user_meta_data->>'full_name', NEW.raw_user_meta_data->>'name', NEW.email, 'User'),
+    NEW.raw_user_meta_data->>'username',
+    NEW.raw_user_meta_data->>'avatar_url'
+  )
+  ON CONFLICT (id) DO UPDATE
+  SET email = EXCLUDED.email,
+      full_name = EXCLUDED.full_name,
+      avatar_url = EXCLUDED.avatar_url;
+  RETURN NEW;
+END;
+$$;
+
+-- ==============================================================================
+-- SECTION 18: FINANCIAL CALCULATION AND SECURITY DEFINER FUNCTIONS
+-- ==============================================================================
+
+-- 18.1. Get current authenticated user's active business_id
+CREATE OR REPLACE FUNCTION public.get_auth_business_id()
+RETURNS UUID
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public, auth
+AS $$
+  SELECT business_id 
+  FROM public.business_memberships 
+  WHERE user_id = auth.uid() AND is_active = true
+  LIMIT 1;
+$$;
+
+-- 18.2. Check if authenticated user is active owner of the target business
+CREATE OR REPLACE FUNCTION public.is_business_owner(target_business_id UUID)
+RETURNS BOOLEAN
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public, auth
+AS $$
+  SELECT EXISTS (
+    SELECT 1 
+    FROM public.business_memberships 
+    WHERE user_id = auth.uid() 
+      AND business_id = target_business_id 
+      AND role = 'owner' 
+      AND is_active = true
+  );
+$$;
+
+-- 18.3. Check if authenticated user is an active employee assigned to target shop
+CREATE OR REPLACE FUNCTION public.is_assigned_to_shop(target_shop_id UUID)
+RETURNS BOOLEAN
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public, auth
+AS $$
+  SELECT EXISTS (
+    SELECT 1 
+    FROM public.shop_memberships sm
+    JOIN public.shops s ON s.id = sm.shop_id
+    JOIN public.business_memberships bm ON bm.user_id = sm.user_id AND bm.business_id = s.business_id
+    WHERE sm.user_id = auth.uid() 
+      AND sm.shop_id = target_shop_id
+      AND s.is_active = true
+      AND bm.is_active = true
+      AND bm.role = 'employee'
+  );
+$$;
+
+-- 18.4. Retrieve authenticated employee's assigned shop ID
+CREATE OR REPLACE FUNCTION public.get_employee_assigned_shop_id()
+RETURNS UUID
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public, auth
+AS $$
+  SELECT sm.shop_id 
+  FROM public.shop_memberships sm
+  JOIN public.shops s ON s.id = sm.shop_id
+  JOIN public.business_memberships bm ON bm.user_id = sm.user_id AND bm.business_id = s.business_id
+  WHERE sm.user_id = auth.uid()
+    AND s.is_active = true
+    AND bm.is_active = true
+    AND bm.role = 'employee'
+  LIMIT 1;
+$$;
+
+-- Grant execution to authenticated and service_role
+GRANT EXECUTE ON FUNCTION public.get_auth_business_id() TO authenticated, service_role;
+GRANT EXECUTE ON FUNCTION public.is_business_owner(UUID) TO authenticated, service_role;
+GRANT EXECUTE ON FUNCTION public.is_assigned_to_shop(UUID) TO authenticated, service_role;
+GRANT EXECUTE ON FUNCTION public.get_employee_assigned_shop_id() TO authenticated, service_role;
+
+-- ==============================================================================
+-- SECTION 19: TRIGGERS
+-- ==============================================================================
+
+-- 19.1. Auth user profile creation trigger
 DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
 CREATE TRIGGER on_auth_user_created
   AFTER INSERT ON auth.users
   FOR EACH ROW EXECUTE FUNCTION public.handle_new_user();
 
--- 5.2. Standard updated_at triggers
+-- 19.2. Standard updated_at triggers
 DROP TRIGGER IF EXISTS trg_businesses_updated_at ON public.businesses;
 CREATE TRIGGER trg_businesses_updated_at BEFORE UPDATE ON public.businesses
   FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
@@ -527,7 +661,7 @@ DROP TRIGGER IF EXISTS trg_daily_reports_updated_at ON public.daily_reports;
 CREATE TRIGGER trg_daily_reports_updated_at BEFORE UPDATE ON public.daily_reports
   FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
 
--- 5.3. Immutable ledger protection triggers
+-- 19.3. Immutable ledger protection triggers
 DROP TRIGGER IF EXISTS trg_stock_movements_immutable ON public.stock_movements;
 CREATE TRIGGER trg_stock_movements_immutable BEFORE UPDATE OR DELETE ON public.stock_movements
   FOR EACH ROW EXECUTE FUNCTION public.prevent_immutable_mutation();
@@ -536,8 +670,7 @@ DROP TRIGGER IF EXISTS trg_audit_logs_immutable ON public.audit_logs;
 CREATE TRIGGER trg_audit_logs_immutable BEFORE UPDATE OR DELETE ON public.audit_logs
   FOR EACH ROW EXECUTE FUNCTION public.prevent_immutable_mutation();
 
--- 5.4. Delivery Totals Calculation from Line Items
--- Whenever delivery_items are inserted, updated, or removed, recalculates deliveries.total_amount
+-- 19.4. Delivery Totals Calculation from Line Items
 CREATE OR REPLACE FUNCTION public.sync_delivery_items_totals()
 RETURNS TRIGGER
 LANGUAGE plpgsql
@@ -572,8 +705,7 @@ CREATE TRIGGER trg_delivery_items_sync_total
   AFTER INSERT OR UPDATE OR DELETE ON public.delivery_items
   FOR EACH ROW EXECUTE FUNCTION public.sync_delivery_items_totals();
 
--- 5.5. Payment Synchronization & Outstanding Balance Auto-Recalculation
--- Whenever a payment is inserted, updated, or deleted, recalculates amount_paid and payment_status on delivery & invoice
+-- 19.5. Payment Synchronization & Outstanding Balance Auto-Recalculation
 CREATE OR REPLACE FUNCTION public.sync_payment_totals()
 RETURNS TRIGGER
 LANGUAGE plpgsql
@@ -593,7 +725,6 @@ BEGIN
   v_deliv_id := COALESCE(NEW.delivery_id, OLD.delivery_id);
   v_inv_id := COALESCE(NEW.invoice_id, OLD.invoice_id);
 
-  -- 1. Sync Deliveries Payment Balance
   IF v_deliv_id IS NOT NULL THEN
     SELECT COALESCE(SUM(amount), 0.00)
     INTO v_deliv_paid
@@ -622,7 +753,6 @@ BEGIN
     END IF;
   END IF;
 
-  -- 2. Sync Invoices Payment Balance (if tied to an invoice)
   IF v_inv_id IS NOT NULL THEN
     SELECT COALESCE(SUM(amount), 0.00)
     INTO v_inv_paid
@@ -660,7 +790,7 @@ CREATE TRIGGER trg_payments_sync_totals
   AFTER INSERT OR UPDATE OR DELETE ON public.payments
   FOR EACH ROW EXECUTE FUNCTION public.sync_payment_totals();
 
--- 5.6. Automatic Stock Movement Generation on Confirmed Deliveries
+-- 19.6. Automatic Stock Movement Generation on Confirmed Deliveries
 CREATE OR REPLACE FUNCTION public.post_delivery_stock_movements()
 RETURNS TRIGGER
 LANGUAGE plpgsql
@@ -705,7 +835,7 @@ CREATE TRIGGER trg_deliveries_post_movements
   AFTER INSERT OR UPDATE ON public.deliveries
   FOR EACH ROW EXECUTE FUNCTION public.post_delivery_stock_movements();
 
--- 5.7. Automatic Stock Movement Generation on Stock Transfers
+-- 19.7. Automatic Stock Movement Generation on Stock Transfers
 CREATE OR REPLACE FUNCTION public.post_transfer_stock_movements()
 RETURNS TRIGGER
 LANGUAGE plpgsql
@@ -713,7 +843,6 @@ SECURITY DEFINER
 SET search_path = public, auth
 AS $$
 BEGIN
-  -- Deduct from source shop
   INSERT INTO public.stock_movements (
     business_id,
     shop_id,
@@ -736,7 +865,6 @@ BEGIN
     NEW.created_by
   );
 
-  -- Add to destination shop
   INSERT INTO public.stock_movements (
     business_id,
     shop_id,
@@ -768,7 +896,7 @@ CREATE TRIGGER trg_transfers_post_movements
   AFTER INSERT ON public.stock_transfers
   FOR EACH ROW EXECUTE FUNCTION public.post_transfer_stock_movements();
 
--- 5.8. Automatic Stock Movement Generation on Daily Report Approval
+-- 19.8. Automatic Stock Movement Generation on Daily Report Approval
 CREATE OR REPLACE FUNCTION public.post_report_approval_stock_movements()
 RETURNS TRIGGER
 LANGUAGE plpgsql
@@ -811,146 +939,33 @@ CREATE TRIGGER trg_daily_reports_approval_movements
   FOR EACH ROW EXECUTE FUNCTION public.post_report_approval_stock_movements();
 
 -- ==============================================================================
--- 6. SECURITY HELPER FUNCTIONS
+-- SECTION 20: ROW LEVEL SECURITY ENABLEMENT
 -- ==============================================================================
+ALTER TABLE public.businesses ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.business_memberships ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.shops ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.shop_memberships ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.products ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.deliveries ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.delivery_items ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.invoices ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.payments ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.daily_reports ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.daily_report_items ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.stock_movements ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.stock_counts ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.stock_transfers ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.stock_adjustments ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.audit_logs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.idempotency_records ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.maintenance_audit_ledger ENABLE ROW LEVEL SECURITY;
 
--- 6.1. Get current authenticated user's active business_id
-CREATE OR REPLACE FUNCTION public.get_auth_business_id()
-RETURNS UUID
-LANGUAGE sql
-STABLE
-SECURITY DEFINER
-SET search_path = public, auth
-AS $$
-  SELECT business_id 
-  FROM public.business_memberships 
-  WHERE user_id = auth.uid() AND is_active = true
-  LIMIT 1;
-$$;
-
--- 6.2. Check if authenticated user is active owner of the target business
-CREATE OR REPLACE FUNCTION public.is_business_owner(target_business_id UUID)
-RETURNS BOOLEAN
-LANGUAGE sql
-STABLE
-SECURITY DEFINER
-SET search_path = public, auth
-AS $$
-  SELECT EXISTS (
-    SELECT 1 
-    FROM public.business_memberships 
-    WHERE user_id = auth.uid() 
-      AND business_id = target_business_id 
-      AND role = 'owner' 
-      AND is_active = true
-  );
-$$;
-
--- 6.3. [REMOVED] Employee shop assignment check removed - Owner authentication only
-
--- ==============================================================================
--- 7. ANALYTICAL DATABASE VIEWS
--- ==============================================================================
-
--- 7.1. Unified Business Records View (Directly maps to the Records Page Ledger)
-CREATE OR REPLACE VIEW public.v_business_records WITH (security_invoker = true) AS
-SELECT
-    COALESCE(di.id, d.id) AS record_id,
-    d.id AS delivery_id,
-    d.business_id,
-    d.delivery_date AS date,
-    s.id AS shop_id,
-    COALESCE(s.name, 'Direct Wholesale')::VARCHAR(150) AS shop_name,
-    s.code::VARCHAR(30) AS shop_code,
-    p.id AS product_id,
-    COALESCE(p.name, 'Wholesale Product')::VARCHAR(200) AS product_name,
-    p.sku::VARCHAR(50) AS product_sku,
-    COALESCE(di.quantity, 1)::INTEGER AS quantity,
-    COALESCE(di.unit_price, d.total_amount, 0.00)::NUMERIC(12, 2) AS unit_price,
-    COALESCE(di.total_price, d.total_amount, 0.00)::NUMERIC(12, 2) AS total_amount,
-    d.status::VARCHAR(20) AS delivery_status,
-    d.amount_paid::NUMERIC(12, 2) AS amount_paid,
-    d.outstanding_amount::NUMERIC(12, 2) AS pending_amount,
-    d.payment_status::VARCHAR(20) AS payment_status,
-    d.notes,
-    d.created_at,
-    CASE
-        -- Delivered & cancelled items placed below pending
-        WHEN d.status IN ('delivered', 'cancelled') THEN 2
-        -- Pending (unchecked) deliveries first
-        ELSE 1
-    END::INTEGER AS priority_rank
-FROM public.deliveries d
-LEFT JOIN public.shops s ON s.id = d.shop_id
-LEFT JOIN public.delivery_items di ON di.delivery_id = d.id
-LEFT JOIN public.products p ON p.id = di.product_id;
-
--- 7.2. Shop-wise Payment & Outstanding Balances View
-CREATE OR REPLACE VIEW public.v_shop_payment_balances WITH (security_invoker = true) AS
-SELECT
-    s.id AS shop_id,
-    s.name AS shop_name,
-    s.code AS shop_code,
-    COALESCE(SUM(d.total_amount), 0.00)::NUMERIC(12, 2) AS total_billed,
-    COALESCE(SUM(d.amount_paid), 0.00)::NUMERIC(12, 2) AS total_paid,
-    COALESCE(SUM(d.outstanding_amount), 0.00)::NUMERIC(12, 2) AS outstanding_balance,
-    CASE
-        WHEN COALESCE(SUM(d.total_amount), 0.00) = 0 THEN 'unpaid'
-        WHEN COALESCE(SUM(d.amount_paid), 0.00) >= COALESCE(SUM(d.total_amount), 0.00) THEN 'fully_paid'
-        WHEN COALESCE(SUM(d.amount_paid), 0.00) > 0 THEN 'partially_paid'
-        ELSE 'unpaid'
-    END AS status,
-    MAX(p.payment_date) AS last_payment_date,
-    COUNT(DISTINCT p.id)::INTEGER AS payment_count
-FROM public.shops s
-LEFT JOIN public.deliveries d ON d.shop_id = s.id AND d.status <> 'cancelled'
-LEFT JOIN public.payments p ON p.shop_id = s.id AND p.status = 'COMPLETED'
-WHERE s.is_active = true
-GROUP BY s.id, s.name, s.code;
-
--- 7.3. Shop-wise Live Inventory Ledger Balances View
-CREATE OR REPLACE VIEW public.v_shop_inventory_balances WITH (security_invoker = true) AS
-SELECT
-    s.id AS shop_id,
-    s.name AS shop_name,
-    s.code AS shop_code,
-    p.id AS product_id,
-    p.name AS product_name,
-    p.sku AS product_sku,
-    p.category AS category,
-    p.min_stock_threshold,
-    COALESCE(SUM(CASE WHEN sm.movement_type = 'DELIVERY_IN' THEN sm.quantity ELSE 0 END), 0)::INTEGER AS total_delivered,
-    COALESCE(ABS(SUM(CASE WHEN sm.movement_type = 'SALE_OUT' AND sm.is_provisional = false THEN sm.quantity ELSE 0 END)), 0)::INTEGER AS confirmed_sold,
-    COALESCE(ABS(SUM(CASE WHEN sm.movement_type = 'SALE_OUT' AND sm.is_provisional = true THEN sm.quantity ELSE 0 END)), 0)::INTEGER AS provisional_sold,
-    COALESCE(SUM(CASE WHEN sm.movement_type = 'TRANSFER_IN' THEN sm.quantity ELSE 0 END), 0)::INTEGER AS total_transferred_in,
-    COALESCE(ABS(SUM(CASE WHEN sm.movement_type = 'TRANSFER_OUT' THEN sm.quantity ELSE 0 END)), 0)::INTEGER AS total_transferred_out,
-    COALESCE(SUM(CASE WHEN sm.movement_type = 'RETURN_IN' THEN sm.quantity ELSE 0 END), 0)::INTEGER AS total_returned,
-    COALESCE(ABS(SUM(CASE WHEN sm.movement_type = 'DAMAGED_OUT' THEN sm.quantity ELSE 0 END)), 0)::INTEGER AS total_damaged,
-    COALESCE(SUM(sm.quantity), 0)::INTEGER AS expected_stock
-FROM public.shops s
-CROSS JOIN public.products p
-LEFT JOIN public.stock_movements sm 
-    ON sm.shop_id = s.id 
-   AND sm.product_id = p.id 
-   AND sm.is_provisional = false
-WHERE s.is_active = true 
-  AND p.is_active = true
-GROUP BY s.id, s.name, s.code, p.id, p.name, p.sku, p.category, p.min_stock_threshold;
-
--- ==============================================================================
--- 8. PERMISSIONS & TABLE GRANTS (Least-Privilege)
--- ==============================================================================
+-- Base Grants
 REVOKE ALL ON ALL TABLES IN SCHEMA public FROM PUBLIC;
 REVOKE ALL ON ALL FUNCTIONS IN SCHEMA public FROM PUBLIC;
-
--- Explicitly revoke anonymous access
 REVOKE ALL ON SCHEMA public FROM anon;
 REVOKE ALL ON ALL TABLES IN SCHEMA public FROM anon;
-REVOKE ALL ON ALL FUNCTIONS IN SCHEMA public FROM anon;
-REVOKE ALL ON ALL SEQUENCES IN SCHEMA public FROM anon;
-
-GRANT EXECUTE ON FUNCTION public.get_auth_business_id() TO authenticated, service_role;
-GRANT EXECUTE ON FUNCTION public.is_business_owner(UUID) TO authenticated, service_role;
 
 GRANT SELECT, INSERT, UPDATE, DELETE ON public.businesses TO authenticated;
 GRANT SELECT, INSERT, UPDATE, DELETE ON public.profiles TO authenticated;
@@ -971,37 +986,15 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON public.stock_adjustments TO authenticate
 GRANT SELECT, INSERT ON public.audit_logs TO authenticated;
 GRANT SELECT, INSERT, UPDATE, DELETE ON public.idempotency_records TO authenticated;
 
-GRANT SELECT ON public.v_business_records TO authenticated, service_role;
-GRANT SELECT ON public.v_shop_payment_balances TO authenticated, service_role;
-GRANT SELECT ON public.v_shop_inventory_balances TO authenticated, service_role;
-
 GRANT ALL ON ALL TABLES IN SCHEMA public TO postgres, service_role;
 GRANT ALL ON ALL FUNCTIONS IN SCHEMA public TO postgres, service_role;
 GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO postgres, service_role;
 
 -- ==============================================================================
--- 9. ROW LEVEL SECURITY (RLS) POLICIES
+-- SECTION 21: OWNER RLS POLICIES
 -- ==============================================================================
-ALTER TABLE public.businesses ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.business_memberships ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.shops ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.shop_memberships ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.products ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.deliveries ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.delivery_items ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.invoices ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.payments ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.daily_reports ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.daily_report_items ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.stock_movements ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.stock_counts ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.stock_transfers ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.stock_adjustments ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.audit_logs ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.idempotency_records ENABLE ROW LEVEL SECURITY;
 
--- 9.1. Businesses Policies
+-- 21.1. Businesses (Owner Full Management)
 DROP POLICY IF EXISTS "businesses_select_member" ON public.businesses;
 CREATE POLICY "businesses_select_member"
   ON public.businesses FOR SELECT
@@ -1023,35 +1016,11 @@ CREATE POLICY "businesses_delete_owner"
   ON public.businesses FOR DELETE
   USING (public.is_business_owner(id));
 
--- 9.2. Profiles Policies
-DROP POLICY IF EXISTS "profiles_select_shared_business" ON public.profiles;
-CREATE POLICY "profiles_select_shared_business"
-  ON public.profiles FOR SELECT
-  USING (
-    id = auth.uid() OR 
-    EXISTS (
-      SELECT 1 FROM public.business_memberships bm1
-      JOIN public.business_memberships bm2 ON bm1.business_id = bm2.business_id
-      WHERE bm1.user_id = auth.uid() AND bm2.user_id = public.profiles.id
-    )
-  );
-
-DROP POLICY IF EXISTS "profiles_insert_self" ON public.profiles;
-CREATE POLICY "profiles_insert_self"
-  ON public.profiles FOR INSERT
-  WITH CHECK (id = auth.uid());
-
-DROP POLICY IF EXISTS "profiles_update_self" ON public.profiles;
-CREATE POLICY "profiles_update_self"
-  ON public.profiles FOR UPDATE
-  USING (id = auth.uid())
-  WITH CHECK (id = auth.uid());
-
--- 9.3. Business Memberships Policies
+-- 21.2. Business Memberships (Owner Management)
 DROP POLICY IF EXISTS "memberships_select_member" ON public.business_memberships;
 CREATE POLICY "memberships_select_member"
   ON public.business_memberships FOR SELECT
-  USING (business_id = public.get_auth_business_id());
+  USING (user_id = auth.uid() OR public.is_business_owner(business_id));
 
 DROP POLICY IF EXISTS "memberships_insert_owner" ON public.business_memberships;
 CREATE POLICY "memberships_insert_owner"
@@ -1069,9 +1038,7 @@ CREATE POLICY "memberships_delete_owner"
   ON public.business_memberships FOR DELETE
   USING (public.is_business_owner(business_id));
 
-DROP POLICY IF EXISTS "memberships_manage_owner" ON public.business_memberships;
-
--- 9.4. Shops Policies
+-- 21.3. Shops (Owner Management)
 DROP POLICY IF EXISTS "shops_select_owner" ON public.shops;
 CREATE POLICY "shops_select_owner"
   ON public.shops FOR SELECT
@@ -1093,9 +1060,7 @@ CREATE POLICY "shops_delete_owner"
   ON public.shops FOR DELETE
   USING (public.is_business_owner(business_id));
 
-DROP POLICY IF EXISTS "shops_manage_owner" ON public.shops;
-
--- 9.5. Shop Memberships Policies
+-- 21.4. Shop Memberships (Owner Management)
 DROP POLICY IF EXISTS "shop_memberships_select_owner" ON public.shop_memberships;
 CREATE POLICY "shop_memberships_select_owner"
   ON public.shop_memberships FOR SELECT
@@ -1147,9 +1112,7 @@ CREATE POLICY "shop_memberships_delete_owner"
     )
   );
 
-DROP POLICY IF EXISTS "shop_memberships_manage_owner" ON public.shop_memberships;
-
--- 9.6. Products Policies
+-- 21.5. Products (Owner Management)
 DROP POLICY IF EXISTS "products_select_owner" ON public.products;
 CREATE POLICY "products_select_owner"
   ON public.products FOR SELECT
@@ -1171,9 +1134,7 @@ CREATE POLICY "products_delete_owner"
   ON public.products FOR DELETE
   USING (public.is_business_owner(business_id));
 
-DROP POLICY IF EXISTS "products_manage_owner" ON public.products;
-
--- 9.7. Deliveries Policies
+-- 21.6. Deliveries (Owner Management)
 DROP POLICY IF EXISTS "deliveries_select_owner" ON public.deliveries;
 CREATE POLICY "deliveries_select_owner"
   ON public.deliveries FOR SELECT
@@ -1195,20 +1156,7 @@ CREATE POLICY "deliveries_delete_owner"
   ON public.deliveries FOR DELETE
   USING (public.is_business_owner(business_id));
 
-DROP POLICY IF EXISTS "deliveries_manage_owner" ON public.deliveries;
-
--- 9.8. Delivery Items Policies
-DROP POLICY IF EXISTS "delivery_items_select" ON public.delivery_items;
-CREATE POLICY "delivery_items_select"
-  ON public.delivery_items FOR SELECT
-  USING (
-    EXISTS (
-      SELECT 1 FROM public.deliveries d
-      WHERE d.id = public.delivery_items.delivery_id
-        AND public.is_business_owner(d.business_id)
-    )
-  );
-
+-- 21.7. Delivery Items (Owner Management)
 DROP POLICY IF EXISTS "delivery_items_insert" ON public.delivery_items;
 CREATE POLICY "delivery_items_insert"
   ON public.delivery_items FOR INSERT
@@ -1249,33 +1197,7 @@ CREATE POLICY "delivery_items_delete"
     )
   );
 
-DROP POLICY IF EXISTS "delivery_items_manage_owner" ON public.delivery_items;
-
--- 9.9. Payments Policies
-DROP POLICY IF EXISTS "payments_select_owner" ON public.payments;
-CREATE POLICY "payments_select_owner"
-  ON public.payments FOR SELECT
-  USING (public.is_business_owner(business_id));
-
-DROP POLICY IF EXISTS "payments_insert_owner" ON public.payments;
-CREATE POLICY "payments_insert_owner"
-  ON public.payments FOR INSERT
-  WITH CHECK (public.is_business_owner(business_id));
-
-DROP POLICY IF EXISTS "payments_update_owner" ON public.payments;
-CREATE POLICY "payments_update_owner"
-  ON public.payments FOR UPDATE
-  USING (public.is_business_owner(business_id))
-  WITH CHECK (public.is_business_owner(business_id));
-
-DROP POLICY IF EXISTS "payments_delete_owner" ON public.payments;
-CREATE POLICY "payments_delete_owner"
-  ON public.payments FOR DELETE
-  USING (public.is_business_owner(business_id));
-
-DROP POLICY IF EXISTS "payments_manage_owner" ON public.payments;
-
--- 9.10. Invoices Policies
+-- 21.8. Invoices (Owner Management)
 DROP POLICY IF EXISTS "invoices_select_owner" ON public.invoices;
 CREATE POLICY "invoices_select_owner"
   ON public.invoices FOR SELECT
@@ -1297,9 +1219,29 @@ CREATE POLICY "invoices_delete_owner"
   ON public.invoices FOR DELETE
   USING (public.is_business_owner(business_id));
 
-DROP POLICY IF EXISTS "invoices_manage_owner" ON public.invoices;
+-- 21.9. Payments (Owner Management)
+DROP POLICY IF EXISTS "payments_select_owner" ON public.payments;
+CREATE POLICY "payments_select_owner"
+  ON public.payments FOR SELECT
+  USING (public.is_business_owner(business_id));
 
--- 9.11. Daily Reports Policies
+DROP POLICY IF EXISTS "payments_insert_owner" ON public.payments;
+CREATE POLICY "payments_insert_owner"
+  ON public.payments FOR INSERT
+  WITH CHECK (public.is_business_owner(business_id));
+
+DROP POLICY IF EXISTS "payments_update_owner" ON public.payments;
+CREATE POLICY "payments_update_owner"
+  ON public.payments FOR UPDATE
+  USING (public.is_business_owner(business_id))
+  WITH CHECK (public.is_business_owner(business_id));
+
+DROP POLICY IF EXISTS "payments_delete_owner" ON public.payments;
+CREATE POLICY "payments_delete_owner"
+  ON public.payments FOR DELETE
+  USING (public.is_business_owner(business_id));
+
+-- 21.10. Daily Reports & Items (Owner Management)
 DROP POLICY IF EXISTS "daily_reports_select_owner" ON public.daily_reports;
 CREATE POLICY "daily_reports_select_owner"
   ON public.daily_reports FOR SELECT
@@ -1321,9 +1263,6 @@ CREATE POLICY "daily_reports_delete_owner"
   ON public.daily_reports FOR DELETE
   USING (public.is_business_owner(business_id));
 
-DROP POLICY IF EXISTS "daily_reports_manage_owner" ON public.daily_reports;
-
--- 9.12. Daily Report Items Policies
 DROP POLICY IF EXISTS "daily_report_items_select" ON public.daily_report_items;
 CREATE POLICY "daily_report_items_select"
   ON public.daily_report_items FOR SELECT
@@ -1375,7 +1314,7 @@ CREATE POLICY "daily_report_items_delete"
     )
   );
 
--- 9.13. Stock Movements Policies (Append-only Ledger)
+-- 21.11. Stock Movement & Inventory Ledger (Owner Management)
 DROP POLICY IF EXISTS "stock_movements_select_owner" ON public.stock_movements;
 CREATE POLICY "stock_movements_select_owner"
   ON public.stock_movements FOR SELECT
@@ -1396,7 +1335,6 @@ CREATE POLICY "stock_movements_deny_delete"
   ON public.stock_movements FOR DELETE
   USING (false);
 
--- 9.14. Stock Counts Policies
 DROP POLICY IF EXISTS "stock_counts_select_owner" ON public.stock_counts;
 CREATE POLICY "stock_counts_select_owner"
   ON public.stock_counts FOR SELECT
@@ -1418,9 +1356,6 @@ CREATE POLICY "stock_counts_delete_owner"
   ON public.stock_counts FOR DELETE
   USING (public.is_business_owner(business_id));
 
-DROP POLICY IF EXISTS "stock_counts_manage_owner" ON public.stock_counts;
-
--- 9.15. Stock Transfers Policies
 DROP POLICY IF EXISTS "stock_transfers_select_owner" ON public.stock_transfers;
 CREATE POLICY "stock_transfers_select_owner"
   ON public.stock_transfers FOR SELECT
@@ -1442,9 +1377,6 @@ CREATE POLICY "stock_transfers_delete_owner"
   ON public.stock_transfers FOR DELETE
   USING (public.is_business_owner(business_id));
 
-DROP POLICY IF EXISTS "stock_transfers_manage_owner" ON public.stock_transfers;
-
--- 9.16. Stock Adjustments Policies
 DROP POLICY IF EXISTS "stock_adjustments_select_owner" ON public.stock_adjustments;
 CREATE POLICY "stock_adjustments_select_owner"
   ON public.stock_adjustments FOR SELECT
@@ -1466,9 +1398,86 @@ CREATE POLICY "stock_adjustments_delete_owner"
   ON public.stock_adjustments FOR DELETE
   USING (public.is_business_owner(business_id));
 
-DROP POLICY IF EXISTS "stock_adjustments_manage_owner" ON public.stock_adjustments;
+-- ==============================================================================
+-- SECTION 22: EMPLOYEE RLS POLICIES (Strict Read-Only Scoped Access)
+-- ==============================================================================
 
--- 9.17. Audit Logs Policies (Append-only)
+-- 22.1. Scoped SELECT policy for shops: Employee can view only their assigned shop
+DROP POLICY IF EXISTS "shops_select_assigned_employee" ON public.shops;
+CREATE POLICY "shops_select_assigned_employee"
+  ON public.shops FOR SELECT
+  USING (public.is_assigned_to_shop(id));
+
+-- 22.2. Scoped SELECT policy for deliveries: Employee views only records of their assigned shop
+DROP POLICY IF EXISTS "deliveries_select_assigned_employee" ON public.deliveries;
+CREATE POLICY "deliveries_select_assigned_employee"
+  ON public.deliveries FOR SELECT
+  USING (public.is_assigned_to_shop(shop_id));
+
+-- 22.3. Scoped SELECT policy for delivery_items: Employee views only items of assigned shop deliveries
+DROP POLICY IF EXISTS "delivery_items_select" ON public.delivery_items;
+CREATE POLICY "delivery_items_select"
+  ON public.delivery_items FOR SELECT
+  USING (
+    EXISTS (
+      SELECT 1 FROM public.deliveries d
+      WHERE d.id = public.delivery_items.delivery_id
+        AND (public.is_business_owner(d.business_id) OR public.is_assigned_to_shop(d.shop_id))
+    )
+  );
+
+-- 22.4. Scoped SELECT policy for products: Employee can read catalog items of active business
+DROP POLICY IF EXISTS "products_select_authorized" ON public.products;
+CREATE POLICY "products_select_authorized"
+  ON public.products FOR SELECT
+  USING (
+    public.is_business_owner(business_id) OR
+    EXISTS (
+      SELECT 1 FROM public.business_memberships bm
+      WHERE bm.user_id = auth.uid()
+        AND bm.business_id = public.products.business_id
+        AND bm.is_active = true
+    )
+  );
+
+-- 22.5. Scoped SELECT policy for shop_memberships: Employee can view own assignment
+DROP POLICY IF EXISTS "shop_memberships_select_employee" ON public.shop_memberships;
+CREATE POLICY "shop_memberships_select_employee"
+  ON public.shop_memberships FOR SELECT
+  USING (user_id = auth.uid());
+
+-- 22.6. Strict Mutation Restriction: Zero INSERT, UPDATE, or DELETE policies exist for employees.
+-- Attempted writes by employees are unconditionally rejected by RLS at the database engine level.
+
+-- ==============================================================================
+-- SECTION 23: OTHER REQUIRED SECURITY POLICIES
+-- ==============================================================================
+
+-- 23.1. Profiles (Self-access & Shared Business Members)
+DROP POLICY IF EXISTS "profiles_select_shared_business" ON public.profiles;
+CREATE POLICY "profiles_select_shared_business"
+  ON public.profiles FOR SELECT
+  USING (
+    id = auth.uid() OR 
+    EXISTS (
+      SELECT 1 FROM public.business_memberships bm1
+      JOIN public.business_memberships bm2 ON bm1.business_id = bm2.business_id
+      WHERE bm1.user_id = auth.uid() AND bm2.user_id = public.profiles.id
+    )
+  );
+
+DROP POLICY IF EXISTS "profiles_insert_self" ON public.profiles;
+CREATE POLICY "profiles_insert_self"
+  ON public.profiles FOR INSERT
+  WITH CHECK (id = auth.uid());
+
+DROP POLICY IF EXISTS "profiles_update_self" ON public.profiles;
+CREATE POLICY "profiles_update_self"
+  ON public.profiles FOR UPDATE
+  USING (id = auth.uid())
+  WITH CHECK (id = auth.uid());
+
+-- 23.2. Audit Logs (Append-only & Owner Visibility)
 DROP POLICY IF EXISTS "audit_logs_select_owner" ON public.audit_logs;
 CREATE POLICY "audit_logs_select_owner"
   ON public.audit_logs FOR SELECT
@@ -1489,7 +1498,7 @@ CREATE POLICY "audit_logs_deny_delete"
   ON public.audit_logs FOR DELETE
   USING (false);
 
--- 9.18. Idempotency Records Policies
+-- 23.3. Idempotency Records
 DROP POLICY IF EXISTS "idempotency_records_select_owner" ON public.idempotency_records;
 CREATE POLICY "idempotency_records_select_owner"
   ON public.idempotency_records FOR SELECT
@@ -1511,13 +1520,125 @@ CREATE POLICY "idempotency_records_delete_owner"
   ON public.idempotency_records FOR DELETE
   USING (business_id = public.get_auth_business_id());
 
-DROP POLICY IF EXISTS "idempotency_records_manage" ON public.idempotency_records;
+-- 23.4. Maintenance Audit Ledger (Service Role / Postgres only)
+DROP POLICY IF EXISTS "maintenance_ledger_service_role" ON public.maintenance_audit_ledger;
+CREATE POLICY "maintenance_ledger_service_role"
+  ON public.maintenance_audit_ledger
+  USING (auth.role() = 'service_role');
 
 -- ==============================================================================
--- 10. SAFE BASELINE BOOTSTRAP (Zero Demo Data)
+-- SECTION 24: VIEWS
 -- ==============================================================================
--- 10.1. Ensure baseline business entity exists
--- Preserves existing production business row ('4fba6fb7-4e1b-4106-ac84-908f821d73c3') without duplicate rows.
+
+-- 24.1. Unified Business Records View (Directly maps to the Records Page Ledger)
+CREATE OR REPLACE VIEW public.v_business_records WITH (security_invoker = true) AS
+SELECT
+    COALESCE(di.id, d.id) AS record_id,
+    d.id AS delivery_id,
+    d.business_id,
+    d.delivery_date AS date,
+    s.id AS shop_id,
+    COALESCE(s.name, 'Direct Wholesale')::VARCHAR(150) AS shop_name,
+    s.code::VARCHAR(30) AS shop_code,
+    p.id AS product_id,
+    COALESCE(p.name, 'Wholesale Product')::VARCHAR(200) AS product_name,
+    p.sku::VARCHAR(50) AS product_sku,
+    COALESCE(di.quantity, 1)::INTEGER AS quantity,
+    COALESCE(di.unit_price, d.total_amount, 0.00)::NUMERIC(12, 2) AS unit_price,
+    COALESCE(di.total_price, d.total_amount, 0.00)::NUMERIC(12, 2) AS total_amount,
+    d.customer_price::NUMERIC(12, 2) AS customer_price,
+    d.profit::NUMERIC(12, 2) AS profit,
+    d.status::VARCHAR(20) AS delivery_status,
+    d.amount_paid::NUMERIC(12, 2) AS amount_paid,
+    d.outstanding_amount::NUMERIC(12, 2) AS pending_amount,
+    d.payment_status::VARCHAR(20) AS payment_status,
+    d.notes,
+    d.created_at,
+    CASE
+        WHEN d.status IN ('delivered', 'cancelled') THEN 2
+        ELSE 1
+    END::INTEGER AS priority_rank
+FROM public.deliveries d
+LEFT JOIN public.shops s ON s.id = d.shop_id
+LEFT JOIN public.delivery_items di ON di.delivery_id = d.id
+LEFT JOIN public.products p ON p.id = di.product_id;
+
+-- 24.2. Shop-wise Payment & Outstanding Balances View
+CREATE OR REPLACE VIEW public.v_shop_payment_balances WITH (security_invoker = true) AS
+SELECT
+    s.id AS shop_id,
+    s.name AS shop_name,
+    s.code AS shop_code,
+    COALESCE(SUM(d.total_amount), 0.00)::NUMERIC(12, 2) AS total_billed,
+    COALESCE(SUM(d.amount_paid), 0.00)::NUMERIC(12, 2) AS total_paid,
+    COALESCE(SUM(d.outstanding_amount), 0.00)::NUMERIC(12, 2) AS outstanding_balance,
+    CASE
+        WHEN COALESCE(SUM(d.total_amount), 0.00) = 0 THEN 'unpaid'
+        WHEN COALESCE(SUM(d.amount_paid), 0.00) >= COALESCE(SUM(d.total_amount), 0.00) THEN 'fully_paid'
+        WHEN COALESCE(SUM(d.amount_paid), 0.00) > 0 THEN 'partially_paid'
+        ELSE 'unpaid'
+    END AS status,
+    MAX(p.payment_date) AS last_payment_date,
+    COUNT(DISTINCT p.id)::INTEGER AS payment_count
+FROM public.shops s
+LEFT JOIN public.deliveries d ON d.shop_id = s.id AND d.status <> 'cancelled'
+LEFT JOIN public.payments p ON p.shop_id = s.id AND p.status = 'COMPLETED'
+WHERE s.is_active = true
+GROUP BY s.id, s.name, s.code;
+
+-- 24.3. Shop-wise Live Inventory Ledger Balances View
+CREATE OR REPLACE VIEW public.v_shop_inventory_balances WITH (security_invoker = true) AS
+SELECT
+    s.id AS shop_id,
+    s.name AS shop_name,
+    s.code AS shop_code,
+    p.id AS product_id,
+    p.name AS product_name,
+    p.sku AS product_sku,
+    p.category AS category,
+    p.min_stock_threshold,
+    COALESCE(SUM(CASE WHEN sm.movement_type = 'DELIVERY_IN' THEN sm.quantity ELSE 0 END), 0)::INTEGER AS total_delivered,
+    COALESCE(ABS(SUM(CASE WHEN sm.movement_type = 'SALE_OUT' AND sm.is_provisional = false THEN sm.quantity ELSE 0 END)), 0)::INTEGER AS confirmed_sold,
+    COALESCE(ABS(SUM(CASE WHEN sm.movement_type = 'SALE_OUT' AND sm.is_provisional = true THEN sm.quantity ELSE 0 END)), 0)::INTEGER AS provisional_sold,
+    COALESCE(SUM(CASE WHEN sm.movement_type = 'TRANSFER_IN' THEN sm.quantity ELSE 0 END), 0)::INTEGER AS total_transferred_in,
+    COALESCE(ABS(SUM(CASE WHEN sm.movement_type = 'TRANSFER_OUT' THEN sm.quantity ELSE 0 END)), 0)::INTEGER AS total_transferred_out,
+    COALESCE(SUM(CASE WHEN sm.movement_type = 'RETURN_IN' THEN sm.quantity ELSE 0 END), 0)::INTEGER AS total_returned,
+    COALESCE(ABS(SUM(CASE WHEN sm.movement_type = 'DAMAGED_OUT' THEN sm.quantity ELSE 0 END)), 0)::INTEGER AS total_damaged,
+    COALESCE(SUM(sm.quantity), 0)::INTEGER AS expected_stock
+FROM public.shops s
+CROSS JOIN public.products p
+LEFT JOIN public.stock_movements sm 
+    ON sm.shop_id = s.id 
+   AND sm.product_id = p.id 
+   AND sm.is_provisional = false
+WHERE s.is_active = true 
+  AND p.is_active = true
+GROUP BY s.id, s.name, s.code, p.id, p.name, p.sku, p.category, p.min_stock_threshold;
+
+-- View grants
+GRANT SELECT ON public.v_business_records TO authenticated, service_role;
+GRANT SELECT ON public.v_shop_payment_balances TO authenticated, service_role;
+GRANT SELECT ON public.v_shop_inventory_balances TO authenticated, service_role;
+
+-- ==============================================================================
+-- SECTION 25: STORAGE POLICIES
+-- ==============================================================================
+-- RTR Wholesale Management uses standard Supabase Storage buckets for invoice PDFs
+-- and product assets (e.g. 'receipts', 'catalog-images').
+-- Storage RLS principles:
+-- 1. Objects in 'receipts' bucket: Restricted to authenticated users belonging to the tenant business.
+-- 2. Objects in 'catalog-images' bucket: Publicly readable; writable only by authenticated business owners.
+-- In default deployments without custom buckets configured, file storage routes are handled
+-- directly through the Node API service role credentials.
+
+-- ==============================================================================
+-- SECTION 26: REQUIRED SEED CONFIGURATION NOTES
+-- ==============================================================================
+-- Baseline Business Entity:
+-- Production tenant business UUID: '4fba6fb7-4e1b-4106-ac84-908f821d73c3'
+-- To bootstrap a fresh development or staging environment:
+--
+-- 1. Ensure tenant business entity exists:
 INSERT INTO public.businesses (id, name, timezone, report_cutoff_time)
 VALUES ('4fba6fb7-4e1b-4106-ac84-908f821d73c3', 'RTR Wholesale Management', 'Asia/Kolkata', '21:00:00')
 ON CONFLICT (id) DO UPDATE
@@ -1525,10 +1646,9 @@ SET name = EXCLUDED.name,
     timezone = EXCLUDED.timezone,
     report_cutoff_time = EXCLUDED.report_cutoff_time;
 
--- 10.2. Owner profile membership baseline setup
--- Safely associates verified owner profile(s) (e.g. owner@rtrmobiles.com or username 'owner')
--- to the active business workspace without inventing fake Auth user IDs or violating foreign keys.
--- If no profile exists yet (new blank deployment), this safely produces 0 rows until an owner signs up.
+-- 2. Associate authenticated owner profile:
+-- When an owner registers or signs in via Supabase Auth (e.g. owner@rtrmobiles.com or username 'owner'),
+-- grant them owner role in business_memberships:
 INSERT INTO public.business_memberships (business_id, user_id, role, is_active)
 SELECT 
     b.id, 
@@ -1544,22 +1664,10 @@ WHERE b.is_active = true
 ON CONFLICT (business_id, user_id) DO UPDATE
 SET role = 'owner', is_active = true;
 
--- ==============================================================================
--- 11. VERIFICATION QUERIES
--- ==============================================================================
--- The following queries can be executed to verify database health and schema integrity:
---
--- 1. Check all tables exist:
---    SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' ORDER BY table_name;
---
--- 2. Check wholesale delivery columns:
---    SELECT column_name, data_type, is_nullable FROM information_schema.columns 
---    WHERE table_schema = 'public' AND table_name = 'deliveries' ORDER BY ordinal_position;
---
--- 3. Check delivery line item columns:
---    SELECT column_name, data_type, is_nullable FROM information_schema.columns 
---    WHERE table_schema = 'public' AND table_name = 'delivery_items' ORDER BY ordinal_position;
---
--- 4. Check active views:
---    SELECT table_name FROM information_schema.views WHERE table_schema = 'public';
--- ==============================================================================
+-- 3. Shop Employee Setup:
+-- To onboard a shop employee for a retail partner shop:
+-- a. Create Supabase Auth user (e.g. employee_vasanth@rtrmobiles.com).
+-- b. Insert membership into public.business_memberships with role = 'employee'.
+-- c. Insert assignment into public.shop_memberships with shop_id = <TARGET_SHOP_UUID>.
+-- The application automatically routes the user to the Employee Portal with strictly
+-- read-only, shop-isolated visibility.

@@ -550,7 +550,20 @@ let cachedBusinessId: string | null = null;
  * If session is missing or unrefreshable, dispatches 'rtr:session-expired' and returns null.
  */
 export async function getValidAuthToken(): Promise<string | null> {
-  if (isDemoMode()) return null;
+  if (isDemoMode()) {
+    try {
+      if (typeof localStorage !== 'undefined') {
+        const stored = localStorage.getItem('rtr_current_user');
+        if (stored) {
+          const parsed = JSON.parse(stored);
+          if (parsed?.role === 'demo' || parsed?.isDemo) {
+            return 'demo-session-token';
+          }
+        }
+      }
+    } catch {}
+    return 'demo-session-token';
+  }
   if (!isSupabaseConfigured || !supabase) return null;
 
   try {
@@ -605,7 +618,7 @@ export async function authenticatedFetch(url: string, init?: RequestInit): Promi
 
   let res = await fetch(url, { ...init, headers });
 
-  if (res.status === 401 && isSupabaseConfigured && supabase) {
+  if (res.status === 401 && isSupabaseConfigured && supabase && !isDemoMode()) {
     try {
       const { data: refreshData, error: refreshErr } = await supabase.auth.refreshSession();
       if (!refreshErr && refreshData.session?.access_token) {
@@ -4330,19 +4343,65 @@ export async function getShopTimelineEvents(
 
 // ----------------------------------------------------
 // EMPLOYEE MANAGEMENT (Owner Only)
-// ----------------------------------------------------
+
+/**
+ * Safely parses an API Response, protecting against unexpected HTML error pages,
+ * empty response bodies, and JSON parse exceptions.
+ */
+async function parseApiResponse<T = any>(res: Response, fallbackErrorMsg: string): Promise<T> {
+  const contentType = res.headers.get('content-type') || '';
+  const isJsonHeader = contentType.toLowerCase().includes('application/json');
+
+  let rawText = '';
+  try {
+    rawText = await res.text();
+  } catch (readErr: any) {
+    throw new Error(`Failed to read server response: ${readErr?.message || 'Network error'}`);
+  }
+
+  const trimmed = rawText.trim();
+
+  // Detect HTML or SPA fallback responses
+  if (trimmed.startsWith('<!DOCTYPE') || trimmed.startsWith('<html') || (!isJsonHeader && trimmed.startsWith('<'))) {
+    throw new Error(
+      `Server returned an unexpected HTML response (HTTP ${res.status} ${res.statusText || ''}). The requested API service may be misconfigured or temporarily unavailable.`
+    );
+  }
+
+  // Handle empty bodies (e.g., HTTP 204 No Content)
+  if (!trimmed) {
+    if (!res.ok) {
+      throw new Error(`Request failed with status HTTP ${res.status} (${res.statusText || 'Error'})`);
+    }
+    return {} as T;
+  }
+
+  let data: any;
+  try {
+    data = JSON.parse(trimmed);
+  } catch {
+    if (!res.ok) {
+      throw new Error(`Request failed (HTTP ${res.status}): ${trimmed.slice(0, 150)}`);
+    }
+    throw new Error(`Invalid response received from server: ${trimmed.slice(0, 150)}`);
+  }
+
+  if (!res.ok) {
+    throw new Error(data?.message || data?.error || fallbackErrorMsg);
+  }
+
+  return data as T;
+}
+
 export async function getEmployees(): Promise<EmployeeRecord[]> {
   try {
-    const token = await getValidAuthToken();
-    const headers: Record<string, string> = { 'Accept': 'application/json' };
-    if (token) {
-      headers['Authorization'] = `Bearer ${token}`;
-    }
-    const res = await fetch('/api/employees', { headers });
-    if (!res.ok) {
-      throw new Error(`Failed to fetch employees: HTTP ${res.status}`);
-    }
-    const data = await res.json();
+    const res = await authenticatedFetch('/api/employees', {
+      headers: { 'Accept': 'application/json' }
+    });
+    const data = await parseApiResponse<{ employees?: EmployeeRecord[] }>(
+      res, 
+      'Failed to retrieve employee directory.'
+    );
     return data.employees || [];
   } catch (err) {
     console.error('getEmployees error:', err);
@@ -4351,81 +4410,59 @@ export async function getEmployees(): Promise<EmployeeRecord[]> {
 }
 
 export async function createEmployee(input: CreateEmployeeInput): Promise<{ success: boolean; message: string; employee?: EmployeeRecord }> {
-  const token = await getValidAuthToken();
-  const headers: Record<string, string> = { 
-    'Content-Type': 'application/json',
-    'Accept': 'application/json' 
-  };
-  if (token) {
-    headers['Authorization'] = `Bearer ${token}`;
-  }
-  const res = await fetch('/api/employees', {
+  const res = await authenticatedFetch('/api/employees', {
     method: 'POST',
-    headers,
+    headers: {
+      'Content-Type': 'application/json',
+      'Accept': 'application/json'
+    },
     body: JSON.stringify(input)
   });
-  const data = await res.json();
-  if (!res.ok) {
-    throw new Error(data.message || 'Failed to create employee');
-  }
-  return data;
+  return parseApiResponse<{ success: boolean; message: string; employee?: EmployeeRecord }>(
+    res,
+    'Failed to provision employee account.'
+  );
 }
 
 export async function reassignEmployeeShop(id: string, shopId: string): Promise<{ success: boolean; message: string }> {
-  const token = await getValidAuthToken();
-  const headers: Record<string, string> = { 
-    'Content-Type': 'application/json',
-    'Accept': 'application/json' 
-  };
-  if (token) {
-    headers['Authorization'] = `Bearer ${token}`;
-  }
-  const res = await fetch(`/api/employees/${id}/shop`, {
+  const res = await authenticatedFetch(`/api/employees/${encodeURIComponent(id)}/shop`, {
     method: 'PATCH',
-    headers,
+    headers: {
+      'Content-Type': 'application/json',
+      'Accept': 'application/json'
+    },
     body: JSON.stringify({ shopId })
   });
-  const data = await res.json();
-  if (!res.ok) {
-    throw new Error(data.message || 'Failed to reassign shop');
-  }
-  return data;
+  return parseApiResponse<{ success: boolean; message: string }>(
+    res,
+    'Failed to reassign employee shop.'
+  );
 }
 
 export async function toggleEmployeeStatus(id: string, isActive: boolean): Promise<{ success: boolean; message: string }> {
-  const token = await getValidAuthToken();
-  const headers: Record<string, string> = { 
-    'Content-Type': 'application/json',
-    'Accept': 'application/json' 
-  };
-  if (token) {
-    headers['Authorization'] = `Bearer ${token}`;
-  }
-  const res = await fetch(`/api/employees/${id}/status`, {
+  const res = await authenticatedFetch(`/api/employees/${encodeURIComponent(id)}/status`, {
     method: 'PATCH',
-    headers,
+    headers: {
+      'Content-Type': 'application/json',
+      'Accept': 'application/json'
+    },
     body: JSON.stringify({ isActive })
   });
-  const data = await res.json();
-  if (!res.ok) {
-    throw new Error(data.message || 'Failed to update employee status');
-  }
-  return data;
+  return parseApiResponse<{ success: boolean; message: string }>(
+    res,
+    'Failed to update employee account status.'
+  );
 }
 
 export async function revokeEmployeeAccess(id: string): Promise<{ success: boolean; message: string }> {
-  const token = await getValidAuthToken();
-  const headers: Record<string, string> = { 'Accept': 'application/json' };
-  if (token) {
-    headers['Authorization'] = `Bearer ${token}`;
-  }
-  const res = await fetch(`/api/employees/${id}`, {
+  const res = await authenticatedFetch(`/api/employees/${encodeURIComponent(id)}`, {
     method: 'DELETE',
-    headers
+    headers: {
+      'Accept': 'application/json'
+    }
   });
-  const data = await res.json();
-  if (!res.ok) {
-    throw new Error(data.message || 'Failed to revoke employee access');
-  }
-  return data;
+  return parseApiResponse<{ success: boolean; message: string }>(
+    res,
+    'Failed to revoke employee access.'
+  );
 }

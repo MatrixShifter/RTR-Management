@@ -25,7 +25,7 @@ export default async function handler(req: any, res: any) {
   // 1. Isolated Demo Sandbox check
   const configuredDemoPass = process.env.DEMO_PASSWORD || DEMO_PASSWORD_PLACEHOLDER;
   if (cleanUsername.toLowerCase() === DEMO_USERNAME.toLowerCase() || cleanUsername.toLowerCase() === 'demo-owner@rtrmobiles.com') {
-    if (cleanPassword === configuredDemoPass || cleanPassword === DEMO_PASSWORD_PLACEHOLDER || cleanPassword === 'demo-password-2026') {
+    if (cleanPassword === configuredDemoPass || cleanPassword === DEMO_PASSWORD_PLACEHOLDER) {
       return res.status(200).json({
         user: {
           id: 'deae5634-055a-4045-a6ac-fc00ed9e247a',

@@ -20,7 +20,7 @@ export const ForgotPassword: React.FC<ForgotPasswordProps> = ({ onNavigateToLogi
 
     // Validate email format if input contains '@'
     if (clean.includes('@') && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(clean)) {
-      setErrorMsg('Please enter a valid email address (e.g. owner@rtrmobiles.com).');
+      setErrorMsg('Please enter a valid email address.');
       return;
     }
 
@@ -123,7 +123,7 @@ export const ForgotPassword: React.FC<ForgotPasswordProps> = ({ onNavigateToLogi
                       setIdentifier(e.target.value);
                       if (errorMsg) setErrorMsg(null);
                     }}
-                    placeholder="e.g. owner or owner@rtrmobiles.com"
+                    placeholder="Enter your username or email"
                     required
                     disabled={isLoading}
                     autoFocus
