@@ -13,7 +13,10 @@ import {
   Edit2,
   X,
   Mail,
-  User
+  User,
+  Key,
+  Eye,
+  EyeOff
 } from 'lucide-react';
 import { 
   getEmployees, 
@@ -21,7 +24,7 @@ import {
   reassignEmployeeShop, 
   toggleEmployeeStatus, 
   revokeEmployeeAccess,
-  sendEmployeeOtp,
+  resetEmployeePassword,
   getShops,
   type Shop
 } from '../services/db.js';
@@ -40,6 +43,10 @@ export const EmployeeManagementSection: React.FC = () => {
   const [newEmail, setNewEmail] = useState('');
   const [newUsername, setNewUsername] = useState('');
   const [newShopId, setNewShopId] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [newConfirmPassword, setNewConfirmPassword] = useState('');
+  const [showNewPassword, setShowNewPassword] = useState(false);
+  const [showNewConfirmPassword, setShowNewConfirmPassword] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
 
   // Reassign Shop Modal State
@@ -48,6 +55,14 @@ export const EmployeeManagementSection: React.FC = () => {
 
   // Delete Confirm Modal State
   const [empToDelete, setEmpToDelete] = useState<EmployeeRecord | null>(null);
+
+  // Reset Password Modal State
+  const [empToResetPassword, setEmpToResetPassword] = useState<EmployeeRecord | null>(null);
+  const [resetNewPassword, setResetNewPassword] = useState('');
+  const [resetConfirmPassword, setResetConfirmPassword] = useState('');
+  const [showResetPassword, setShowResetPassword] = useState(false);
+  const [showResetConfirmPassword, setShowResetConfirmPassword] = useState(false);
+  const [resetFormError, setResetFormError] = useState<string | null>(null);
 
   const loadData = useCallback(async () => {
     setIsLoading(true);
@@ -85,6 +100,14 @@ export const EmployeeManagementSection: React.FC = () => {
       setFormError('Please select an assigned retail shop.');
       return;
     }
+    if (!newPassword || newPassword.length < 8) {
+      setFormError('Password must be at least 8 characters long.');
+      return;
+    }
+    if (newPassword !== newConfirmPassword) {
+      setFormError('Passwords do not match.');
+      return;
+    }
 
     setActionLoading('creating');
     try {
@@ -92,7 +115,8 @@ export const EmployeeManagementSection: React.FC = () => {
         name: newName.trim(),
         email: newEmail.trim().toLowerCase(),
         username: newUsername.trim() || undefined,
-        shopId: newShopId
+        shopId: newShopId,
+        password: newPassword
       };
 
       const result = await createEmployee(input);
@@ -102,6 +126,10 @@ export const EmployeeManagementSection: React.FC = () => {
       setNewEmail('');
       setNewUsername('');
       setNewShopId('');
+      setNewPassword('');
+      setNewConfirmPassword('');
+      setShowNewPassword(false);
+      setShowNewConfirmPassword(false);
       await loadData();
     } catch (err: any) {
       setFormError(err?.message || 'Failed to create employee.');
@@ -154,13 +182,31 @@ export const EmployeeManagementSection: React.FC = () => {
     }
   };
 
-  const handleSendOtp = async (emp: EmployeeRecord) => {
-    setActionLoading(`otp-${emp.id}`);
+  const handleResetPassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!empToResetPassword) return;
+    setResetFormError(null);
+
+    if (!resetNewPassword || resetNewPassword.length < 8) {
+      setResetFormError('Password must be at least 8 characters long.');
+      return;
+    }
+    if (resetNewPassword !== resetConfirmPassword) {
+      setResetFormError('Passwords do not match.');
+      return;
+    }
+
+    setActionLoading(`reset-pwd-${empToResetPassword.id}`);
     try {
-      const res = await sendEmployeeOtp(emp.id);
-      setFeedback({ type: 'success', message: res.message || `Verification code sent to ${emp.email}.` });
+      const res = await resetEmployeePassword(empToResetPassword.id, resetNewPassword);
+      setFeedback({ type: 'success', message: res.message || `Password for ${empToResetPassword.name} updated successfully.` });
+      setEmpToResetPassword(null);
+      setResetNewPassword('');
+      setResetConfirmPassword('');
+      setShowResetPassword(false);
+      setShowResetConfirmPassword(false);
     } catch (err: any) {
-      setFeedback({ type: 'error', message: err?.message || 'Failed to dispatch verification code.' });
+      setResetFormError(err?.message || 'Failed to reset employee password.');
     } finally {
       setActionLoading(null);
     }
@@ -176,7 +222,7 @@ export const EmployeeManagementSection: React.FC = () => {
           </div>
           <div>
             <h2 className="text-sm font-bold text-slate-900">Employee Management &amp; Shop Access</h2>
-            <p className="text-xs text-slate-400">Assign shop employees with strict read-only access to their designated stores</p>
+            <p className="text-xs text-slate-400">Assign shop employees with individual passwords and strict read-only access</p>
           </div>
         </div>
 
@@ -221,7 +267,7 @@ export const EmployeeManagementSection: React.FC = () => {
           <Users className="w-8 h-8 text-slate-300 mx-auto" />
           <p className="text-xs font-semibold text-slate-700">No shop employees provisioned yet</p>
           <p className="text-[11px] text-slate-400 max-w-sm mx-auto">
-            Click &quot;Add Shop Employee&quot; above to create employee logins with strictly isolated, read-only store access.
+            Click &quot;Add Shop Employee&quot; above to create employee logins with individual passwords and strictly isolated, read-only store access.
           </p>
         </div>
       ) : (
@@ -271,20 +317,23 @@ export const EmployeeManagementSection: React.FC = () => {
                   </td>
                   <td className="py-3 px-3 text-right">
                     <div className="flex items-center justify-end gap-1.5">
-                      {/* Send Login OTP Button */}
+                      {/* Reset Employee Password Button */}
                       <button
                         type="button"
-                        onClick={() => handleSendOtp(emp)}
+                        onClick={() => {
+                          setEmpToResetPassword(emp);
+                          setResetNewPassword('');
+                          setResetConfirmPassword('');
+                          setShowResetPassword(false);
+                          setShowResetConfirmPassword(false);
+                          setResetFormError(null);
+                        }}
                         disabled={actionLoading !== null || !emp.isActive}
-                        className="px-2 py-1 text-[11px] font-medium text-[#168BFF] hover:text-blue-700 hover:bg-blue-50 rounded-lg transition-colors cursor-pointer inline-flex items-center gap-1 disabled:opacity-40"
-                        title="Send Sign-In Code"
+                        className="px-2 py-1 text-[11px] font-medium text-slate-700 hover:text-blue-700 hover:bg-blue-50 rounded-lg transition-colors cursor-pointer inline-flex items-center gap-1 disabled:opacity-40"
+                        title="Reset Employee Password"
                       >
-                        {actionLoading === `otp-${emp.id}` ? (
-                          <RefreshCw className="w-3 h-3 animate-spin" />
-                        ) : (
-                          <Mail className="w-3 h-3" />
-                        )}
-                        <span>Send Code</span>
+                        <Key className="w-3 h-3 text-[#168BFF]" />
+                        <span>Reset Password</span>
                       </button>
 
                       {/* Reassign Shop Button */}
@@ -346,7 +395,7 @@ export const EmployeeManagementSection: React.FC = () => {
          ======================================================== */}
       {isAddModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs animate-fade-in">
-          <div className="bg-white rounded-2xl border border-slate-200 shadow-xl max-w-md w-full p-5 sm:p-6 space-y-4">
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-xl max-w-md w-full p-5 sm:p-6 space-y-4 max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between pb-3 border-b border-slate-100">
               <div className="flex items-center gap-2">
                 <div className="p-2 rounded-xl bg-blue-50 text-[#168BFF]">
@@ -440,6 +489,56 @@ export const EmployeeManagementSection: React.FC = () => {
                 </p>
               </div>
 
+              <div>
+                <label className="block font-semibold text-slate-700 mb-1">
+                  Initial Password <span className="text-rose-500">*</span>
+                </label>
+                <div className="relative">
+                  <Key className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                  <input
+                    type={showNewPassword ? 'text' : 'password'}
+                    value={newPassword}
+                    onChange={e => setNewPassword(e.target.value)}
+                    placeholder="Min 8 characters"
+                    required
+                    minLength={8}
+                    className="w-full pl-9 pr-10 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowNewPassword(!showNewPassword)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 cursor-pointer"
+                  >
+                    {showNewPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
+              </div>
+
+              <div>
+                <label className="block font-semibold text-slate-700 mb-1">
+                  Confirm Password <span className="text-rose-500">*</span>
+                </label>
+                <div className="relative">
+                  <Key className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                  <input
+                    type={showNewConfirmPassword ? 'text' : 'password'}
+                    value={newConfirmPassword}
+                    onChange={e => setNewConfirmPassword(e.target.value)}
+                    placeholder="Re-enter password"
+                    required
+                    minLength={8}
+                    className="w-full pl-9 pr-10 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowNewConfirmPassword(!showNewConfirmPassword)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 cursor-pointer"
+                  >
+                    {showNewConfirmPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
+              </div>
+
               <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
                 <button
                   type="button"
@@ -460,6 +559,119 @@ export const EmployeeManagementSection: React.FC = () => {
                     </>
                   ) : (
                     <span>Create &amp; Assign Employee</span>
+                  )}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================
+          RESET PASSWORD MODAL
+         ======================================================== */}
+      {empToResetPassword && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs animate-fade-in">
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-xl max-w-sm w-full p-5 space-y-4">
+            <div className="flex items-center justify-between pb-2 border-b border-slate-100">
+              <div className="flex items-center gap-2">
+                <div className="p-2 rounded-xl bg-blue-50 text-[#168BFF]">
+                  <Key className="w-4 h-4" />
+                </div>
+                <h3 className="text-sm font-bold text-slate-900">Reset Employee Password</h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setEmpToResetPassword(null)}
+                className="text-slate-400 hover:text-slate-600"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="text-xs text-slate-600 space-y-1">
+              <p>Employee: <span className="font-semibold text-slate-800">{empToResetPassword.name}</span></p>
+              <p>Email: <span className="font-mono text-slate-700">{empToResetPassword.email}</span></p>
+            </div>
+
+            {resetFormError && (
+              <div className="p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-xs flex items-center gap-2">
+                <AlertCircle className="w-4 h-4 text-rose-600 flex-shrink-0" />
+                <span>{resetFormError}</span>
+              </div>
+            )}
+
+            <form onSubmit={handleResetPassword} className="space-y-3.5 text-xs">
+              <div>
+                <label className="block font-semibold text-slate-700 mb-1">
+                  New Password <span className="text-rose-500">*</span>
+                </label>
+                <div className="relative">
+                  <Key className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                  <input
+                    type={showResetPassword ? 'text' : 'password'}
+                    value={resetNewPassword}
+                    onChange={e => setResetNewPassword(e.target.value)}
+                    placeholder="Min 8 characters"
+                    required
+                    minLength={8}
+                    className="w-full pl-9 pr-10 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowResetPassword(!showResetPassword)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 cursor-pointer"
+                  >
+                    {showResetPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
+              </div>
+
+              <div>
+                <label className="block font-semibold text-slate-700 mb-1">
+                  Confirm New Password <span className="text-rose-500">*</span>
+                </label>
+                <div className="relative">
+                  <Key className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                  <input
+                    type={showResetConfirmPassword ? 'text' : 'password'}
+                    value={resetConfirmPassword}
+                    onChange={e => setResetConfirmPassword(e.target.value)}
+                    placeholder="Re-enter new password"
+                    required
+                    minLength={8}
+                    className="w-full pl-9 pr-10 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowResetConfirmPassword(!showResetConfirmPassword)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 cursor-pointer"
+                  >
+                    {showResetConfirmPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => setEmpToResetPassword(null)}
+                  className="px-3 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-xl transition-colors cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={actionLoading !== null}
+                  className="px-3.5 py-1.5 text-xs font-bold text-white bg-[#168BFF] hover:bg-blue-600 rounded-xl transition-colors cursor-pointer shadow-xs inline-flex items-center gap-1.5"
+                >
+                  {actionLoading === `reset-pwd-${empToResetPassword.id}` ? (
+                    <>
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      <span>Updating...</span>
+                    </>
+                  ) : (
+                    <span>Update Password</span>
                   )}
                 </button>
               </div>

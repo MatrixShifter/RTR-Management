@@ -789,9 +789,15 @@ export const CreateEmployeeSchema = z.object({
   name: z.string().trim().min(1, 'Employee name is required').max(150),
   email: z.string().trim().email('Valid email is required').toLowerCase(),
   username: z.string().trim().min(3, 'Username must be at least 3 characters').max(60).optional(),
-  shopId: z.string().uuid('Valid shop ID is required')
+  shopId: z.string().uuid('Valid shop ID is required'),
+  password: z.string().min(8, 'Password must be at least 8 characters long')
 });
 export type CreateEmployeeInput = z.infer<typeof CreateEmployeeSchema>;
+
+export const ResetEmployeePasswordSchema = z.object({
+  password: z.string().min(8, 'Password must be at least 8 characters long')
+});
+export type ResetEmployeePasswordInput = z.infer<typeof ResetEmployeePasswordSchema>;
 
 export const UpdateEmployeeShopSchema = z.object({
   shopId: z.string().uuid('Valid shop ID is required')

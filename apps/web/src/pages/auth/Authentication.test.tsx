@@ -10,13 +10,9 @@ import {
   INCORRECT_CREDENTIALS_MSG, 
   RECOVERY_CONFIRMATION_MSG,
   NETWORK_ERROR_MSG,
-  EMPLOYEE_OTP_CONFIRMATION_MSG,
-  INVALID_OTP_MSG,
   getRememberedUsername,
   setRememberedUsername,
   signIn,
-  requestEmployeeOtp,
-  verifyEmployeeOtp,
   DEMO_USERNAME,
   DEMO_PASSWORD_PLACEHOLDER
 } from '../../services/auth.js';
@@ -475,35 +471,27 @@ describe('Secure Owner Authentication Suite', () => {
     });
   });
 
-  describe('Passwordless Employee Login Suite', () => {
-    it('renders Employee Login tab with assigned email input and no password field', () => {
+  describe('Employee Individual Password Login Suite', () => {
+    it('renders Employee Login tab with assigned email input and password field', () => {
       const html = renderToString(
         <Login onLoginSuccess={() => {}} onNavigateToForgot={() => {}} initialTab="employee" />
       );
 
       // Verify Employee Login Tab is active
-      expect(html).toContain('Shop Employee Passwordless Login');
-      expect(html).toContain('Assigned Employee Email');
+      expect(html).toContain('Shop Employee Sign In');
+      expect(html).toContain('Employee Email');
       expect(html).toContain('name="employeeEmail"');
-      expect(html).toContain('Send Verification Code');
+      expect(html).toContain('name="employeePassword"');
+      expect(html).toContain('Sign In as Employee');
 
-      // Strictly verify NO password field is rendered in employee tab
-      expect(html).not.toContain('name="password"');
+      // Strictly verify NO OTP controls or links are rendered in employee tab
+      expect(html).not.toContain('Send Verification Code');
       expect(html).not.toContain('Forgot Password?');
       expect(html).not.toContain('Remember my username');
     });
 
-    it('enforces generic confirmation message on requestEmployeeOtp to prevent account enumeration', async () => {
-      const msg = await requestEmployeeOtp('unknown_employee_999@rtrmobiles.com');
-      expect(msg).toBe(EMPLOYEE_OTP_CONFIRMATION_MSG);
-    });
-
-    it('validates email format before sending employee OTP', async () => {
-      await expect(requestEmployeeOtp('')).rejects.toThrow('Please enter a valid email address.');
-    });
-
-    it('authenticates valid employee OTP and returns employee user state with assigned shop', async () => {
-      const user = await verifyEmployeeOtp('demo-employee@rtrmobiles.com', '123456');
+    it('authenticates valid employee credentials and returns employee user state with assigned shop', async () => {
+      const user = await signIn('demo-employee@rtrmobiles.com', 'password123');
       expect(user).toBeDefined();
       expect(user.role).toBe('employee');
       expect(user.assignedShopId).toBeDefined();
@@ -511,11 +499,10 @@ describe('Secure Owner Authentication Suite', () => {
       expect(user.assignedShopCode).toBe('SH-DEMO');
     });
 
-    it('rejects invalid verification code with standard error message', async () => {
-      expect(INVALID_OTP_MSG).toBe('Invalid or expired verification code. Please request a new code.');
+    it('rejects employee login when incorrect password is provided', async () => {
       await expect(
-        verifyEmployeeOtp('employee@rtrmobiles.com', '999999')
-      ).rejects.toThrow();
+        signIn('demo-employee@rtrmobiles.com', 'wrongpassword')
+      ).rejects.toThrow(INCORRECT_CREDENTIALS_MSG);
     });
 
     it('renders workspace with employee dashboard when employee session is restored', () => {
@@ -544,5 +531,4 @@ describe('Secure Owner Authentication Suite', () => {
       expect(html).not.toContain('Business Owner');
     });
   });
-
 });

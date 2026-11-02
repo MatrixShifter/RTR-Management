@@ -3,14 +3,14 @@ import employeesHandler from '../api/employees/index.js';
 import employeeIdHandler from '../api/employees/[id]/index.js';
 import employeeShopHandler from '../api/employees/[id]/shop.js';
 import employeeStatusHandler from '../api/employees/[id]/status.js';
-import employeeSendOtpHandler from '../api/employees/[id]/send-otp.js';
+import employeeResetPasswordHandler from '../api/employees/[id]/reset-password.js';
 import { 
   getEmployees, 
   createEmployee, 
   reassignEmployeeShop, 
   toggleEmployeeStatus, 
   revokeEmployeeAccess,
-  sendEmployeeOtp
+  resetEmployeePassword
 } from './services/db.js';
 import { setDemoMode } from './services/demoMode.js';
 
@@ -79,7 +79,7 @@ describe('Vercel Serverless Employee Endpoints Suite (/api/employees*)', () => {
     const { req, res } = createMockReqRes({
       method: 'POST',
       headers: { authorization: demoOwnerToken },
-      body: { name: '', email: 'not-an-email' }
+      body: { name: '', email: 'not-an-email', password: 'short' }
     });
     await employeesHandler(req, res);
     expect(res.getStatus()).toBe(400);
@@ -94,7 +94,8 @@ describe('Vercel Serverless Employee Endpoints Suite (/api/employees*)', () => {
         name: 'Jane Staff',
         email: 'jane.staff@example.com',
         username: 'janestaff',
-        shopId: 'a0000000-0000-0000-0000-000000000001'
+        shopId: 'a0000000-0000-0000-0000-000000000001',
+        password: 'password123'
       }
     });
     await employeesHandler(req, res);
@@ -140,16 +141,17 @@ describe('Vercel Serverless Employee Endpoints Suite (/api/employees*)', () => {
     expect(res.getBody().success).toBe(true);
   });
 
-  it('POST /api/employees/:id/send-otp dispatches verification code in demo mode', async () => {
+  it('POST /api/employees/:id/reset-password resets employee password in demo mode', async () => {
     const { req, res } = createMockReqRes({
       method: 'POST',
       headers: { authorization: demoOwnerToken },
-      query: { id: 'demo-employee-1' }
+      query: { id: 'demo-employee-1' },
+      body: { password: 'new-secure-password' }
     });
-    await employeeSendOtpHandler(req, res);
+    await employeeResetPasswordHandler(req, res);
     expect(res.getStatus()).toBe(200);
     expect(res.getBody().success).toBe(true);
-    expect(res.getBody().message).toContain('verification code');
+    expect(res.getBody().message).toMatch(/password reset successfully|Password updated successfully/i);
   });
 
   it('rejects unsupported HTTP methods with 405 Method Not Allowed', async () => {
@@ -184,7 +186,8 @@ describe('Frontend API Client Safe Response Handling (HTML & Error Resilience)',
     await expect(createEmployee({
       name: 'Test Staff',
       email: 'staff@example.com',
-      shopId: 'a0000000-0000-0000-0000-000000000001'
+      shopId: 'a0000000-0000-0000-0000-000000000001',
+      password: 'password123'
     })).rejects.toThrow(/Server returned an unexpected HTML response/);
   });
 
@@ -214,7 +217,8 @@ describe('Frontend API Client Safe Response Handling (HTML & Error Resilience)',
     await expect(createEmployee({
       name: 'Existing Staff',
       email: 'existing@example.com',
-      shopId: 'a0000000-0000-0000-0000-000000000001'
+      shopId: 'a0000000-0000-0000-0000-000000000001',
+      password: 'password123'
     })).rejects.toThrow('An employee with this email is already registered for your business.');
   });
 
@@ -243,12 +247,12 @@ describe('Frontend API Client Safe Response Handling (HTML & Error Resilience)',
     const toggleOutcome = await toggleEmployeeStatus('emp-1', true);
     expect(toggleOutcome.success).toBe(true);
 
-    const sendOtpRes = new Response(JSON.stringify({ success: true, message: 'Code dispatched' }), {
+    const resetPwdRes = new Response(JSON.stringify({ success: true, message: 'Password reset' }), {
       status: 200,
       headers: { 'Content-Type': 'application/json' }
     });
-    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(sendOtpRes);
-    const sendOtpOutcome = await sendEmployeeOtp('emp-1');
-    expect(sendOtpOutcome.success).toBe(true);
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(resetPwdRes);
+    const resetOutcome = await resetEmployeePassword('emp-1', 'newpassword123');
+    expect(resetOutcome.success).toBe(true);
   });
 });

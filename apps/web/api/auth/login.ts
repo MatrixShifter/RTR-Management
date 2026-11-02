@@ -45,8 +45,32 @@ export default async function handler(req: any, res: any) {
     return res.status(401).json({ error: INCORRECT_CREDENTIALS_MSG });
   }
 
-  // 2. Authoritative Supabase Owner Login
-  const email = resolveIdentifierToEmail(cleanUsername);
+  if (cleanUsername.toLowerCase() === 'demo-employee@rtrmobiles.com' || cleanUsername.toLowerCase() === 'employee@demo.com') {
+    if (cleanPassword === 'password123' || cleanPassword === 'demo1234' || cleanPassword === 'demo-password' || cleanPassword === DEMO_PASSWORD_PLACEHOLDER) {
+      return res.status(200).json({
+        user: {
+          id: 'demo-employee-00000000-0000-0000-0000-000000000001',
+          email: cleanUsername.toLowerCase(),
+          username: 'demo-employee',
+          name: 'Demo Employee (Sandbox)',
+          role: 'employee',
+          isDemo: true,
+          assignedShopId: 'demo-shop-00000000-0000-0000-0000-000000000001',
+          assignedShopName: 'Demo Retail Outlet',
+          assignedShopCode: 'SH-DEMO'
+        },
+        session: {
+          access_token: 'demo-employee-token-' + Date.now(),
+          refresh_token: 'demo-employee-refresh-' + Date.now(),
+          expires_at: Math.floor(Date.now() / 1000) + 86400
+        }
+      });
+    }
+    return res.status(401).json({ error: INCORRECT_CREDENTIALS_MSG });
+  }
+
+  // 2. Resolve Identifier to Email
+  const email = resolveIdentifierToEmail(cleanUsername) || (cleanUsername.includes('@') ? cleanUsername : null);
   if (!email) {
     return res.status(401).json({ error: INCORRECT_CREDENTIALS_MSG });
   }
@@ -64,34 +88,78 @@ export default async function handler(req: any, res: any) {
       return res.status(401).json({ error: INCORRECT_CREDENTIALS_MSG });
     }
 
-    // Verify Owner Role via business_memberships
+    // Verify User Role & Active Status via business_memberships
     const clientForRole = supabaseAdmin || supabaseAnon;
-    const { data: membership } = await clientForRole
+    const { data: membership, error: memErr } = await clientForRole
       .from('business_memberships')
-      .select('role')
+      .select('business_id, role, is_active')
       .eq('user_id', authData.user.id)
       .maybeSingle();
 
-    if (membership && membership.role !== 'owner') {
+    if (memErr || !membership || !membership.is_active) {
       await supabaseAnon.auth.signOut().catch(() => {});
-      return res.status(403).json({ error: 'Access restricted to Business Owner only.' });
+      return res.status(403).json({ error: 'Account is deactivated or unauthorized. Please contact your manager.' });
     }
 
-    return res.status(200).json({
-      user: {
-        id: authData.user.id,
-        email: authData.user.email || email,
-        username: cleanUsername,
-        name: authData.user.user_metadata?.full_name || 'Business Owner',
-        role: 'owner',
-        isDemo: false
-      },
-      session: {
-        access_token: authData.session.access_token,
-        refresh_token: authData.session.refresh_token,
-        expires_at: authData.session.expires_at
+    if (membership.role === 'owner') {
+      return res.status(200).json({
+        user: {
+          id: authData.user.id,
+          email: authData.user.email || email,
+          username: cleanUsername,
+          name: authData.user.user_metadata?.full_name || 'Business Owner',
+          role: 'owner',
+          isDemo: false
+        },
+        session: {
+          access_token: authData.session.access_token,
+          refresh_token: authData.session.refresh_token,
+          expires_at: authData.session.expires_at
+        }
+      });
+    }
+
+    if (membership.role === 'employee') {
+      const { data: shopMember, error: shopErr } = await clientForRole
+        .from('shop_memberships')
+        .select('shop_id, shops!inner(id, name, code, is_active, business_id)')
+        .eq('user_id', authData.user.id)
+        .maybeSingle();
+
+      if (
+        shopErr || 
+        !shopMember || 
+        !(shopMember as any).shops?.is_active ||
+        (shopMember as any).shops?.business_id !== membership.business_id
+      ) {
+        await supabaseAnon.auth.signOut().catch(() => {});
+        return res.status(403).json({
+          error: 'Your employee account is not currently assigned to an active shop. Please contact your manager.'
+        });
       }
-    });
+
+      return res.status(200).json({
+        user: {
+          id: authData.user.id,
+          email: authData.user.email || email,
+          username: cleanUsername.includes('@') ? (authData.user.user_metadata?.username || cleanUsername.split('@')[0]) : cleanUsername,
+          name: authData.user.user_metadata?.full_name || 'Shop Staff',
+          role: 'employee',
+          isDemo: false,
+          assignedShopId: shopMember.shop_id,
+          assignedShopName: (shopMember as any).shops?.name,
+          assignedShopCode: (shopMember as any).shops?.code
+        },
+        session: {
+          access_token: authData.session.access_token,
+          refresh_token: authData.session.refresh_token,
+          expires_at: authData.session.expires_at
+        }
+      });
+    }
+
+    await supabaseAnon.auth.signOut().catch(() => {});
+    return res.status(403).json({ error: 'Unknown or unauthorized account role.' });
   } catch (err: any) {
     return res.status(500).json({ error: 'Authentication service temporarily unavailable.' });
   }

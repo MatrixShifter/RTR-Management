@@ -4409,7 +4409,7 @@ export async function getEmployees(): Promise<EmployeeRecord[]> {
   }
 }
 
-export async function createEmployee(input: CreateEmployeeInput): Promise<{ success: boolean; message: string; emailStatus?: 'sent' | 'rate_limited' | 'failed'; emailMessage?: string; employee?: EmployeeRecord }> {
+export async function createEmployee(input: CreateEmployeeInput): Promise<{ success: boolean; message: string; employee?: EmployeeRecord }> {
   const res = await authenticatedFetch('/api/employees', {
     method: 'POST',
     headers: {
@@ -4418,7 +4418,7 @@ export async function createEmployee(input: CreateEmployeeInput): Promise<{ succ
     },
     body: JSON.stringify(input)
   });
-  return parseApiResponse<{ success: boolean; message: string; emailStatus?: 'sent' | 'rate_limited' | 'failed'; emailMessage?: string; employee?: EmployeeRecord }>(
+  return parseApiResponse<{ success: boolean; message: string; employee?: EmployeeRecord }>(
     res,
     'Failed to provision employee account.'
   );
@@ -4467,15 +4467,17 @@ export async function revokeEmployeeAccess(id: string): Promise<{ success: boole
   );
 }
 
-export async function sendEmployeeOtp(id: string): Promise<{ success: boolean; message: string }> {
-  const res = await authenticatedFetch(`/api/employees/${encodeURIComponent(id)}/send-otp`, {
+export async function resetEmployeePassword(id: string, password: string): Promise<{ success: boolean; message: string }> {
+  const res = await authenticatedFetch(`/api/employees/${encodeURIComponent(id)}/reset-password`, {
     method: 'POST',
     headers: {
+      'Content-Type': 'application/json',
       'Accept': 'application/json'
-    }
+    },
+    body: JSON.stringify({ password })
   });
   return parseApiResponse<{ success: boolean; message: string }>(
     res,
-    'Failed to dispatch employee verification code.'
+    'Failed to reset employee password.'
   );
 }

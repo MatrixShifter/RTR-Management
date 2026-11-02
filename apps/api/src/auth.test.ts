@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import request from 'supertest';
 import { app } from './app.js';
-import { INCORRECT_CREDENTIALS_MSG, RECOVERY_CONFIRMATION_MSG, EMPLOYEE_OTP_CONFIRMATION_MSG, INVALID_OTP_MSG, supabaseAdmin, supabaseAnon } from './routes/auth.js';
+import { INCORRECT_CREDENTIALS_MSG, RECOVERY_CONFIRMATION_MSG, supabaseAdmin, supabaseAnon } from './routes/auth.js';
 
 describe('Authentication API Endpoints (/api/auth)', { timeout: 25000 }, () => {
   describe('POST /api/auth/login', () => {
@@ -460,84 +460,158 @@ describe('Authentication API Endpoints (/api/auth)', { timeout: 25000 }, () => {
     }, 45000);
   });
 
-  describe('Passwordless Employee OTP Endpoints', () => {
-    describe('POST /api/auth/employee/request-otp', () => {
-      it('rejects empty or missing email with 400', async () => {
-        const res = await request(app)
-          .post('/api/auth/employee/request-otp')
-          .send({});
-
-        expect(res.status).toBe(400);
-        expect(res.body.success).toBe(false);
-        expect(res.body.message).toContain('valid employee email');
+  describe('Employee Password Authentication on /api/auth/login', () => {
+    it('authenticates valid employee account with email and password', async () => {
+      vi.spyOn(supabaseAnon.auth, 'signInWithPassword').mockResolvedValueOnce({
+        data: {
+          user: { 
+            id: 'emp-uuid-1', 
+            email: 'employee@rtrmobiles.com', 
+            user_metadata: { full_name: 'Shop Employee', username: 'shopemp' } 
+          } as any,
+          session: { access_token: 'fake-employee-token', refresh_token: 'fake-refresh', expires_at: 1999999999, expires_in: 3600 } as any
+        },
+        error: null
       });
 
-      it('rejects invalid email format with 400', async () => {
-        const res = await request(app)
-          .post('/api/auth/employee/request-otp')
-          .send({ email: 'not-an-email' });
+      vi.spyOn(supabaseAdmin, 'from').mockImplementation(((table: string) => {
+        if (table === 'business_memberships') {
+          return {
+            select: () => ({
+              eq: () => ({
+                maybeSingle: async () => ({
+                  data: { business_id: 'biz-1', role: 'employee', is_active: true },
+                  error: null
+                })
+              })
+            })
+          } as any;
+        }
+        if (table === 'shop_memberships') {
+          return {
+            select: () => ({
+              eq: () => ({
+                maybeSingle: async () => ({
+                  data: {
+                    shop_id: 'shop-uuid-1',
+                    shops: {
+                      id: 'shop-uuid-1',
+                      name: 'Downtown Branch',
+                      code: 'DT-01',
+                      is_active: true,
+                      business_id: 'biz-1'
+                    }
+                  },
+                  error: null
+                })
+              })
+            })
+          } as any;
+        }
+        return {} as any;
+      }) as any);
 
-        expect(res.status).toBe(400);
-        expect(res.body.success).toBe(false);
-        expect(res.body.message).toContain('valid email format');
-      });
+      const res = await request(app)
+        .post('/api/auth/login')
+        .send({ username: 'employee@rtrmobiles.com', password: 'ValidPassword123' });
 
-      it('returns neutral confirmation for unknown email without creating accounts', async () => {
-        const res = await request(app)
-          .post('/api/auth/employee/request-otp')
-          .send({ email: 'nonexistent_emp_9999@rtrmobiles.com' });
-
-        expect(res.status).toBe(200);
-        expect(res.body.success).toBe(true);
-        expect(res.body.message).toBe(EMPLOYEE_OTP_CONFIRMATION_MSG);
-      });
-
-      it('returns neutral confirmation for demo employee email', async () => {
-        const res = await request(app)
-          .post('/api/auth/employee/request-otp')
-          .send({ email: 'demo-employee@rtrmobiles.com' });
-
-        expect(res.status).toBe(200);
-        expect(res.body.success).toBe(true);
-        expect(res.body.message).toBe(EMPLOYEE_OTP_CONFIRMATION_MSG);
-      });
+      expect(res.status).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(res.body.user).toBeDefined();
+      expect(res.body.user.role).toBe('employee');
+      expect(res.body.user.assignedShopId).toBe('shop-uuid-1');
+      expect(res.body.user.assignedShopName).toBe('Downtown Branch');
+      expect(res.body.user.assignedShopCode).toBe('DT-01');
     });
 
-    describe('POST /api/auth/employee/verify-otp', () => {
-      it('rejects missing email or token with 400', async () => {
-        const res = await request(app)
-          .post('/api/auth/employee/verify-otp')
-          .send({ email: 'demo-employee@rtrmobiles.com' });
-
-        expect(res.status).toBe(400);
-        expect(res.body.success).toBe(false);
+    it('rejects employee login with incorrect password (401)', async () => {
+      vi.spyOn(supabaseAnon.auth, 'signInWithPassword').mockResolvedValueOnce({
+        data: { user: null, session: null },
+        error: { message: 'Invalid login credentials', status: 400 } as any
       });
 
-      it('rejects invalid OTP with 401', async () => {
-        const res = await request(app)
-          .post('/api/auth/employee/verify-otp')
-          .send({ email: 'demo-employee@rtrmobiles.com', token: '999999' });
+      const res = await request(app)
+        .post('/api/auth/login')
+        .send({ username: 'employee@rtrmobiles.com', password: 'WrongPassword999' });
 
-        expect(res.status).toBe(401);
-        expect(res.body.success).toBe(false);
-        expect(res.body.message).toBe(INVALID_OTP_MSG);
+      expect(res.status).toBe(401);
+      expect(res.body.success).toBe(false);
+      expect(res.body.message).toBe(INCORRECT_CREDENTIALS_MSG);
+    });
+
+    it('rejects employee login if employee account is deactivated (403)', async () => {
+      vi.spyOn(supabaseAnon.auth, 'signInWithPassword').mockResolvedValueOnce({
+        data: {
+          user: { id: 'emp-uuid-2', email: 'deactivated@rtrmobiles.com', user_metadata: {} } as any,
+          session: { access_token: 'fake-token' } as any
+        },
+        error: null
       });
 
-      it('authenticates demo employee with valid OTP and returns employee user state with assigned shop', async () => {
-        const res = await request(app)
-          .post('/api/auth/employee/verify-otp')
-          .send({ email: 'demo-employee@rtrmobiles.com', token: '123456' });
+      vi.spyOn(supabaseAdmin, 'from').mockImplementationOnce(() => ({
+        select: () => ({
+          eq: () => ({
+            maybeSingle: async () => ({
+              data: { business_id: 'biz-1', role: 'employee', is_active: false },
+              error: null
+            })
+          })
+        })
+      } as any));
 
-        expect(res.status).toBe(200);
-        expect(res.body.success).toBe(true);
-        expect(res.body.session).toBeDefined();
-        expect(res.body.session.access_token).toBeDefined();
-        expect(res.body.user).toBeDefined();
-        expect(res.body.user.role).toBe('employee');
-        expect(res.body.user.assignedShopId).toBeDefined();
-        expect(res.body.user.assignedShopName).toBe('Demo Retail Outlet');
+      const res = await request(app)
+        .post('/api/auth/login')
+        .send({ username: 'deactivated@rtrmobiles.com', password: 'ValidPassword123' });
+
+      expect(res.status).toBe(403);
+      expect(res.body.success).toBe(false);
+      expect(res.body.message).toContain('Account is deactivated or unauthorized');
+    });
+
+    it('rejects employee login if not assigned to active shop (403)', async () => {
+      vi.spyOn(supabaseAnon.auth, 'signInWithPassword').mockResolvedValueOnce({
+        data: {
+          user: { id: 'emp-uuid-3', email: 'no-shop@rtrmobiles.com', user_metadata: {} } as any,
+          session: { access_token: 'fake-token' } as any
+        },
+        error: null
       });
+
+      vi.spyOn(supabaseAdmin, 'from').mockImplementation(((table: string) => {
+        if (table === 'business_memberships') {
+          return {
+            select: () => ({
+              eq: () => ({
+                maybeSingle: async () => ({
+                  data: { business_id: 'biz-1', role: 'employee', is_active: true },
+                  error: null
+                })
+              })
+            })
+          } as any;
+        }
+        if (table === 'shop_memberships') {
+          return {
+            select: () => ({
+              eq: () => ({
+                maybeSingle: async () => ({
+                  data: null,
+                  error: null
+                })
+              })
+            })
+          } as any;
+        }
+        return {} as any;
+      }) as any);
+
+      const res = await request(app)
+        .post('/api/auth/login')
+        .send({ username: 'no-shop@rtrmobiles.com', password: 'ValidPassword123' });
+
+      expect(res.status).toBe(403);
+      expect(res.body.success).toBe(false);
+      expect(res.body.message).toContain('not currently assigned to an active shop');
     });
   });
-
 });

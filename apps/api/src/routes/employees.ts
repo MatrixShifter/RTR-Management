@@ -1,5 +1,4 @@
 import { Router, Request, Response } from 'express';
-import crypto from 'crypto';
 import { 
   CreateEmployeeSchema, 
   UpdateEmployeeShopSchema, 
@@ -9,7 +8,7 @@ import {
 } from '@crimpston/shared';
 import { requireOwnerAuth } from '../middleware/auth.js';
 import { logSecurityEvent, logger } from '../logger.js';
-import { supabaseAdmin, supabaseAnon } from '../supabase.js';
+import { supabaseAdmin } from '../supabase.js';
 
 export const employeesRouter = Router();
 
@@ -118,7 +117,7 @@ employeesRouter.post('/', requireOwnerAuth, async (req: Request, res: Response) 
     });
   }
 
-  const { name, email, username, shopId } = parsed.data;
+  const { name, email, username, shopId, password } = parsed.data;
 
   // Demo Sandbox Isolation
   if (user.isDemo) {
@@ -183,11 +182,10 @@ employeesRouter.post('/', requireOwnerAuth, async (req: Request, res: Response) 
     }
 
     if (!targetUserId) {
-      // 3. Create secure Supabase Auth user
-      const initialPassword = `RTR-${crypto.randomBytes(8).toString('hex')}!2026`;
+      // 3. Create or update Supabase Auth user with individual password
       const { data: newUser, error: createErr } = await supabaseAdmin.auth.admin.createUser({
         email,
-        password: initialPassword,
+        password,
         email_confirm: true,
         user_metadata: {
           full_name: name,
@@ -196,13 +194,17 @@ employeesRouter.post('/', requireOwnerAuth, async (req: Request, res: Response) 
         }
       });
 
-      if (createErr || !newUser.user) {
+      if (createErr || !newUser?.user) {
         const errMsg = createErr?.message || '';
         if (errMsg.toLowerCase().includes('already') || errMsg.toLowerCase().includes('exists')) {
           const { data: userList } = await supabaseAdmin.auth.admin.listUsers();
           const found = userList?.users?.find(u => u.email?.toLowerCase() === email.toLowerCase());
           if (found) {
             targetUserId = found.id;
+            await supabaseAdmin.auth.admin.updateUserById(targetUserId, {
+              password,
+              email_confirm: true
+            });
           } else {
             throw new Error(errMsg || 'Failed to provision auth user.');
           }
@@ -213,6 +215,11 @@ employeesRouter.post('/', requireOwnerAuth, async (req: Request, res: Response) 
         targetUserId = newUser.user.id;
         isNewlyCreatedAuth = true;
       }
+    } else {
+      await supabaseAdmin.auth.admin.updateUserById(targetUserId, {
+        password,
+        email_confirm: true
+      });
     }
 
     // 4. Upsert profile
@@ -251,37 +258,6 @@ employeesRouter.post('/', requireOwnerAuth, async (req: Request, res: Response) 
 
     if (smErr) throw smErr;
 
-    // 7. Dispatch employee verification OTP email
-    let emailStatus: 'sent' | 'rate_limited' | 'failed' = 'failed';
-    let emailMessage = '';
-
-    try {
-      const { error: otpErr } = await supabaseAnon.auth.signInWithOtp({
-        email,
-        options: {
-          shouldCreateUser: false,
-          emailRedirectTo: 'https://rtr-management-cfn4.vercel.app'
-        }
-      });
-
-      if (!otpErr) {
-        emailStatus = 'sent';
-        emailMessage = 'Verification code email sent successfully.';
-      } else {
-        const isRateLimit = otpErr.status === 429 || 
-          (otpErr as any).code === 'over_email_send_rate_limit' || 
-          otpErr.message?.toLowerCase().includes('rate limit');
-        
-        emailStatus = isRateLimit ? 'rate_limited' : 'failed';
-        emailMessage = isRateLimit
-          ? 'Default Supabase email rate limit reached (~3-4 emails/hour). Please wait before requesting another verification code.'
-          : (otpErr.message || 'Email delivery failed.');
-      }
-    } catch (sendErr: any) {
-      emailStatus = 'failed';
-      emailMessage = sendErr?.message || 'Email delivery failed.';
-    }
-
     logSecurityEvent({
       action: 'EMPLOYEE_CREATED',
       category: 'access_control',
@@ -289,7 +265,7 @@ employeesRouter.post('/', requireOwnerAuth, async (req: Request, res: Response) 
       statusCode: 201,
       correlationId: (req.headers['x-correlation-id'] as string),
       resourceType: 'employee',
-      details: { action: 'created', emailStatus }
+      details: { action: 'created' }
     });
 
     const newEmployee: EmployeeRecord = {
@@ -307,9 +283,7 @@ employeesRouter.post('/', requireOwnerAuth, async (req: Request, res: Response) 
 
     return res.status(201).json({
       success: true,
-      message: `Employee account created and assigned to ${shop.name}.${emailStatus === 'rate_limited' ? ' (Note: Default Supabase email rate limit was exceeded; please wait before requesting another code)' : ''}`,
-      emailStatus,
-      emailMessage,
+      message: `Employee account created and assigned to ${shop.name}.`,
       employee: newEmployee
     });
   } catch (err: any) {
@@ -336,7 +310,10 @@ employeesRouter.post('/', requireOwnerAuth, async (req: Request, res: Response) 
  */
 employeesRouter.patch('/:id/shop', requireOwnerAuth, async (req: Request, res: Response) => {
   const user = req.user!;
-  const employeeId = req.params.id;
+  const employeeId = req.params.id as string;
+  if (!employeeId) {
+    return res.status(400).json({ error: 'Validation Error', message: 'Employee ID is required.' });
+  }
 
   const parsed = UpdateEmployeeShopSchema.safeParse(req.body);
   if (!parsed.success) {
@@ -567,17 +544,25 @@ employeesRouter.delete('/:id', requireOwnerAuth, async (req: Request, res: Respo
 });
 
 /**
- * POST /api/employees/:id/send-otp
- * Dispatches a fresh sign-in verification code to an existing employee.
+ * POST /api/employees/:id/reset-password
+ * Securely updates an employee's Supabase Auth password by the Business Owner.
  */
-employeesRouter.post('/:id/send-otp', requireOwnerAuth, async (req: Request, res: Response) => {
+employeesRouter.post('/:id/reset-password', requireOwnerAuth, async (req: Request, res: Response) => {
   const user = req.user!;
   const employeeId = req.params.id;
+  const { password } = req.body || {};
+
+  if (!password || typeof password !== 'string' || password.length < 8) {
+    return res.status(400).json({
+      error: 'Validation Error',
+      message: 'Password must be at least 8 characters long.'
+    });
+  }
 
   if (user.isDemo) {
     return res.status(200).json({
       success: true,
-      message: 'Demo verification code dispatched.'
+      message: 'Demo employee password reset successfully.'
     });
   }
 
@@ -589,60 +574,42 @@ employeesRouter.post('/:id/send-otp', requireOwnerAuth, async (req: Request, res
       .eq('business_id', user.businessId)
       .maybeSingle();
 
-    if (memErr || !mem || mem.role !== 'employee' || !mem.is_active) {
+    if (memErr || !mem || mem.role !== 'employee') {
       return res.status(404).json({
         error: 'Not Found',
-        message: 'Active employee not found in your business directory.'
+        message: 'Employee not found in your business directory.'
       });
     }
 
-    const { data: profile, error: profErr } = await supabaseAdmin
-      .from('profiles')
-      .select('email')
-      .eq('id', employeeId)
-      .maybeSingle();
-
-    if (profErr || !profile?.email) {
-      return res.status(404).json({
-        error: 'Not Found',
-        message: 'Employee email address not found.'
-      });
-    }
-
-    const { error: otpErr } = await supabaseAnon.auth.signInWithOtp({
-      email: profile.email,
-      options: {
-        shouldCreateUser: false,
-        emailRedirectTo: 'https://rtr-management-cfn4.vercel.app'
-      }
+    const { error: updateErr } = await supabaseAdmin.auth.admin.updateUserById(employeeId!, {
+      password
     });
 
-    if (otpErr) {
-      const isRateLimit = otpErr.status === 429 || 
-        (otpErr as any).code === 'over_email_send_rate_limit' || 
-        otpErr.message?.toLowerCase().includes('rate limit');
-
-      if (isRateLimit) {
-        return res.status(429).json({
-          error: 'Rate Limit Exceeded',
-          message: 'Default Supabase email rate limit exceeded (~3 emails/hour). Please wait or please wait before requesting another code.'
-        });
-      }
-
+    if (updateErr) {
       return res.status(500).json({
-        error: 'Email Delivery Error',
-        message: otpErr.message || 'Failed to dispatch verification code.'
+        error: 'Update Error',
+        message: updateErr.message || 'Failed to reset employee password.'
       });
     }
+
+    logSecurityEvent({
+      action: 'EMPLOYEE_PASSWORD_RESET',
+      category: 'access_control',
+      status: 'SUCCESS',
+      statusCode: 200,
+      correlationId: (req.headers['x-correlation-id'] as string),
+      resourceType: 'employee',
+      details: { employeeId }
+    });
 
     return res.status(200).json({
       success: true,
-      message: `Sign-in verification code sent to ${profile.email}.`
+      message: 'Employee password reset successfully.'
     });
   } catch (err: any) {
     return res.status(500).json({
       error: 'Internal Server Error',
-      message: err?.message || 'Failed to dispatch verification code.'
+      message: err?.message || 'Failed to reset employee password.'
     });
   }
 });

@@ -4,7 +4,7 @@ import {
   handleReassignShop, 
   handleToggleStatus, 
   handleRevokeAccess,
-  handleSendOtp
+  handleResetPassword
 } from '../_employees.js';
 
 export default async function handler(req: any, res: any) {
@@ -17,8 +17,8 @@ export default async function handler(req: any, res: any) {
     if (req.method === 'DELETE') {
       return handleRevokeAccess(req, res, id);
     }
-    if (req.method === 'POST' && (action === 'send-otp' || action === 'resend')) {
-      return handleSendOtp(req, res, id);
+    if (req.method === 'POST' && action === 'reset-password') {
+      return handleResetPassword(req, res, id);
     }
     if (req.method === 'PATCH') {
       if (action === 'shop' || (req.body && 'shopId' in req.body)) {

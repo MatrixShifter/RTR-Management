@@ -118,6 +118,23 @@ export async function signIn(username: string, password: string): Promise<AuthUs
 
       if (authError || !authData.user) {
         // Demo account sandbox check: completely isolated from network and Supabase
+        if (cleanUsername.toLowerCase() === 'demo-employee@rtrmobiles.com' || cleanUsername.toLowerCase() === 'employee@demo.com') {
+          if (password === 'password123' || password === 'demo1234' || password === DEMO_PASSWORD_PLACEHOLDER) {
+            setDemoMode(true);
+            return {
+              id: 'demo-employee-00000000-0000-0000-0000-000000000001',
+              email: cleanUsername.toLowerCase(),
+              username: 'demo-employee',
+              name: 'Demo Employee (Sandbox)',
+              role: 'employee',
+              isDemo: true,
+              assignedShopId: 'demo-shop-00000000-0000-0000-0000-000000000001',
+              assignedShopName: 'Demo Retail Outlet',
+              assignedShopCode: 'SH-DEMO'
+            };
+          }
+          throw new Error(INCORRECT_CREDENTIALS_MSG);
+        }
         if (cleanUsername.toLowerCase() === DEMO_USERNAME.toLowerCase() || cleanUsername.toLowerCase() === 'demo-owner@rtrmobiles.com') {
           if (password === DEMO_PASSWORD_PLACEHOLDER) {
             setDemoMode(true);
@@ -371,227 +388,4 @@ export async function updatePassword(newPassword: string): Promise<void> {
     localStorage.removeItem('rtr_current_user');
     localStorage.removeItem('rtr_session_expiry');
   } catch {}
-}
-/**
- * Request passwordless verification code (OTP) for an employee.
- */
-export async function requestEmployeeOtp(email: string): Promise<string> {
-  const cleanEmail = email.trim().toLowerCase();
-  if (!cleanEmail) {
-    throw new Error('Please enter a valid email address.');
-  }
-
-  // 0. Demo employee sandbox handling
-  if (cleanEmail === 'demo-employee@rtrmobiles.com' || cleanEmail === 'employee@demo.com') {
-    return EMPLOYEE_OTP_CONFIRMATION_MSG;
-  }
-
-  // 1. Primary: Server-side API endpoint
-  try {
-    let res = await fetch('/api/auth/employee/request-otp', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email: cleanEmail })
-    });
-    if (res.status === 404) {
-      res = await fetch('/api/auth/employee-request-otp', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: cleanEmail })
-      });
-    }
-
-    if (res.ok) {
-      const data = await res.json();
-      return data.message || EMPLOYEE_OTP_CONFIRMATION_MSG;
-    }
-
-    if (res.status === 429) {
-      const data = await res.json().catch(() => ({}));
-      throw new Error(data.message || 'Supabase email delivery rate limit exceeded (default mail pool is limited to ~3-4 emails/hour). Please wait a few minutes before requesting another verification code.');
-    }
-
-    if (res.status === 502 || res.status === 503) {
-      const data = await res.json().catch(() => ({}));
-      throw new Error(data.message || 'Email delivery service is temporarily unavailable. Please try again shortly.');
-    }
-
-    if (res.status === 400) {
-      const data = await res.json().catch(() => ({}));
-      throw new Error(data.message || 'Please enter a valid email format.');
-    }
-  } catch (err: any) {
-    if (
-      err.message?.includes('wait') || 
-      err.message?.includes('valid email') ||
-      err.message?.includes('rate limit') ||
-      err.message?.includes('limit') ||
-      err.message?.includes('Custom SMTP') ||
-      err.message?.includes('unavailable')
-    ) {
-      throw err;
-    }
-    // Fallback to Supabase client if server endpoint unavailable
-  }
-
-  // 2. Direct Supabase fallback
-  if (isSupabaseConfigured && supabase) {
-    const { error } = await supabase.auth.signInWithOtp({
-      email: cleanEmail,
-      options: {
-        shouldCreateUser: false
-      }
-    });
-
-    if (error) {
-      const isRateLimit = error.status === 429 || 
-        (error as any).code === 'over_email_send_rate_limit' || 
-        error.message?.toLowerCase().includes('rate limit');
-      if (isRateLimit) {
-        throw new Error('Supabase email delivery rate limit exceeded (default mail pool is limited to ~3-4 emails/hour). Please wait a few minutes before requesting another verification code.');
-      }
-      // Never reveal non-existence; return generic neutral message
-    }
-    return EMPLOYEE_OTP_CONFIRMATION_MSG;
-  }
-
-  return EMPLOYEE_OTP_CONFIRMATION_MSG;
-}
-
-/**
- * Verify employee OTP and obtain active authenticated employee session.
- */
-export async function verifyEmployeeOtp(email: string, token: string): Promise<AuthUser> {
-  const cleanEmail = email.trim().toLowerCase();
-  const cleanToken = token.trim();
-
-  if (!cleanEmail || !cleanToken) {
-    throw new Error('Both email and verification code are required.');
-  }
-
-  // 0. Demo employee sandbox verification
-  if (
-    (cleanEmail === 'demo-employee@rtrmobiles.com' || cleanEmail === 'employee@demo.com') &&
-    (cleanToken === '123456' || cleanToken === '000000')
-  ) {
-    setDemoMode(true);
-    return {
-      id: 'demo-employee-00000000-0000-0000-0000-000000000001',
-      email: cleanEmail,
-      username: 'demo-employee',
-      name: 'Demo Employee (Sandbox)',
-      role: 'employee',
-      isDemo: true,
-      assignedShopId: 'demo-shop-00000000-0000-0000-0000-000000000001',
-      assignedShopName: 'Demo Retail Outlet',
-      assignedShopCode: 'SH-DEMO'
-    };
-  }
-
-  // 1. Primary: Server-side API endpoint
-  try {
-    let res = await fetch('/api/auth/employee/verify-otp', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email: cleanEmail, token: cleanToken })
-    });
-    if (res.status === 404) {
-      res = await fetch('/api/auth/employee-verify-otp', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: cleanEmail, token: cleanToken })
-      });
-    }
-
-    if (res.ok) {
-      const data = await res.json();
-      if (data.session && isSupabaseConfigured && supabase) {
-        await supabase.auth.setSession({
-          access_token: data.session.access_token,
-          refresh_token: data.session.refresh_token
-        });
-      }
-      setDemoMode(Boolean(data.user?.isDemo));
-      return data.user;
-    }
-
-    if (res.status === 401) {
-      const data = await res.json().catch(() => ({}));
-      throw new Error(data.message || INVALID_OTP_MSG);
-    }
-
-    if (res.status === 403) {
-      const data = await res.json().catch(() => ({}));
-      throw new Error(data.message || 'Account is deactivated or unauthorized. Please contact your manager.');
-    }
-
-    if (res.status === 429) {
-      throw new Error('Too many attempts. Please wait a moment and try again.');
-    }
-  } catch (err: any) {
-    if (
-      err.message === INVALID_OTP_MSG ||
-      err.message?.includes('Invalid') ||
-      err.message?.includes('deactivated') ||
-      err.message?.includes('unauthorized') ||
-      err.message?.includes('assigned to an active shop') ||
-      err.message?.includes('Too many')
-    ) {
-      throw err;
-    }
-    // Fall through to direct Supabase verifyOtp
-  }
-
-  // 2. Direct Supabase fallback
-  if (isSupabaseConfigured && supabase) {
-    const { data: verifyData, error: verifyError } = await supabase.auth.verifyOtp({
-      email: cleanEmail,
-      token: cleanToken,
-      type: 'email'
-    });
-
-    if (verifyError || !verifyData.user) {
-      throw new Error(INVALID_OTP_MSG);
-    }
-
-    // Role check
-    const { data: membership } = await supabase
-      .from('business_memberships')
-      .select('business_id, role, is_active')
-      .eq('user_id', verifyData.user.id)
-      .maybeSingle();
-
-    if (!membership || !membership.is_active || membership.role !== 'employee') {
-      await supabase.auth.signOut().catch(() => {});
-      throw new Error('Account is deactivated or unauthorized. Please contact your manager.');
-    }
-
-    // Shop assignment check
-    const { data: sm } = await supabase
-      .from('shop_memberships')
-      .select('shop_id, shops(id, name, code, is_active)')
-      .eq('user_id', verifyData.user.id)
-      .maybeSingle();
-
-    const shop = (sm as any)?.shops;
-    if (!sm || !shop || !shop.is_active) {
-      await supabase.auth.signOut().catch(() => {});
-      throw new Error('Your employee account is not currently assigned to an active shop. Please contact your manager.');
-    }
-
-    setDemoMode(false);
-    return {
-      id: verifyData.user.id,
-      email: verifyData.user.email || cleanEmail,
-      username: cleanEmail.split('@')[0] || cleanEmail,
-      name: verifyData.user.user_metadata?.full_name || 'Shop Staff',
-      role: 'employee',
-      isDemo: false,
-      assignedShopId: sm.shop_id,
-      assignedShopName: shop.name,
-      assignedShopCode: shop.code
-    };
-  }
-
-  throw new Error(NETWORK_ERROR_MSG);
 }

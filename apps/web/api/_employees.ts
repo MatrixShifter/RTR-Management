@@ -1,4 +1,3 @@
-import crypto from 'crypto';
 import { 
   CreateEmployeeSchema, 
   UpdateEmployeeShopSchema, 
@@ -6,7 +5,7 @@ import {
   isDemoShop,
   type EmployeeRecord 
 } from '@crimpston/shared';
-import { supabaseAdmin, supabaseAnon } from './_supabase.js';
+import { supabaseAdmin } from './_supabase.js';
 
 export interface AuthenticatedOwner {
   id: string;
@@ -203,7 +202,7 @@ export async function handleCreateEmployee(req: any, res: any) {
     });
   }
 
-  const { name, email, username, shopId } = parsed.data;
+  const { name, email, username, shopId, password } = parsed.data;
 
   // Handle Demo Mode
   if (owner.isDemo) {
@@ -268,12 +267,11 @@ export async function handleCreateEmployee(req: any, res: any) {
       targetUserId = existingProfile.id;
     }
 
-    // 3. If no target user found, provision in Supabase Auth
+    // 3. Provision or update password in Supabase Auth
     if (!targetUserId) {
-      const initialPassword = `RTR-${crypto.randomBytes(8).toString('hex')}!2026`;
       const { data: newUser, error: createErr } = await supabaseAdmin.auth.admin.createUser({
         email,
-        password: initialPassword,
+        password,
         email_confirm: true,
         user_metadata: {
           full_name: name,
@@ -282,14 +280,18 @@ export async function handleCreateEmployee(req: any, res: any) {
         }
       });
 
-      if (createErr || !newUser.user) {
-        // If already registered in auth.users (e.g. past account without public profile), look up ID
+      if (createErr || !newUser?.user) {
+        // If already registered in auth.users, resolve ID and update password
         const errMsg = createErr?.message || '';
         if (errMsg.toLowerCase().includes('already') || errMsg.toLowerCase().includes('exists')) {
           const { data: userList } = await supabaseAdmin.auth.admin.listUsers();
           const found = userList?.users?.find(u => u.email?.toLowerCase() === email.toLowerCase());
           if (found) {
             targetUserId = found.id;
+            await supabaseAdmin.auth.admin.updateUserById(targetUserId, {
+              password,
+              email_confirm: true
+            });
           } else {
             throw new Error(errMsg || 'Failed to provision auth user.');
           }
@@ -300,6 +302,12 @@ export async function handleCreateEmployee(req: any, res: any) {
         targetUserId = newUser.user.id;
         isNewlyCreatedAuth = true;
       }
+    } else {
+      // Update existing user with the individual password
+      await supabaseAdmin.auth.admin.updateUserById(targetUserId, {
+        password,
+        email_confirm: true
+      });
     }
 
     // 4. Upsert profile
@@ -336,37 +344,6 @@ export async function handleCreateEmployee(req: any, res: any) {
       });
     if (smErr) throw smErr;
 
-    // 7. Dispatch employee verification OTP email
-    let emailStatus: 'sent' | 'rate_limited' | 'failed' = 'failed';
-    let emailMessage = '';
-
-    try {
-      const { error: otpErr } = await supabaseAnon.auth.signInWithOtp({
-        email,
-        options: {
-          shouldCreateUser: false,
-          emailRedirectTo: 'https://rtr-management-cfn4.vercel.app'
-        }
-      });
-
-      if (!otpErr) {
-        emailStatus = 'sent';
-        emailMessage = 'Verification code email sent successfully.';
-      } else {
-        const isRateLimit = otpErr.status === 429 || 
-          (otpErr as any).code === 'over_email_send_rate_limit' || 
-          otpErr.message?.toLowerCase().includes('rate limit');
-        
-        emailStatus = isRateLimit ? 'rate_limited' : 'failed';
-        emailMessage = isRateLimit
-          ? 'Default Supabase email rate limit reached (~3-4 emails/hour). Please wait before requesting another verification code.'
-          : (otpErr.message || 'Email delivery failed.');
-      }
-    } catch (sendErr: any) {
-      emailStatus = 'failed';
-      emailMessage = sendErr?.message || 'Email delivery failed.';
-    }
-
     const newEmployee: EmployeeRecord = {
       id: targetUserId,
       name,
@@ -382,9 +359,7 @@ export async function handleCreateEmployee(req: any, res: any) {
 
     return res.status(201).json({
       success: true,
-      message: `Employee account created and assigned to ${shop.name}.${emailStatus === 'rate_limited' ? ' (Note: Default Supabase email rate limit was exceeded; please wait before requesting another code)' : ''}`,
-      emailStatus,
-      emailMessage,
+      message: `Employee account created and assigned to ${shop.name}.`,
       employee: newEmployee
     });
   } catch (err: any) {
@@ -608,17 +583,25 @@ export async function handleRevokeAccess(req: any, res: any, employeeId: string)
 }
 
 /**
- * POST /api/employees/:id/send-otp
- * Dispatches a fresh sign-in verification code to an existing employee.
+ * POST /api/employees/:id/reset-password
+ * Securely updates an employee's Supabase Auth password by the Business Owner.
  */
-export async function handleSendOtp(req: any, res: any, employeeId: string) {
+export async function handleResetPassword(req: any, res: any, employeeId: string) {
   const owner = await authenticateOwner(req, res);
   if (!owner) return;
+
+  const { password } = req.body || {};
+  if (!password || typeof password !== 'string' || password.length < 8) {
+    return res.status(400).json({
+      error: 'Validation Error',
+      message: 'Password must be at least 8 characters long.'
+    });
+  }
 
   if (owner.isDemo) {
     return res.status(200).json({
       success: true,
-      message: 'Demo verification code dispatched.'
+      message: 'Demo employee password reset successfully.'
     });
   }
 
@@ -630,60 +613,32 @@ export async function handleSendOtp(req: any, res: any, employeeId: string) {
       .eq('business_id', owner.businessId)
       .maybeSingle();
 
-    if (memErr || !mem || mem.role !== 'employee' || !mem.is_active) {
+    if (memErr || !mem || mem.role !== 'employee') {
       return res.status(404).json({
         error: 'Not Found',
-        message: 'Active employee not found in your business directory.'
+        message: 'Employee not found in your business directory.'
       });
     }
 
-    const { data: profile, error: profErr } = await supabaseAdmin
-      .from('profiles')
-      .select('email')
-      .eq('id', employeeId)
-      .maybeSingle();
-
-    if (profErr || !profile?.email) {
-      return res.status(404).json({
-        error: 'Not Found',
-        message: 'Employee email address not found.'
-      });
-    }
-
-    const { error: otpErr } = await supabaseAnon.auth.signInWithOtp({
-      email: profile.email,
-      options: {
-        shouldCreateUser: false,
-        emailRedirectTo: 'https://rtr-management-cfn4.vercel.app'
-      }
+    const { error: updateErr } = await supabaseAdmin.auth.admin.updateUserById(employeeId, {
+      password
     });
 
-    if (otpErr) {
-      const isRateLimit = otpErr.status === 429 || 
-        (otpErr as any).code === 'over_email_send_rate_limit' || 
-        otpErr.message?.toLowerCase().includes('rate limit');
-
-      if (isRateLimit) {
-        return res.status(429).json({
-          error: 'Rate Limit Exceeded',
-          message: 'Default Supabase email rate limit exceeded (~3 emails/hour). Please wait or please wait before requesting another code.'
-        });
-      }
-
+    if (updateErr) {
       return res.status(500).json({
-        error: 'Email Delivery Error',
-        message: otpErr.message || 'Failed to dispatch verification code.'
+        error: 'Update Error',
+        message: updateErr.message || 'Failed to reset employee password.'
       });
     }
 
     return res.status(200).json({
       success: true,
-      message: `Sign-in verification code sent to ${profile.email}.`
+      message: 'Employee password reset successfully.'
     });
   } catch (err: any) {
     return res.status(500).json({
       error: 'Internal Server Error',
-      message: err?.message || 'Failed to dispatch verification code.'
+      message: err?.message || 'Failed to reset employee password.'
     });
   }
 }
