@@ -42,7 +42,7 @@ export function isWeakPassword(pass: string): boolean {
 }
 
 // Verified system username mappings for the authorized business owner and demo account
-export const configuredOwnerEmail = (process.env.OWNER_EMAIL || 'vinov042007@gmail.com').trim().toLowerCase();
+export const configuredOwnerEmail = (process.env.OWNER_EMAIL || 'rtrmobile92@gmail.com').trim().toLowerCase();
 
 const VERIFIED_USERNAME_MAP: Record<string, string> = {
   'owner': configuredOwnerEmail,
@@ -67,6 +67,7 @@ export async function resolveIdentifierToEmail(identifier: string): Promise<stri
   // 2. Map known alias emails directly to the authoritative owner email
   if (
     clean === 'owner@rtrmobiles.com' ||
+    clean === 'rtrmobile92@gmail.com' ||
     clean === 'vinov042007@gmail.com' ||
     clean === configuredOwnerEmail
   ) {
@@ -464,7 +465,7 @@ authRouter.post('/forgot-password', passwordRecoveryRateLimiter, async (req: Req
         cleanId === 'rtrmobiles' ||
         targetEmail === configuredOwnerEmail ||
         targetEmail === 'owner@rtrmobiles.com' || 
-        targetEmail === 'vinoth42007@gmail.com' ||
+        targetEmail === 'rtrmobile92@gmail.com' ||
         targetEmail === 'vinov042007@gmail.com'
       ) {
         isOwner = true;

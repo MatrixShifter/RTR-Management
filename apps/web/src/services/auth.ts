@@ -25,7 +25,7 @@ export const INVALID_OTP_MSG = "Invalid or expired verification code. Please req
 
 export { getRememberedUsername, setRememberedUsername } from './rememberUsername.js';
 
-const configuredOwnerEmail = (import.meta.env?.VITE_OWNER_EMAIL || 'vinov042007@gmail.com').trim().toLowerCase();
+const configuredOwnerEmail = (import.meta.env?.VITE_OWNER_EMAIL || 'rtrmobile92@gmail.com').trim().toLowerCase();
 
 export const VERIFIED_USERNAME_MAP: Record<string, string> = {
   'owner': configuredOwnerEmail,

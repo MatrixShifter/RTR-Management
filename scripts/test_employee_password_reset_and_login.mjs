@@ -51,11 +51,11 @@ async function runRegressionSuite() {
     // Also verify owner email login
     const ownerEmailLogin = await request
       .post('/api/auth/login')
-      .send({ username: 'vinov042007@gmail.com', password: 'password123' });
+      .send({ username: 'rtrmobile92@gmail.com', password: 'password123' });
     if (ownerEmailLogin.status !== 200) {
-      throw new Error('Owner login with email vinov042007@gmail.com failed');
+      throw new Error('Owner login with email rtrmobile92@gmail.com failed');
     }
-    console.log('  ✓ Owner authenticated successfully via email "vinov042007@gmail.com".');
+    console.log('  ✓ Owner authenticated successfully via email "rtrmobile92@gmail.com".');
 
     // Get active business & shop
     const { data: ownerBm } = await supabaseAdmin

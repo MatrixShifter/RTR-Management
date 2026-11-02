@@ -94,6 +94,7 @@ describe('Secure Owner Authentication Suite', () => {
       expect(html).toContain('name="password"');
       expect(html).toContain('value=""');
       expect(html).not.toContain('owner@rtrmobiles.com');
+      expect(html).not.toContain('rtrmobile92@gmail.com');
       expect(html).not.toContain('vinov042007@gmail.com');
       expect(html).not.toContain('demo-owner');
       expect(html).not.toContain('password123');

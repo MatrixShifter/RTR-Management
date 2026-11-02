@@ -1,18 +1,15 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import request from 'supertest';
 import { app } from './app.js';
+import { getTestOwnerToken } from './testHelper.js';
 
 describe('Business Settings & Usage API Endpoints (/api/settings & /api/shops/:id/usage)', { timeout: 35000 }, () => {
   let ownerToken: string;
 
   beforeAll(async () => {
-    // Authenticate as owner to obtain valid JWT token
-    const loginRes = await request(app)
-      .post('/api/auth/login')
-      .send({ username: 'owner', password: 'password123' });
-
-    expect(loginRes.status).toBe(200);
-    ownerToken = loginRes.body.session.access_token;
+    // Authenticate as owner to obtain valid JWT token without hardcoded passwords
+    ownerToken = await getTestOwnerToken();
+    expect(ownerToken).toBeDefined();
   }, 35000);
 
   describe('Authorization & Access Controls on /api/settings', () => {

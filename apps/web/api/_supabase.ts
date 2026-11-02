@@ -20,7 +20,7 @@ export const supabaseServiceRoleKey =
 export const configuredOwnerEmail = (
   process.env.OWNER_EMAIL || 
   process.env.VITE_OWNER_EMAIL || 
-  'vinov042007@gmail.com'
+  'rtrmobile92@gmail.com'
 ).trim().toLowerCase();
 
 export const supabaseAnon = createClient(supabaseUrl, supabaseAnonKey, {

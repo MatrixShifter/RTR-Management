@@ -33,7 +33,7 @@ const supabaseAdmin = createClient(supabaseUrl, serviceKey, {
   auth: { persistSession: false, autoRefreshToken: false }
 });
 
-const OWNER_EMAIL = (process.env.OWNER_EMAIL || 'vinov042007@gmail.com').trim().toLowerCase();
+const OWNER_EMAIL = (process.env.OWNER_EMAIL || 'rtrmobile92@gmail.com').trim().toLowerCase();
 const OWNER_USERNAME = (process.env.OWNER_USERNAME || 'owner').trim().toLowerCase();
 const OWNER_FULL_NAME = process.env.OWNER_FULL_NAME || 'Business Owner';
 
