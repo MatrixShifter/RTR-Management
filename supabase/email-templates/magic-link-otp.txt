@@ -2,16 +2,18 @@ RTR WHOLESALE MANAGEMENT
 Mobile Accessories Distribution & Settlement
 ==================================================
 
+Your RTR Wholesale Management Verification Code
+
 Sign In to Your Workspace
 
-Use the verification code below to sign in to your authorized employee workspace for {{ .Email }}:
+Use the 6-digit verification code below to sign in to your authorized employee workspace for {{ .Email }}:
 
 YOUR 6-DIGIT VERIFICATION CODE:
 {{ .Token }}
 
 Expires in 5 minutes. Single-use only.
 
-Enter this 6-digit code on the Employee Login screen to access your assigned shop statement and delivery ledger.
+Enter this 6-digit code on the Employee Login tab to access your assigned shop statement and delivery ledger.
 
 Alternatively, you can sign in directly using this link:
 {{ .ConfirmationURL }}

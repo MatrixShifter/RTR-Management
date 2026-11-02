@@ -1,4 +1,4 @@
-import { supabaseAnon, supabaseAdmin } from '../_supabase.js';
+import { supabaseAnon, supabaseAdmin, supabaseServiceRoleKey } from '../_supabase.js';
 
 export const EMPLOYEE_OTP_CONFIRMATION_MSG = "If an active employee account exists for this email, a verification code has been sent.";
 
@@ -26,66 +26,69 @@ export default async function handler(req: any, res: any) {
   });
 
   try {
-    // Demo employee sandbox check
+    // 0. Demo employee sandbox check
     if (cleanEmail === 'demo-employee@rtrmobiles.com' || cleanEmail === 'employee@demo.com') {
       return genericResponse();
     }
 
-    const clientForRole = supabaseAdmin || supabaseAnon;
+    const hasAdminAccess = Boolean(supabaseServiceRoleKey && supabaseAdmin);
 
-    // Check user in profiles or auth.users
-    let targetUserId: string | null = null;
-    try {
-      const { data: profile } = await clientForRole
-        .from('profiles')
-        .select('id, email')
-        .ilike('email', cleanEmail)
-        .maybeSingle();
-
-      if (profile?.id) {
-        targetUserId = profile.id;
-      }
-    } catch {}
-
-    if (!targetUserId && supabaseAdmin) {
+    // 1. Authoritative check if admin client is available
+    if (hasAdminAccess) {
+      let targetUserId: string | null = null;
       try {
-        const { data: { users } } = await supabaseAdmin.auth.admin.listUsers();
-        const matched = users?.find(u => u.email?.toLowerCase() === cleanEmail);
-        if (matched?.id) {
-          targetUserId = matched.id;
+        const { data: profile } = await supabaseAdmin
+          .from('profiles')
+          .select('id, email')
+          .ilike('email', cleanEmail)
+          .maybeSingle();
+
+        if (profile?.id) {
+          targetUserId = profile.id;
         }
       } catch {}
-    }
 
-    if (!targetUserId) {
-      return genericResponse();
-    }
+      if (!targetUserId) {
+        try {
+          const { data: { users } } = await supabaseAdmin.auth.admin.listUsers();
+          const matched = users?.find(u => u.email?.toLowerCase() === cleanEmail);
+          if (matched?.id) {
+            targetUserId = matched.id;
+          }
+        } catch {}
+      }
 
-    // Check membership
-    const { data: membership } = await clientForRole
-      .from('business_memberships')
-      .select('business_id, role, is_active')
-      .eq('user_id', targetUserId)
-      .maybeSingle();
+      // Do not reveal non-existence; return generic response if user not found
+      if (!targetUserId) {
+        return genericResponse();
+      }
 
-    if (!membership || !membership.is_active || membership.role !== 'employee') {
-      return genericResponse();
-    }
+      // Verify active employee membership
+      const { data: membership } = await supabaseAdmin
+        .from('business_memberships')
+        .select('business_id, role, is_active')
+        .eq('user_id', targetUserId)
+        .maybeSingle();
 
-    // Check active shop assignment
-    const { data: shopMember, error: shopErr } = await clientForRole
-      .from('shop_memberships')
-      .select('shop_id, shops!inner(id, is_active, business_id)')
-      .eq('user_id', targetUserId)
-      .maybeSingle();
+      if (!membership || !membership.is_active || membership.role !== 'employee') {
+        return genericResponse();
+      }
 
-    if (
-      shopErr || 
-      !shopMember || 
-      !(shopMember as any).shops?.is_active ||
-      (shopMember as any).shops?.business_id !== membership.business_id
-    ) {
-      return genericResponse();
+      // Verify active assigned retail shop
+      const { data: shopMember, error: shopErr } = await supabaseAdmin
+        .from('shop_memberships')
+        .select('shop_id, shops!inner(id, is_active, business_id)')
+        .eq('user_id', targetUserId)
+        .maybeSingle();
+
+      if (
+        shopErr || 
+        !shopMember || 
+        !(shopMember as any).shops?.is_active ||
+        (shopMember as any).shops?.business_id !== membership.business_id
+      ) {
+        return genericResponse();
+      }
     }
 
     const canonicalRedirect = process.env.NODE_ENV === 'production'
@@ -96,7 +99,8 @@ export default async function handler(req: any, res: any) {
       ? req.body.redirectTo
       : canonicalRedirect;
 
-    // Dispatch Supabase OTP with shouldCreateUser: false and configured redirect
+    // Dispatch Supabase OTP with shouldCreateUser: false
+    // If user does not exist in auth.users, shouldCreateUser: false ensures no new user is created
     const { error: otpError } = await supabaseAnon.auth.signInWithOtp({
       email: cleanEmail,
       options: {
@@ -106,16 +110,25 @@ export default async function handler(req: any, res: any) {
     });
 
     if (otpError) {
-      if (otpError.status === 429 || otpError.message.toLowerCase().includes('rate limit')) {
+      const isRateLimit = otpError.status === 429 || 
+        (otpError as any).code === 'over_email_send_rate_limit' || 
+        otpError.message?.toLowerCase().includes('rate limit');
+
+      if (isRateLimit) {
         return res.status(429).json({
           success: false,
-          message: 'Too many verification code requests. Please wait a minute and try again.'
+          message: 'Supabase email delivery rate limit exceeded (~3 emails/hour). Configure Custom SMTP in Supabase Dashboard for unlimited delivery.'
         });
       }
+
+      return res.status(502).json({
+        success: false,
+        message: otpError.message || 'Unable to dispatch verification code at this time.'
+      });
     }
 
     return genericResponse();
-  } catch {
+  } catch (err: any) {
     return genericResponse();
   }
 }

@@ -47,6 +47,22 @@
   ],
   "rewrites": [
     {
+      "source": "/api/auth/employee/request-otp",
+      "destination": "/api/auth/employee/request-otp"
+    },
+    {
+      "source": "/api/auth/employee/verify-otp",
+      "destination": "/api/auth/employee/verify-otp"
+    },
+    {
+      "source": "/api/auth/employee-request-otp",
+      "destination": "/api/auth/employee-request-otp"
+    },
+    {
+      "source": "/api/auth/employee-verify-otp",
+      "destination": "/api/auth/employee-verify-otp"
+    },
+    {
       "source": "/api/employees/:id/send-otp",
       "destination": "/api/employees/:id/send-otp"
     },

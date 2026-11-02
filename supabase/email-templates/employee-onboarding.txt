@@ -1,0 +1,28 @@
+RTR WHOLESALE MANAGEMENT
+Mobile Accessories Distribution & Settlement
+==================================================
+
+Welcome to the RTR Team — Your Employee Account
+
+An authorized employee account has been created for you at {{ .Email }}. You have been granted access to the RTR Wholesale Management staff portal for your assigned retail shop.
+
+ACCOUNT SUMMARY:
+- Role: Retail Shop Employee
+- Login Method: Passwordless Email OTP (No permanent password needed)
+- Portal URL: https://rtr-management-cfn4.vercel.app/login?tab=employee
+
+HOW TO SIGN IN (PASSWORDLESS):
+1. Visit https://rtr-management-cfn4.vercel.app/login and select the Employee Login tab.
+2. Enter your registered email address ({{ .Email }}).
+3. Click "Send Verification Code" to receive a fresh 6-digit numeric security code in your inbox.
+4. Enter the 6-digit code on screen to access your assigned shop's ledger, deliveries, and statements.
+
+SUPPORT & CONTACT:
+If you have questions about your assigned shop or cannot access your account, contact your store manager or RTR operations support at support@rtrmobiles.com.
+
+SECURITY REMINDER:
+Never share your one-time verification codes with anyone. Authorized RTR personnel will never ask for your verification code.
+
+==================================================
+RTR Wholesale Management • Internal Operations Portal
+Confidential • Authorized Personnel Only

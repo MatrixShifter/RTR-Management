@@ -1,0 +1,20 @@
+RTR WHOLESALE MANAGEMENT
+Mobile Accessories Distribution & Settlement
+==================================================
+
+Confirm Your Email Address
+
+Please confirm your email address for your RTR Wholesale Management account ({{ .Email }}).
+
+Confirm your account using the link below:
+{{ .ConfirmationURL }}
+
+Or enter your verification code:
+{{ .Token }}
+
+SECURITY NOTICE:
+If you did not create this account, no action is needed.
+
+==================================================
+RTR Wholesale Management • Internal Operations Portal
+Confidential • Authorized Personnel Only

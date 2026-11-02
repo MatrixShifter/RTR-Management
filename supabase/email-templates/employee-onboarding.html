@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Welcome to RTR Wholesale Management — Your Employee Account</title>
+</head>
+<body style="margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; background-color: #F8FAFC; color: #0F172A;">
+  <table role="presentation" width="100%" border="0" cellspacing="0" cellpadding="0" style="background-color: #F8FAFC; padding: 40px 16px;">
+    <tr>
+      <td align="center">
+        <table role="presentation" width="100%" border="0" cellspacing="0" cellpadding="0" style="max-width: 540px; background-color: #FFFFFF; border: 1px solid #E2E8F0; border-radius: 16px; overflow: hidden; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -2px rgba(0, 0, 0, 0.05);">
+          <!-- Header Banner -->
+          <tr>
+            <td style="background-color: #0C1E38; padding: 32px 24px; text-align: center;">
+              <table role="presentation" border="0" cellspacing="0" cellpadding="0" align="center">
+                <tr>
+                  <td style="background-color: #102A4C; border: 1px solid #1E3A5F; border-radius: 12px; padding: 10px 18px; text-align: center;">
+                    <span style="font-size: 22px; font-weight: 800; letter-spacing: 2px; color: #FFFFFF; text-transform: uppercase;">RTR</span>
+                  </td>
+                </tr>
+              </table>
+              <h1 style="color: #FFFFFF; font-size: 18px; font-weight: 700; margin: 16px 0 4px; letter-spacing: -0.2px;">RTR Wholesale Management</h1>
+              <p style="color: #94A3B8; font-size: 12px; margin: 0; font-weight: 500;">Mobile Accessories Distribution &amp; Settlement</p>
+            </td>
+          </tr>
+
+          <!-- Content Body -->
+          <tr>
+            <td style="padding: 32px 28px;">
+              <h2 style="font-size: 19px; font-weight: 700; color: #0C1E38; margin: 0 0 14px; line-height: 1.4;">Welcome to the RTR Team</h2>
+              <p style="font-size: 14px; color: #334155; line-height: 1.6; margin: 0 0 18px;">
+                An authorized employee account has been created for you at <strong>{{ .Email }}</strong>. You have been granted access to the RTR Wholesale Management staff portal for your assigned retail shop.
+              </p>
+
+              <!-- Account Summary Card -->
+              <table role="presentation" width="100%" border="0" cellspacing="0" cellpadding="0" style="margin: 20px 0; background-color: #F8FAFC; border: 1px solid #E2E8F0; border-radius: 12px; padding: 16px;">
+                <tr>
+                  <td style="padding: 6px 12px; font-size: 12px; color: #64748B; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px;">Account Role:</td>
+                  <td style="padding: 6px 12px; font-size: 13px; color: #0C1E38; font-weight: 700;">Retail Shop Employee</td>
+                </tr>
+                <tr>
+                  <td style="padding: 6px 12px; font-size: 12px; color: #64748B; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px;">Login Method:</td>
+                  <td style="padding: 6px 12px; font-size: 13px; color: #0C1E38; font-weight: 600;">Passwordless Email OTP (No password needed)</td>
+                </tr>
+                <tr>
+                  <td style="padding: 6px 12px; font-size: 12px; color: #64748B; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px;">Portal URL:</td>
+                  <td style="padding: 6px 12px; font-size: 13px; color: #168BFF; font-weight: 600;">
+                    <a href="https://rtr-management-cfn4.vercel.app/login?tab=employee" style="color: #168BFF; text-decoration: none;">rtr-management-cfn4.vercel.app</a>
+                  </td>
+                </tr>
+              </table>
+
+              <!-- Instructions -->
+              <h3 style="font-size: 15px; font-weight: 700; color: #0C1E38; margin: 24px 0 10px;">How to Sign In (Passwordless)</h3>
+              <ol style="font-size: 13px; color: #475569; line-height: 1.7; margin: 0 0 24px; padding-left: 20px;">
+                <li>Visit the RTR portal and select the <strong>Employee Login</strong> tab.</li>
+                <li>Enter your registered email address (<strong>{{ .Email }}</strong>).</li>
+                <li>Click <strong>Send Verification Code</strong> to receive a fresh 6-digit numeric security code in your inbox.</li>
+                <li>Enter the 6-digit code on screen to access your assigned shop's ledger, deliveries, and statements.</li>
+              </ol>
+
+              <!-- Sign In CTA Button -->
+              <table role="presentation" width="100%" border="0" cellspacing="0" cellpadding="0" style="margin: 28px 0 20px;">
+                <tr>
+                  <td align="center">
+                    <a href="https://rtr-management-cfn4.vercel.app/login?tab=employee" style="display: inline-block; background-color: #168BFF; color: #FFFFFF; font-size: 14px; font-weight: 600; text-decoration: none; padding: 14px 34px; border-radius: 10px; box-shadow: 0 2px 4px rgba(22, 139, 255, 0.25);">Access Employee Portal &rarr;</a>
+                  </td>
+                </tr>
+              </table>
+
+              <!-- Divider -->
+              <hr style="border: none; border-top: 1px solid #E2E8F0; margin: 28px 0 20px;">
+
+              <!-- Support & Security Notice -->
+              <p style="font-size: 12px; color: #64748B; line-height: 1.6; margin: 0 0 8px;">
+                <strong>Need Help?</strong> If you have questions about your assigned shop or cannot access your account, contact your store manager or RTR operations support at <a href="mailto:support@rtrmobiles.com" style="color: #168BFF; text-decoration: none;">support@rtrmobiles.com</a>.
+              </p>
+              <p style="font-size: 11px; color: #94A3B8; line-height: 1.5; margin: 0;">
+                <strong>Security Reminder:</strong> Never share your one-time verification codes with anyone. RTR staff will never ask for your authentication codes.
+              </p>
+            </td>
+          </tr>
+
+          <!-- Footer -->
+          <tr>
+            <td style="background-color: #F8FAFC; border-top: 1px solid #E2E8F0; padding: 20px 24px; text-align: center;">
+              <p style="font-size: 11px; color: #94A3B8; margin: 0 0 4px;">RTR Wholesale Management &bull; Internal Operations Portal</p>
+              <p style="font-size: 10px; color: #CBD5E1; margin: 0;">Confidential &bull; Authorized Personnel Only</p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>
