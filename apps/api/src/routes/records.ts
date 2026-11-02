@@ -45,7 +45,8 @@ recordsRouter.get('/', requireAuth, async (req: Request, res: Response) => {
         status: 'BLOCKED',
         statusCode: 403,
         correlationId: (req.headers['x-correlation-id'] as string),
-        details: { attemptedShopId: requestedShopId, assignedShopId: user.assignedShopId }
+        resourceType: 'shop',
+        details: { reason: 'cross_shop_access_prohibited' }
       });
       return res.status(403).json({
         error: 'Forbidden',
@@ -137,7 +138,8 @@ recordsRouter.post('/', requireOwnerAuth, businessMutationRateLimiter, async (re
       status: 'BLOCKED',
       statusCode: 400,
       correlationId,
-      details: { shopId: req.body?.shopId, productId: req.body?.productId }
+      resourceType: 'record',
+      details: { reason: 'demo_record_creation_blocked' }
     });
     return res.status(400).json({
       error: 'Validation Error',
@@ -154,6 +156,7 @@ recordsRouter.post('/', requireOwnerAuth, businessMutationRateLimiter, async (re
       status: 'FAILURE',
       statusCode: 400,
       correlationId,
+      resourceType: 'record',
       errorCategory: 'validation_error'
     });
     return res.status(400).json({
@@ -169,11 +172,7 @@ recordsRouter.post('/', requireOwnerAuth, businessMutationRateLimiter, async (re
     status: 'SUCCESS',
     statusCode: 201,
     correlationId,
-    details: { 
-      quantity: parsed.data.quantity,
-      unitPrice: parsed.data.unitPrice,
-      pendingAmount: parsed.data.pendingAmount
-    }
+    resourceType: 'record'
   });
 
   return res.status(201).json({
@@ -199,6 +198,7 @@ recordsRouter.post('/settle', requireOwnerAuth, paymentRateLimiter, async (req: 
       status: 'FAILURE',
       statusCode: 400,
       correlationId,
+      resourceType: 'payment',
       errorCategory: 'validation_error'
     });
     return res.status(400).json({
@@ -214,8 +214,8 @@ recordsRouter.post('/settle', requireOwnerAuth, paymentRateLimiter, async (req: 
     status: 'SUCCESS',
     statusCode: 200,
     correlationId,
-    targetId: parsed.data.deliveryId,
-    details: { amountToPay: parsed.data.amountToPay }
+    resourceType: 'payment',
+    details: { reason: 'payment_settled' }
   });
 
   return res.status(200).json({
@@ -322,7 +322,8 @@ recordsRouter.patch('/:id/delivery-status', requireOwnerAuth, businessMutationRa
         status: 'BLOCKED',
         statusCode: 403,
         correlationId,
-        targetId
+        resourceType: 'delivery',
+        details: { reason: 'unauthorized_business_ownership' }
       });
       return res.status(403).json({
         error: 'Forbidden',
@@ -410,7 +411,7 @@ recordsRouter.patch('/:id/delivery-status', requireOwnerAuth, businessMutationRa
       status: 'SUCCESS',
       statusCode: 200,
       correlationId,
-      targetId,
+      resourceType: 'delivery',
       details: { previousStatus: existingDelivery.status, newStatus: status }
     });
 
@@ -510,7 +511,8 @@ recordsRouter.delete('/:id', requireOwnerAuth, businessMutationRateLimiter, asyn
         status: 'BLOCKED',
         statusCode: 403,
         correlationId,
-        targetId
+        resourceType: 'delivery',
+        details: { reason: 'unauthorized_business_ownership' }
       });
       return res.status(403).json({
         error: 'Forbidden',
@@ -544,7 +546,7 @@ recordsRouter.delete('/:id', requireOwnerAuth, businessMutationRateLimiter, asyn
       status: 'SUCCESS',
       statusCode: 200,
       correlationId,
-      targetId
+      resourceType: 'delivery'
     });
 
     return res.status(200).json({

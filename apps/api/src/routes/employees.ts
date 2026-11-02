@@ -220,7 +220,8 @@ employeesRouter.post('/', requireOwnerAuth, async (req: Request, res: Response) 
       status: 'SUCCESS',
       statusCode: 201,
       correlationId: (req.headers['x-correlation-id'] as string),
-      details: { employeeEmail: email, shopId }
+      resourceType: 'employee',
+      details: { action: 'created' }
     });
 
     const newEmployee: EmployeeRecord = {
@@ -319,7 +320,8 @@ employeesRouter.patch('/:id/shop', requireOwnerAuth, async (req: Request, res: R
       status: 'SUCCESS',
       statusCode: 200,
       correlationId: (req.headers['x-correlation-id'] as string),
-      details: { employeeId, newShopId: shopId }
+      resourceType: 'employee',
+      details: { action: 'reassigned' }
     });
 
     return res.status(200).json({
@@ -384,7 +386,8 @@ employeesRouter.patch('/:id/status', requireOwnerAuth, async (req: Request, res:
       status: 'SUCCESS',
       statusCode: 200,
       correlationId: (req.headers['x-correlation-id'] as string),
-      details: { employeeId, isActive }
+      resourceType: 'employee',
+      details: { isActive }
     });
 
     return res.status(200).json({
@@ -444,7 +447,8 @@ employeesRouter.delete('/:id', requireOwnerAuth, async (req: Request, res: Respo
       status: 'SUCCESS',
       statusCode: 200,
       correlationId: (req.headers['x-correlation-id'] as string),
-      details: { employeeId }
+      resourceType: 'employee',
+      details: { action: 'revoked' }
     });
 
     return res.status(200).json({

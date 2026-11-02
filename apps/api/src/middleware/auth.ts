@@ -68,7 +68,8 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
         status: 'BLOCKED',
         statusCode: 403,
         correlationId,
-        details: { path: req.path, method: req.method }
+        resourceType: 'api',
+        details: { method: req.method }
       });
       return res.status(403).json({
         error: 'Forbidden',

@@ -301,7 +301,7 @@ describe('Production Security Hardening Suite', { timeout: 25000 }, () => {
       }
     }, 15000);
 
-    it('ensures logSecurityEvent preserves correlationId, category, and safe targetId without actorId or ip', async () => {
+    it('ensures logSecurityEvent preserves correlationId, category, and safe targetId without actorId, ip, or financial amounts', async () => {
       const { logSecurityEvent } = await import('./logger.js');
       const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
       try {
@@ -311,10 +311,11 @@ describe('Production Security Hardening Suite', { timeout: 25000 }, () => {
           status: 'SUCCESS',
           statusCode: 200,
           correlationId: 'test-correlation-uuid-999',
-          targetId: 'delivery-uuid-456',
+          targetId: 'delivery-tag-456',
           actorId: 'sensitive-actor-id',
           ip: '192.168.1.150',
           details: {
+            reason: 'payment_settled',
             amountToPay: 500,
             userEmail: 'sensitive_customer@example.com'
           }
@@ -326,13 +327,62 @@ describe('Production Security Hardening Suite', { timeout: 25000 }, () => {
         expect(output.event.status).toBe('SUCCESS');
         expect(output.event.statusCode).toBe(200);
         expect(output.event.correlationId).toBe('test-correlation-uuid-999');
-        expect(output.event.targetId).toBe('delivery-uuid-456');
+        expect(output.event.targetId).toBe('delivery-tag-456');
 
-        // Strictly verify actorId, ip, and userEmail are omitted
+        // Strictly verify actorId, ip, userEmail, and financial amountToPay are omitted
         expect(output.event.actorId).toBeUndefined();
         expect(output.event.ip).toBeUndefined();
         expect(output.event.details?.userEmail).toBeUndefined();
-        expect(output.event.details?.amountToPay).toBe(500);
+        expect(output.event.details?.amountToPay).toBeUndefined();
+        expect(output.event.details?.reason).toBe('payment_settled');
+      } finally {
+        consoleSpy.mockRestore();
+      }
+    });
+
+    it('ensures sanitizeUrl parameterizes raw UUIDs to :id and redacts sensitive query strings', async () => {
+      const { sanitizeUrl } = await import('./logger.js');
+      
+      const shopUrl = sanitizeUrl('/api/shops/4fba6fb7-4e1b-4106-ac84-908f821d73c3');
+      expect(shopUrl).toBe('/api/shops/:id');
+
+      const productUsageUrl = sanitizeUrl('/api/products/4fba6fb7-4e1b-4106-ac84-908f821d73c3/usage');
+      expect(productUsageUrl).toBe('/api/products/:id/usage');
+
+      const queryUrl = sanitizeUrl('/api/records?shopId=11111111-2222-3333-4444-555555555555&token=secret123&normalParam=abc');
+      expect(queryUrl).toContain('shopId=%5BREDACTED%5D');
+      expect(queryUrl).toContain('token=%5BREDACTED%5D');
+      expect(queryUrl).toContain('normalParam=abc');
+    });
+
+    it('ensures logSecurityEvent redacts raw UUIDs in targetId and drops business names and record counts', async () => {
+      const { logSecurityEvent } = await import('./logger.js');
+      const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+      try {
+        logSecurityEvent({
+          action: 'ARCHIVE_PRODUCT',
+          category: 'record_mutation',
+          status: 'SUCCESS',
+          statusCode: 200,
+          correlationId: 'test-corr-abc',
+          resourceType: 'product',
+          targetId: '4fba6fb7-4e1b-4106-ac84-908f821d73c3',
+          details: {
+            productName: '9a combo',
+            totalRecords: 27,
+            reason: 'referenced_by_historical_records',
+            isActive: false
+          }
+        });
+
+        expect(consoleSpy).toHaveBeenCalled();
+        const output = JSON.parse(consoleSpy.mock.calls[0][0]);
+        expect(output.event.resourceType).toBe('product');
+        expect(output.event.targetId).toBe('[REDACTED_UUID]');
+        expect(output.event.details?.productName).toBeUndefined();
+        expect(output.event.details?.totalRecords).toBeUndefined();
+        expect(output.event.details?.reason).toBe('referenced_by_historical_records');
+        expect(output.event.details?.isActive).toBe(false);
       } finally {
         consoleSpy.mockRestore();
       }

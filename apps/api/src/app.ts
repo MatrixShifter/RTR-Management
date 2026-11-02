@@ -4,6 +4,7 @@ import cors from 'cors';
 import morgan from 'morgan';
 import crypto from 'crypto';
 import { config } from './config.js';
+import { sanitizeUrl } from './logger.js';
 import { standardRateLimiter } from './middleware/rateLimiter.js';
 import { errorHandler } from './middleware/errorHandler.js';
 import { authRouter } from './routes/auth.js';
@@ -76,30 +77,19 @@ app.use((req, res, next) => {
 // - Suppresses repetitive routine polls (GET /api/auth/verify-session) when successful
 if (config.NODE_ENV !== 'test') {
   morgan.token('clean-url', (req: express.Request) => {
-    const rawUrl = req.originalUrl || req.url || '';
-    try {
-      const parsed = new URL(rawUrl, 'http://localhost');
-      if (parsed.search) {
-        const params = new URLSearchParams(parsed.search);
-        for (const key of params.keys()) {
-          if (/token|key|secret|code|password|auth|jwt/i.test(key)) {
-            params.set(key, '[REDACTED]');
-          }
-        }
-        return `${parsed.pathname}?${params.toString()}`;
-      }
-      return parsed.pathname;
-    } catch {
-      return rawUrl.split('?')[0];
-    }
+    return sanitizeUrl(req.originalUrl || req.url || '');
   });
 
   app.use(
-    morgan(':method :clean-url :status :res[content-length] - :response-time ms', {
+    morgan(':method :clean-url :status :response-time ms', {
       skip: (req, res) => {
         const url = req.originalUrl || req.url || '';
-        // Skip routine successful session verification polls to avoid terminal clutter
-        if ((url.startsWith('/api/auth/verify-session') || url.startsWith('/api/health')) && res.statusCode < 400) {
+        // Skip routine successful session verification polls and health checks to avoid terminal clutter
+        if ((url.startsWith('/api/auth/verify-session') || url.startsWith('/api/health') || url === '/health') && res.statusCode < 400) {
+          return true;
+        }
+        // Skip routine preflight OPTIONS requests
+        if (req.method === 'OPTIONS' && res.statusCode < 400) {
           return true;
         }
         return false;

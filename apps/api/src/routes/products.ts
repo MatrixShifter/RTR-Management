@@ -190,7 +190,8 @@ productsRouter.delete('/:id', requireOwnerAuth, businessMutationRateLimiter, asy
         status: 'BLOCKED',
         statusCode: 403,
         correlationId: (req.headers['x-correlation-id'] as string),
-        details: { productId, reason: 'Confirmed demo product retained for immutable audit ledger' }
+        resourceType: 'product',
+        details: { reason: 'demo_product_retained' }
       });
       return res.status(403).json({
         error: 'Forbidden',
@@ -229,11 +230,12 @@ productsRouter.delete('/:id', requireOwnerAuth, businessMutationRateLimiter, asy
 
       logSecurityEvent({
         action: 'ARCHIVE_PRODUCT',
-        actorId: user.id,
-        targetId: productId,
+        category: 'record_mutation',
         status: 'SUCCESS',
-        ip: req.ip,
-        details: { productName: existingProduct.name, totalRecords }
+        statusCode: 200,
+        correlationId: (req.headers['x-correlation-id'] as string),
+        resourceType: 'product',
+        details: { reason: 'referenced_by_historical_records', isActive: false }
       });
 
       return res.status(200).json({
@@ -252,11 +254,11 @@ productsRouter.delete('/:id', requireOwnerAuth, businessMutationRateLimiter, asy
 
     logSecurityEvent({
       action: 'DELETE_PRODUCT',
-      actorId: user.id,
-      targetId: productId,
+      category: 'record_mutation',
       status: 'SUCCESS',
-      ip: req.ip,
-      details: { productName: existingProduct.name }
+      statusCode: 200,
+      correlationId: (req.headers['x-correlation-id'] as string),
+      resourceType: 'product'
     });
 
     return res.status(200).json({

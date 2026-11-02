@@ -68,7 +68,8 @@ settingsRouter.get('/', requireOwnerAuth, async (req: Request, res: Response) =>
       status: 'FAILURE',
       statusCode: 500,
       correlationId: (req.headers['x-correlation-id'] as string),
-      details: { error: err?.message || 'Database query failure' }
+      resourceType: 'settings',
+      errorCategory: 'database_query_error'
     });
     return res.status(500).json({
       success: false,
@@ -134,7 +135,8 @@ settingsRouter.patch('/', requireOwnerAuth, businessMutationRateLimiter, async (
       status: 'SUCCESS',
       statusCode: 200,
       correlationId: (req.headers['x-correlation-id'] as string),
-      details: { businessId: user.businessId, updatedFields: Object.keys(updates) }
+      resourceType: 'settings',
+      details: { updatedFields: Object.keys(updates) }
     });
 
     return res.status(200).json({
@@ -157,7 +159,8 @@ settingsRouter.patch('/', requireOwnerAuth, businessMutationRateLimiter, async (
       status: 'FAILURE',
       statusCode: 500,
       correlationId: (req.headers['x-correlation-id'] as string),
-      details: { error: err?.message || 'Database update failure' }
+      resourceType: 'settings',
+      errorCategory: 'database_update_error'
     });
     return res.status(500).json({
       success: false,
