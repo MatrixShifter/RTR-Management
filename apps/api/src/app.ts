@@ -11,6 +11,7 @@ import { recordsRouter } from './routes/records.js';
 import { shopsRouter } from './routes/shops.js';
 import { productsRouter } from './routes/products.js';
 import { employeesRouter } from './routes/employees.js';
+import { settingsRouter } from './routes/settings.js';
 import { type HealthResponse, type DatabaseStorageHealth, evaluateStorageHealth } from '@crimpston/shared';
 
 export const app = express();
@@ -156,6 +157,7 @@ app.use(['/api/products', '/products'], productsRouter);
 
 // Employee directory & access management routes (Owner Only)
 app.use(['/api/employees', '/employees'], employeesRouter);
+app.use(['/api/settings', '/settings'], settingsRouter);
 
 // Centralized error handling
 app.use(errorHandler);

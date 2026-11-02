@@ -16,7 +16,7 @@ import {
   Database,
   Trash2
 } from 'lucide-react';
-import { clearMemoryCache } from '../../services/db.js';
+import { clearMemoryCache, authenticatedFetch } from '../../services/db.js';
 import { EmployeeManagementSection } from '../../components/EmployeeManagementSection.js';
 import { usePwaInstall } from '../../services/usePwaInstall.js';
 import { InstallAppModal } from '../../components/InstallAppModal.js';
@@ -105,9 +105,45 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
     }
   }, []);
 
+  const [businessSettings, setBusinessSettings] = useState<{
+    name?: string;
+    timezone?: string;
+    reportCutoffTime?: string;
+  } | null>(null);
+  const [isLoadingSettings, setIsLoadingSettings] = useState(false);
+  const [settingsError, setSettingsError] = useState<string | null>(null);
+
+  const loadBusinessSettings = useCallback(async () => {
+    if (resolvedUser?.role !== 'owner' && resolvedUser?.role !== 'demo' && !resolvedUser?.isDemo) {
+      return;
+    }
+
+    setIsLoadingSettings(true);
+    setSettingsError(null);
+    try {
+      const res = await authenticatedFetch('/api/settings');
+      if (res.ok) {
+        const json = await res.json();
+        if (json.success && json.data) {
+          setBusinessSettings(json.data);
+          return;
+        }
+      } else if (res.status === 403) {
+        setSettingsError('Access restricted to Business Owners.');
+      } else {
+        setSettingsError('Failed to load business settings.');
+      }
+    } catch (err: any) {
+      setSettingsError(err?.message || 'Unable to load business settings.');
+    } finally {
+      setIsLoadingSettings(false);
+    }
+  }, [resolvedUser?.role, resolvedUser?.isDemo]);
+
   useEffect(() => {
     verifyBackendHealth();
-  }, [verifyBackendHealth]);
+    loadBusinessSettings();
+  }, [verifyBackendHealth, loadBusinessSettings]);
 
   const handleRefreshRecords = async () => {
     setRefreshing(true);
@@ -118,7 +154,10 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new CustomEvent('rtr_data_sync', { detail: { key: 'all' } }));
       }
-      await verifyBackendHealth();
+      await Promise.all([
+        verifyBackendHealth(),
+        loadBusinessSettings()
+      ]);
       setRefreshSuccess(true);
       setTimeout(() => setRefreshSuccess(false), 3000);
     } finally {
@@ -339,6 +378,26 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
                   )}
                 </span>
               </div>
+
+              <div className="flex justify-between items-center py-1">
+                <span className="text-slate-500">Report Cutoff</span>
+                <span className="font-mono text-slate-700 text-[11px]">
+                  {businessSettings?.reportCutoffTime || '21:00'} ({businessSettings?.timezone || 'Asia/Kolkata'})
+                </span>
+              </div>
+              {settingsError && (
+                <div className="p-2 rounded-lg bg-amber-50 border border-amber-200 text-amber-800 text-[11px] flex items-center justify-between mt-1">
+                  <span>{settingsError}</span>
+                  <button
+                    type="button"
+                    onClick={loadBusinessSettings}
+                    disabled={isLoadingSettings}
+                    className="underline font-semibold ml-2 text-amber-900 cursor-pointer"
+                  >
+                    Retry
+                  </button>
+                </div>
+              )}
             </div>
           </div>
 

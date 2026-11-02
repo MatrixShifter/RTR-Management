@@ -550,7 +550,20 @@ let cachedBusinessId: string | null = null;
  * If session is missing or unrefreshable, dispatches 'rtr:session-expired' and returns null.
  */
 export async function getValidAuthToken(): Promise<string | null> {
-  if (isDemoMode()) return null;
+  if (isDemoMode()) {
+    try {
+      if (typeof localStorage !== 'undefined') {
+        const stored = localStorage.getItem('rtr_current_user');
+        if (stored) {
+          const parsed = JSON.parse(stored);
+          if (parsed?.role === 'demo' || parsed?.isDemo) {
+            return 'demo-session-token';
+          }
+        }
+      }
+    } catch {}
+    return 'demo-session-token';
+  }
   if (!isSupabaseConfigured || !supabase) return null;
 
   try {
@@ -605,7 +618,7 @@ export async function authenticatedFetch(url: string, init?: RequestInit): Promi
 
   let res = await fetch(url, { ...init, headers });
 
-  if (res.status === 401 && isSupabaseConfigured && supabase) {
+  if (res.status === 401 && isSupabaseConfigured && supabase && !isDemoMode()) {
     try {
       const { data: refreshData, error: refreshErr } = await supabase.auth.refreshSession();
       if (!refreshErr && refreshData.session?.access_token) {

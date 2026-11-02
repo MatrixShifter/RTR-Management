@@ -17,6 +17,13 @@ export const BusinessProfileSchema = z.object({
 });
 export type BusinessProfile = z.infer<typeof BusinessProfileSchema>;
 
+export const UpdateBusinessSettingsSchema = z.object({
+  name: z.string().min(2, 'Business name must be at least 2 characters').max(100).optional(),
+  timezone: z.string().min(1).max(50).optional(),
+  reportCutoffTime: z.string().regex(/^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/, 'Format must be HH:MM').optional()
+});
+export type UpdateBusinessSettingsInput = z.infer<typeof UpdateBusinessSettingsSchema>;
+
 // Shops
 export const ShopSchema = z.object({
   id: z.string().uuid(),

@@ -44,7 +44,7 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
   const token = authHeader.split(' ')[1];
 
   // Demo token handler (active only when demo sandbox is enabled)
-  if (token && token.startsWith('demo-session-')) {
+  if (token && (token.startsWith('demo-session-') || token.startsWith('demo-access-token-') || token.startsWith('demo-'))) {
     const isDemoEnabled = process.env.NODE_ENV !== 'production' && process.env.DEMO_ENABLED !== 'false';
     if (!isDemoEnabled) {
       logSecurityEvent({
