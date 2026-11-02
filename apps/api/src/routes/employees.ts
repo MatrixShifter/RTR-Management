@@ -120,6 +120,26 @@ employeesRouter.post('/', requireOwnerAuth, async (req: Request, res: Response) 
 
   const { name, email, username, shopId } = parsed.data;
 
+  // Demo Sandbox Isolation
+  if (user.isDemo) {
+    return res.status(201).json({
+      success: true,
+      message: 'Demo employee account created and assigned.',
+      employee: {
+        id: `demo-employee-${Date.now()}`,
+        name,
+        email,
+        username: username || email.split('@')[0],
+        role: 'employee',
+        isActive: true,
+        assignedShopId: shopId,
+        assignedShopName: 'Demo Retail Shop',
+        assignedShopCode: 'DEMO-01',
+        createdAt: new Date().toISOString()
+      }
+    });
+  }
+
   // 1. Verify target shop belongs to owner's business and is active
   const { data: shop, error: shopErr } = await supabaseAdmin
     .from('shops')
@@ -134,6 +154,9 @@ employeesRouter.post('/', requireOwnerAuth, async (req: Request, res: Response) 
     });
   }
 
+  let targetUserId: string | null = null;
+  let isNewlyCreatedAuth = false;
+
   try {
     // 2. Check if employee email is already registered in business_memberships
     const { data: existingProfile } = await supabaseAdmin
@@ -142,13 +165,11 @@ employeesRouter.post('/', requireOwnerAuth, async (req: Request, res: Response) 
       .eq('email', email)
       .maybeSingle();
 
-    let targetUserId = existingProfile?.id;
-
-    if (targetUserId) {
+    if (existingProfile?.id) {
       const { data: existingMem } = await supabaseAdmin
         .from('business_memberships')
         .select('id, business_id')
-        .eq('user_id', targetUserId)
+        .eq('user_id', existingProfile.id)
         .eq('business_id', user.businessId)
         .maybeSingle();
 
@@ -158,9 +179,12 @@ employeesRouter.post('/', requireOwnerAuth, async (req: Request, res: Response) 
           message: 'An employee with this email is already registered for your business.'
         });
       }
-    } else {
+      targetUserId = existingProfile.id;
+    }
+
+    if (!targetUserId) {
       // 3. Create secure Supabase Auth user
-      const initialPassword = `RTR-${crypto.randomBytes(6).toString('hex')}!2026`;
+      const initialPassword = `RTR-${crypto.randomBytes(8).toString('hex')}!2026`;
       const { data: newUser, error: createErr } = await supabaseAdmin.auth.admin.createUser({
         email,
         password: initialPassword,
@@ -173,21 +197,34 @@ employeesRouter.post('/', requireOwnerAuth, async (req: Request, res: Response) 
       });
 
       if (createErr || !newUser.user) {
-        throw new Error(createErr?.message || 'Failed to provision auth user.');
+        const errMsg = createErr?.message || '';
+        if (errMsg.toLowerCase().includes('already') || errMsg.toLowerCase().includes('exists')) {
+          const { data: userList } = await supabaseAdmin.auth.admin.listUsers();
+          const found = userList?.users?.find(u => u.email?.toLowerCase() === email.toLowerCase());
+          if (found) {
+            targetUserId = found.id;
+          } else {
+            throw new Error(errMsg || 'Failed to provision auth user.');
+          }
+        } else {
+          throw new Error(errMsg || 'Failed to provision auth user.');
+        }
+      } else {
+        targetUserId = newUser.user.id;
+        isNewlyCreatedAuth = true;
       }
-
-      targetUserId = newUser.user.id;
-
-      // Upsert profile
-      await supabaseAdmin.from('profiles').upsert({
-        id: targetUserId,
-        email,
-        full_name: name,
-        username: username || email.split('@')[0]
-      });
     }
 
-    // 4. Create business_memberships
+    // 4. Upsert profile
+    const { error: profErr } = await supabaseAdmin.from('profiles').upsert({
+      id: targetUserId,
+      email,
+      full_name: name,
+      username: username || email.split('@')[0]
+    });
+    if (profErr) throw profErr;
+
+    // 5. Create business_memberships
     const { error: bmErr } = await supabaseAdmin
       .from('business_memberships')
       .upsert({
@@ -199,7 +236,7 @@ employeesRouter.post('/', requireOwnerAuth, async (req: Request, res: Response) 
 
     if (bmErr) throw bmErr;
 
-    // 5. Assign to shop in shop_memberships (one shop per employee)
+    // 6. Assign to shop in shop_memberships (one shop per employee)
     await supabaseAdmin
       .from('shop_memberships')
       .delete()
@@ -213,6 +250,19 @@ employeesRouter.post('/', requireOwnerAuth, async (req: Request, res: Response) 
       });
 
     if (smErr) throw smErr;
+
+    // 7. Non-blocking invitation notice dispatch
+    try {
+      await supabaseAdmin.auth.admin.inviteUserByEmail(email, {
+        data: {
+          full_name: name,
+          username: username || email.split('@')[0],
+          role: 'employee'
+        }
+      });
+    } catch {
+      // Graceful fallback if SMTP provider is not yet active
+    }
 
     logSecurityEvent({
       action: 'EMPLOYEE_CREATED',
@@ -243,6 +293,15 @@ employeesRouter.post('/', requireOwnerAuth, async (req: Request, res: Response) 
       employee: newEmployee
     });
   } catch (err: any) {
+    // Saga compensation: If auth user was created but subsequent DB operations failed, cleanup
+    if (isNewlyCreatedAuth && targetUserId) {
+      try {
+        await supabaseAdmin.auth.admin.deleteUser(targetUserId);
+      } catch (cleanupErr) {
+        logger.error('Failed to cleanup orphaned auth user during compensation', { error: cleanupErr });
+      }
+    }
+
     logger.error('Failed to create employee', { error: err?.message });
     return res.status(500).json({
       error: 'Internal Server Error',
@@ -268,6 +327,15 @@ employeesRouter.patch('/:id/shop', requireOwnerAuth, async (req: Request, res: R
   }
 
   const { shopId } = parsed.data;
+
+  if (user.isDemo) {
+    return res.status(200).json({
+      success: true,
+      message: 'Demo employee reassigned.',
+      assignedShopId: shopId,
+      assignedShopName: 'Assigned Shop'
+    });
+  }
 
   try {
     // 1. Verify employee belongs to owner's business
@@ -357,6 +425,13 @@ employeesRouter.patch('/:id/status', requireOwnerAuth, async (req: Request, res:
 
   const { isActive } = parsed.data;
 
+  if (user.isDemo) {
+    return res.status(200).json({
+      success: true,
+      message: isActive ? 'Demo employee reactivated.' : 'Demo employee deactivated.'
+    });
+  }
+
   try {
     const { data: mem, error: memErr } = await supabaseAdmin
       .from('business_memberships')
@@ -410,6 +485,13 @@ employeesRouter.patch('/:id/status', requireOwnerAuth, async (req: Request, res:
 employeesRouter.delete('/:id', requireOwnerAuth, async (req: Request, res: Response) => {
   const user = req.user!;
   const employeeId = req.params.id;
+
+  if (user.isDemo) {
+    return res.status(200).json({
+      success: true,
+      message: 'Demo employee access revoked.'
+    });
+  }
 
   try {
     const { data: mem, error: memErr } = await supabaseAdmin

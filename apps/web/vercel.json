@@ -47,11 +47,27 @@
   ],
   "rewrites": [
     {
+      "source": "/api/employees/:id/shop",
+      "destination": "/api/employees/:id/shop"
+    },
+    {
+      "source": "/api/employees/:id/status",
+      "destination": "/api/employees/:id/status"
+    },
+    {
+      "source": "/api/employees/:id",
+      "destination": "/api/employees/:id"
+    },
+    {
+      "source": "/api/employees",
+      "destination": "/api/employees"
+    },
+    {
       "source": "/api/(.*)",
       "destination": "/api/$1"
     },
     {
-      "source": "/(.*)",
+      "source": "/((?!api/).*)",
       "destination": "/index.html"
     }
   ]

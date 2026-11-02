@@ -41,7 +41,7 @@ describe('SPA Fallback Routing & Vercel Deployment Configuration', () => {
     // Verify SPA rewrite destination
     const spaRewrite = config.rewrites.find((r: any) => r.destination === '/index.html');
     expect(spaRewrite).toBeDefined();
-    expect(spaRewrite.source).toBe('/(.*)');
+    expect(['/(.*)', '/((?!api/).*)']).toContain(spaRewrite.source);
 
     // Verify API routes are explicitly preserved and not rewritten to index.html
     const apiRewrite = config.rewrites.find((r: any) => r.source === '/api/(.*)');
