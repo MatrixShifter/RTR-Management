@@ -3,12 +3,14 @@ import employeesHandler from '../api/employees/index.js';
 import employeeIdHandler from '../api/employees/[id]/index.js';
 import employeeShopHandler from '../api/employees/[id]/shop.js';
 import employeeStatusHandler from '../api/employees/[id]/status.js';
+import employeeSendOtpHandler from '../api/employees/[id]/send-otp.js';
 import { 
   getEmployees, 
   createEmployee, 
   reassignEmployeeShop, 
   toggleEmployeeStatus, 
-  revokeEmployeeAccess 
+  revokeEmployeeAccess,
+  sendEmployeeOtp
 } from './services/db.js';
 import { setDemoMode } from './services/demoMode.js';
 
@@ -138,6 +140,18 @@ describe('Vercel Serverless Employee Endpoints Suite (/api/employees*)', () => {
     expect(res.getBody().success).toBe(true);
   });
 
+  it('POST /api/employees/:id/send-otp dispatches verification code in demo mode', async () => {
+    const { req, res } = createMockReqRes({
+      method: 'POST',
+      headers: { authorization: demoOwnerToken },
+      query: { id: 'demo-employee-1' }
+    });
+    await employeeSendOtpHandler(req, res);
+    expect(res.getStatus()).toBe(200);
+    expect(res.getBody().success).toBe(true);
+    expect(res.getBody().message).toContain('verification code');
+  });
+
   it('rejects unsupported HTTP methods with 405 Method Not Allowed', async () => {
     const { req, res } = createMockReqRes({
       method: 'PUT',
@@ -228,5 +242,13 @@ describe('Frontend API Client Safe Response Handling (HTML & Error Resilience)',
     vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(toggleRes);
     const toggleOutcome = await toggleEmployeeStatus('emp-1', true);
     expect(toggleOutcome.success).toBe(true);
+
+    const sendOtpRes = new Response(JSON.stringify({ success: true, message: 'Code dispatched' }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' }
+    });
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(sendOtpRes);
+    const sendOtpOutcome = await sendEmployeeOtp('emp-1');
+    expect(sendOtpOutcome.success).toBe(true);
   });
 });

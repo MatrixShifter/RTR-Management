@@ -9,7 +9,7 @@ import {
 } from '@crimpston/shared';
 import { requireOwnerAuth } from '../middleware/auth.js';
 import { logSecurityEvent, logger } from '../logger.js';
-import { supabaseAdmin } from '../supabase.js';
+import { supabaseAdmin, supabaseAnon } from '../supabase.js';
 
 export const employeesRouter = Router();
 
@@ -251,17 +251,35 @@ employeesRouter.post('/', requireOwnerAuth, async (req: Request, res: Response) 
 
     if (smErr) throw smErr;
 
-    // 7. Non-blocking invitation notice dispatch
+    // 7. Dispatch employee verification OTP email
+    let emailStatus: 'sent' | 'rate_limited' | 'failed' = 'failed';
+    let emailMessage = '';
+
     try {
-      await supabaseAdmin.auth.admin.inviteUserByEmail(email, {
-        data: {
-          full_name: name,
-          username: username || email.split('@')[0],
-          role: 'employee'
+      const { error: otpErr } = await supabaseAnon.auth.signInWithOtp({
+        email,
+        options: {
+          shouldCreateUser: false,
+          emailRedirectTo: 'https://rtr-management-cfn4.vercel.app'
         }
       });
-    } catch {
-      // Graceful fallback if SMTP provider is not yet active
+
+      if (!otpErr) {
+        emailStatus = 'sent';
+        emailMessage = 'Verification code email sent successfully.';
+      } else {
+        const isRateLimit = otpErr.status === 429 || 
+          (otpErr as any).code === 'over_email_send_rate_limit' || 
+          otpErr.message?.toLowerCase().includes('rate limit');
+        
+        emailStatus = isRateLimit ? 'rate_limited' : 'failed';
+        emailMessage = isRateLimit
+          ? 'Default Supabase email rate limit exceeded (~3 emails/hour). Configure Custom SMTP in Supabase Dashboard for unlimited delivery.'
+          : (otpErr.message || 'Email delivery failed.');
+      }
+    } catch (sendErr: any) {
+      emailStatus = 'failed';
+      emailMessage = sendErr?.message || 'Email delivery failed.';
     }
 
     logSecurityEvent({
@@ -271,7 +289,7 @@ employeesRouter.post('/', requireOwnerAuth, async (req: Request, res: Response) 
       statusCode: 201,
       correlationId: (req.headers['x-correlation-id'] as string),
       resourceType: 'employee',
-      details: { action: 'created' }
+      details: { action: 'created', emailStatus }
     });
 
     const newEmployee: EmployeeRecord = {
@@ -289,7 +307,9 @@ employeesRouter.post('/', requireOwnerAuth, async (req: Request, res: Response) 
 
     return res.status(201).json({
       success: true,
-      message: `Employee account created and assigned to ${shop.name}.`,
+      message: `Employee account created and assigned to ${shop.name}.${emailStatus === 'rate_limited' ? ' (Note: Default Supabase email rate limit was exceeded; configure Custom SMTP in Supabase Dashboard)' : ''}`,
+      emailStatus,
+      emailMessage,
       employee: newEmployee
     });
   } catch (err: any) {
@@ -542,6 +562,87 @@ employeesRouter.delete('/:id', requireOwnerAuth, async (req: Request, res: Respo
     return res.status(500).json({
       error: 'Internal Server Error',
       message: 'Failed to revoke employee access.'
+    });
+  }
+});
+
+/**
+ * POST /api/employees/:id/send-otp
+ * Dispatches a fresh sign-in verification code to an existing employee.
+ */
+employeesRouter.post('/:id/send-otp', requireOwnerAuth, async (req: Request, res: Response) => {
+  const user = req.user!;
+  const employeeId = req.params.id;
+
+  if (user.isDemo) {
+    return res.status(200).json({
+      success: true,
+      message: 'Demo verification code dispatched.'
+    });
+  }
+
+  try {
+    const { data: mem, error: memErr } = await supabaseAdmin
+      .from('business_memberships')
+      .select('id, role, is_active')
+      .eq('user_id', employeeId)
+      .eq('business_id', user.businessId)
+      .maybeSingle();
+
+    if (memErr || !mem || mem.role !== 'employee' || !mem.is_active) {
+      return res.status(404).json({
+        error: 'Not Found',
+        message: 'Active employee not found in your business directory.'
+      });
+    }
+
+    const { data: profile, error: profErr } = await supabaseAdmin
+      .from('profiles')
+      .select('email')
+      .eq('id', employeeId)
+      .maybeSingle();
+
+    if (profErr || !profile?.email) {
+      return res.status(404).json({
+        error: 'Not Found',
+        message: 'Employee email address not found.'
+      });
+    }
+
+    const { error: otpErr } = await supabaseAnon.auth.signInWithOtp({
+      email: profile.email,
+      options: {
+        shouldCreateUser: false,
+        emailRedirectTo: 'https://rtr-management-cfn4.vercel.app'
+      }
+    });
+
+    if (otpErr) {
+      const isRateLimit = otpErr.status === 429 || 
+        (otpErr as any).code === 'over_email_send_rate_limit' || 
+        otpErr.message?.toLowerCase().includes('rate limit');
+
+      if (isRateLimit) {
+        return res.status(429).json({
+          error: 'Rate Limit Exceeded',
+          message: 'Default Supabase email rate limit exceeded (~3 emails/hour). Please wait or configure Custom SMTP in Supabase Dashboard.'
+        });
+      }
+
+      return res.status(500).json({
+        error: 'Email Delivery Error',
+        message: otpErr.message || 'Failed to dispatch verification code.'
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: `Sign-in verification code sent to ${profile.email}.`
+    });
+  } catch (err: any) {
+    return res.status(500).json({
+      error: 'Internal Server Error',
+      message: err?.message || 'Failed to dispatch verification code.'
     });
   }
 });

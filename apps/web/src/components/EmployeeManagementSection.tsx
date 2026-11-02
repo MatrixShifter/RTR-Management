@@ -21,6 +21,7 @@ import {
   reassignEmployeeShop, 
   toggleEmployeeStatus, 
   revokeEmployeeAccess,
+  sendEmployeeOtp,
   getShops,
   type Shop
 } from '../services/db.js';
@@ -153,6 +154,18 @@ export const EmployeeManagementSection: React.FC = () => {
     }
   };
 
+  const handleSendOtp = async (emp: EmployeeRecord) => {
+    setActionLoading(`otp-${emp.id}`);
+    try {
+      const res = await sendEmployeeOtp(emp.id);
+      setFeedback({ type: 'success', message: res.message || `Verification code sent to ${emp.email}.` });
+    } catch (err: any) {
+      setFeedback({ type: 'error', message: err?.message || 'Failed to dispatch verification code.' });
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
   return (
     <div className="bg-white rounded-2xl border border-slate-200/80 p-6 shadow-xs space-y-5">
       {/* Section Header */}
@@ -258,6 +271,22 @@ export const EmployeeManagementSection: React.FC = () => {
                   </td>
                   <td className="py-3 px-3 text-right">
                     <div className="flex items-center justify-end gap-1.5">
+                      {/* Send Login OTP Button */}
+                      <button
+                        type="button"
+                        onClick={() => handleSendOtp(emp)}
+                        disabled={actionLoading !== null || !emp.isActive}
+                        className="px-2 py-1 text-[11px] font-medium text-[#168BFF] hover:text-blue-700 hover:bg-blue-50 rounded-lg transition-colors cursor-pointer inline-flex items-center gap-1 disabled:opacity-40"
+                        title="Send Sign-In Code"
+                      >
+                        {actionLoading === `otp-${emp.id}` ? (
+                          <RefreshCw className="w-3 h-3 animate-spin" />
+                        ) : (
+                          <Mail className="w-3 h-3" />
+                        )}
+                        <span>Send Code</span>
+                      </button>
+
                       {/* Reassign Shop Button */}
                       <button
                         type="button"

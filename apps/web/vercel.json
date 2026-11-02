@@ -47,6 +47,10 @@
   ],
   "rewrites": [
     {
+      "source": "/api/employees/:id/send-otp",
+      "destination": "/api/employees/:id/send-otp"
+    },
+    {
       "source": "/api/employees/:id/shop",
       "destination": "/api/employees/:id/shop"
     },
