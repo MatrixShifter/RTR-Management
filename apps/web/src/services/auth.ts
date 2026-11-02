@@ -1,582 +1,582 @@
-import { supabase, isSupabaseConfigured } from '../lib/supabase.js';
-import { DEMO_USERNAME, DEMO_PASSWORD_PLACEHOLDER } from '@crimpston/shared';
-import { setDemoMode } from './demoMode.js';
-
-export { DEMO_USERNAME, DEMO_PASSWORD_PLACEHOLDER };
-
-export interface AuthUser {
-  id: string;
-  email: string;
-  username: string;
-  name: string;
-  role: 'owner' | 'demo' | 'employee';
-  isDemo?: boolean;
-  assignedShopId?: string;
-  assignedShopName?: string;
-  assignedShopCode?: string;
-}
-
-export const INCORRECT_CREDENTIALS_MSG = "Incorrect username or password. Please try again.";
-export const RECOVERY_CONFIRMATION_MSG = "If an account matches the information provided, password reset instructions will be sent to its registered email address.";
-export const NETWORK_ERROR_MSG = "Unable to connect to authentication service. Please check your connection and try again.";
-export const OWNER_ONLY_ACCESS_MSG = "Access restricted to Business Owner only.";
-export const EMPLOYEE_OTP_CONFIRMATION_MSG = "If an active employee account exists for this email, a verification code has been sent.";
-export const INVALID_OTP_MSG = "Invalid or expired verification code. Please request a new code.";
-
-export { getRememberedUsername, setRememberedUsername } from './rememberUsername.js';
-
-const configuredOwnerEmail = (import.meta.env?.VITE_OWNER_EMAIL || 'vinov042007@gmail.com').trim().toLowerCase();
-
-export const VERIFIED_USERNAME_MAP: Record<string, string> = {
-  'owner': configuredOwnerEmail,
-  'vino': configuredOwnerEmail,
-  'rtrowner': configuredOwnerEmail,
-  'rtrmobiles': configuredOwnerEmail,
-  'owner@rtrmobiles.com': configuredOwnerEmail,
-  'vinoth42007@gmail.com': configuredOwnerEmail,
-  'vinov042007@gmail.com': configuredOwnerEmail,
-  'demo-owner': 'demo-owner@rtrmobiles.com'
-};
-
-export function resolveLoginEmail(identifier: string): string | null {
-  const clean = identifier.trim().toLowerCase();
-  if (!clean) return null;
-  if (clean.includes('@')) return clean;
-  return VERIFIED_USERNAME_MAP[clean] || null;
-}
-
-/**
- * Sign in with username (or email) and password
- */
-export async function signIn(username: string, password: string): Promise<AuthUser> {
-  const cleanUsername = username.trim();
-  if (!cleanUsername || !password) {
-    throw new Error(INCORRECT_CREDENTIALS_MSG);
-  }
-
-  // 1. Try server-side authentication endpoint (/api/auth/login)
-  try {
-    const res = await fetch('/api/auth/login', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username: cleanUsername, password })
-    });
-
-    if (res.ok) {
-      const data = await res.json();
-      if (data.session && isSupabaseConfigured && supabase) {
-        await supabase.auth.setSession({
-          access_token: data.session.access_token,
-          refresh_token: data.session.refresh_token
-        });
-      }
-      if (data.user?.role === 'demo' || data.user?.isDemo) {
-        setDemoMode(true);
-      } else {
-        setDemoMode(false);
-      }
-      return data.user;
-    }
-
-    if (res.status === 401) {
-      throw new Error(INCORRECT_CREDENTIALS_MSG);
-    }
-
-    if (res.status === 403) {
-      const data = await res.json().catch(() => ({}));
-      throw new Error(data.message || 'Access restricted. Please contact your system administrator.');
-    }
-
-    if (res.status === 429) {
-      throw new Error('Too many login attempts. Please wait a moment and try again.');
-    }
-
-    // 5xx / 504 / gateway errors trigger the direct Supabase client fallback
-    throw new Error(`API server status ${res.status}`);
-  } catch (err: any) {
-    // If it's an explicit 401, 403, or 429 response from the backend, bubble up immediately
-    if (
-      err.message === INCORRECT_CREDENTIALS_MSG || 
-      err.message?.includes('restricted') ||
-      err.message?.includes('Too many')
-    ) {
-      throw err;
-    }
-
-    // 2. Direct Supabase fallback if backend API server is offline or proxy failed
-    if (isSupabaseConfigured && supabase) {
-      const email = resolveLoginEmail(cleanUsername);
-
-      if (!email) {
-        throw new Error(INCORRECT_CREDENTIALS_MSG);
-      }
-
-      const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
-        email,
-        password
-      });
-
-      if (authError || !authData.user) {
-        // Demo account sandbox check: completely isolated from network and Supabase
-        if (cleanUsername.toLowerCase() === DEMO_USERNAME.toLowerCase() || cleanUsername.toLowerCase() === 'demo-owner@rtrmobiles.com') {
-          if (password === DEMO_PASSWORD_PLACEHOLDER) {
-            setDemoMode(true);
-            return {
-              id: 'deae5634-055a-4045-a6ac-fc00ed9e247a',
-              email: 'demo-owner@rtrmobiles.com',
-              username: DEMO_USERNAME,
-              name: 'Demo Owner (Sandbox)',
-              role: 'demo',
-              isDemo: true
-            };
-          }
-          throw new Error(INCORRECT_CREDENTIALS_MSG);
-        }
-
-        // Differentiate auth errors:
-        if (authError?.status === 429 || authError?.message?.toLowerCase().includes('rate limit')) {
-          throw new Error('Too many login attempts. Please wait a moment and try again.');
-        }
-        if (
-          authError?.message === 'Failed to fetch' || 
-          authError?.message?.toLowerCase().includes('network') ||
-          (authError as any)?.name === 'AuthRetryableFetchError'
-        ) {
-          throw new Error(NETWORK_ERROR_MSG);
-        }
-        throw new Error(INCORRECT_CREDENTIALS_MSG);
-      }
-
-      const isDemo = authData.user.email === 'demo-owner@rtrmobiles.com' || cleanUsername.toLowerCase() === 'demo-owner';
-      if (isDemo) {
-        setDemoMode(true);
-        return {
-          id: authData.user.id,
-          email: authData.user.email || email,
-          username: DEMO_USERNAME,
-          name: authData.user.user_metadata?.full_name || 'Demo Owner (Sandbox)',
-          role: 'demo',
-          isDemo: true
-        };
-      }
-
-      const { data: membership } = await supabase
-        .from('business_memberships')
-        .select('business_id, role, is_active')
-        .eq('user_id', authData.user.id)
-        .maybeSingle();
-
-      if (!membership || !membership.is_active) {
-        await supabase.auth.signOut().catch(() => {});
-        throw new Error('Account is deactivated or unauthorized. Please contact your manager.');
-      }
-
-      if (membership.role === 'employee') {
-        const { data: sm } = await supabase
-          .from('shop_memberships')
-          .select('shop_id, shops(id, name, code, is_active)')
-          .eq('user_id', authData.user.id)
-          .maybeSingle();
-
-        const shop = (sm as any)?.shops;
-        if (!sm || !shop || !shop.is_active) {
-          await supabase.auth.signOut().catch(() => {});
-          throw new Error('Your employee account is not currently assigned to an active shop. Please contact your manager.');
-        }
-
-        setDemoMode(false);
-        return {
-          id: authData.user.id,
-          email: authData.user.email || email,
-          username: cleanUsername,
-          name: authData.user.user_metadata?.full_name || 'Shop Staff',
-          role: 'employee',
-          isDemo: false,
-          assignedShopId: sm.shop_id,
-          assignedShopName: shop.name,
-          assignedShopCode: shop.code
-        };
-      }
-
-      if (membership.role !== 'owner') {
-        await supabase.auth.signOut().catch(() => {});
-        throw new Error(OWNER_ONLY_ACCESS_MSG);
-      }
-
-      setDemoMode(false);
-      return {
-        id: authData.user.id,
-        email: authData.user.email || email,
-        username: cleanUsername,
-        name: authData.user.user_metadata?.full_name || 'Business Owner',
-        role: 'owner',
-        isDemo: false
-      };
-    }
-
-    // Direct fallback for Demo account when Supabase is unconfigured / mock environment
-    if (cleanUsername.toLowerCase() === DEMO_USERNAME.toLowerCase() || cleanUsername.toLowerCase() === 'demo-owner@rtrmobiles.com') {
-      if (password === DEMO_PASSWORD_PLACEHOLDER) {
-        setDemoMode(true);
-        return {
-          id: 'deae5634-055a-4045-a6ac-fc00ed9e247a',
-          email: 'demo-owner@rtrmobiles.com',
-          username: DEMO_USERNAME,
-          name: 'Demo Owner (Sandbox)',
-          role: 'demo',
-          isDemo: true
-        };
-      }
-      throw new Error(INCORRECT_CREDENTIALS_MSG);
-    }
-
-    throw new Error(NETWORK_ERROR_MSG);
-  }
-
-  throw new Error(INCORRECT_CREDENTIALS_MSG);
-}
-
-/**
- * Computes canonical password-recovery redirect URL based on environment.
- * Local development strictly returns http://localhost:5173/reset-password.
- * Deployed/production environments strictly return https://rtr-management-cfn4.vercel.app/reset-password.
- */
-export function getPasswordResetRedirectUrl(): string {
-  if (typeof window === 'undefined' || !window.location) {
-    return 'https://rtr-management-cfn4.vercel.app/reset-password';
-  }
-
-  const hostname = window.location.hostname;
-  const isLocal = hostname === 'localhost' || hostname === '127.0.0.1';
-
-  if (isLocal) {
-    return `${window.location.origin}/reset-password`;
-  }
-
-  const origin = window.location.origin;
-  if (origin && origin.startsWith('https://') && !origin.includes('localhost') && !origin.includes('127.0.0.1')) {
-    return `${origin}/reset-password`;
-  }
-
-  return 'https://rtr-management-cfn4.vercel.app/reset-password';
-}
-
-/**
- * Request password recovery instructions for a username or email
- */
-export async function requestPasswordReset(identifier: string): Promise<string> {
-  const clean = identifier.trim();
-  if (!clean) {
-    return RECOVERY_CONFIRMATION_MSG;
-  }
-
-  const redirectUrl = getPasswordResetRedirectUrl();
-
-  // 1. Primary: Send request through secure backend endpoint
-  try {
-    const res = await fetch('/api/auth/forgot-password', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        identifier: clean,
-        redirectTo: redirectUrl
-      })
-    });
-
-    if (res.ok) {
-      const data = await res.json();
-      return data.message || RECOVERY_CONFIRMATION_MSG;
-    }
-
-    if (res.status === 429) {
-      const data = await res.json().catch(() => ({}));
-      throw new Error(data.message || 'Email rate limit exceeded. Please wait a minute before requesting another reset link.');
-    }
-
-    if (res.status === 404 || res.status >= 500) {
-      // Backend endpoint not deployed on host or server error; fall through to direct Supabase recovery
-      throw new Error('BACKEND_UNAVAILABLE');
-    }
-
-    if (res.status >= 400) {
-      const data = await res.json().catch(() => ({}));
-      throw new Error(data.message || 'Unable to submit password recovery request.');
-    }
-  } catch (err: any) {
-    if (err.message !== 'BACKEND_UNAVAILABLE' && err.message && (
-      err.message.includes('rate limit') || 
-      err.message.includes('wait') || 
-      err.message.includes('Unable') ||
-      err.message.includes('deliver') ||
-      err.message.includes('exceeded')
-    )) {
-      throw err;
-    }
-
-    // 2. Direct Supabase fallback if backend API server is offline
-    if (isSupabaseConfigured && supabase) {
-      const email = resolveLoginEmail(clean) || (clean.includes('@') ? clean : null);
-      if (email) {
-        const { error } = await supabase.auth.resetPasswordForEmail(email, {
-          redirectTo: redirectUrl
-        });
-        if (error) {
-          if (error.status === 429 || error.message.toLowerCase().includes('rate limit')) {
-            throw new Error('Email rate limit exceeded. Please wait a minute before requesting another reset link.');
-          }
-          throw new Error(error.message || 'Failed to send password recovery email.');
-        }
-        return RECOVERY_CONFIRMATION_MSG;
-      }
-    }
-
-    throw err;
-  }
-
-  return RECOVERY_CONFIRMATION_MSG;
-}
-
-/**
- * Update password using current active recovery session via authoritative Supabase Auth.
- * Safely signs out of the temporary recovery session upon completion to guarantee
- * that subsequent logins strictly authenticate with the new credentials.
- */
-export async function updatePassword(newPassword: string): Promise<void> {
-  if (!isSupabaseConfigured || !supabase) {
-    throw new Error('Authentication service is not configured.');
-  }
-
-  if (!newPassword || newPassword.length < 12) {
-    throw new Error('Password must be at least 12 characters long.');
-  }
-
-  // 1. Verify that a valid authenticated session exists
-  const { data: { session } } = await supabase.auth.getSession();
-  if (!session?.user) {
-    throw new Error('No active recovery session found. Please request a new recovery link.');
-  }
-
-  // 2. Authoritatively update password directly via Supabase Auth client using recovery session
-  const { error } = await supabase.auth.updateUser({
-    password: newPassword
-  });
-
-  if (error) {
-    throw new Error(error.message || 'Failed to update password. Recovery session may have expired.');
-  }
-
-  // 3. Invalidate temporary recovery session so normal login is required with new credentials
-  await supabase.auth.signOut().catch(() => {});
-  try {
-    localStorage.removeItem('rtr_current_user');
-    localStorage.removeItem('rtr_session_expiry');
-  } catch {}
-}
-/**
- * Request passwordless verification code (OTP) for an employee.
- */
-export async function requestEmployeeOtp(email: string): Promise<string> {
-  const cleanEmail = email.trim().toLowerCase();
-  if (!cleanEmail) {
-    throw new Error('Please enter a valid email address.');
-  }
-
-  // 0. Demo employee sandbox handling
-  if (cleanEmail === 'demo-employee@rtrmobiles.com' || cleanEmail === 'employee@demo.com') {
-    return EMPLOYEE_OTP_CONFIRMATION_MSG;
-  }
-
-  // 1. Primary: Server-side API endpoint
-  try {
-    let res = await fetch('/api/auth/employee/request-otp', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email: cleanEmail })
-    });
-    if (res.status === 404) {
-      res = await fetch('/api/auth/employee-request-otp', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: cleanEmail })
-      });
-    }
-
-    if (res.ok) {
-      const data = await res.json();
-      return data.message || EMPLOYEE_OTP_CONFIRMATION_MSG;
-    }
-
-    if (res.status === 429) {
-      const data = await res.json().catch(() => ({}));
-      throw new Error(data.message || 'Too many verification code requests. Please wait a minute and try again.');
-    }
-
-    if (res.status === 400) {
-      const data = await res.json().catch(() => ({}));
-      throw new Error(data.message || 'Please enter a valid email format.');
-    }
-  } catch (err: any) {
-    if (err.message?.includes('wait') || err.message?.includes('valid email')) {
-      throw err;
-    }
-    // Fallback to Supabase client if server endpoint unavailable
-  }
-
-  // 2. Direct Supabase fallback
-  if (isSupabaseConfigured && supabase) {
-    const { error } = await supabase.auth.signInWithOtp({
-      email: cleanEmail,
-      options: {
-        shouldCreateUser: false
-      }
-    });
-
-    if (error) {
-      if (error.status === 429 || error.message.toLowerCase().includes('rate limit')) {
-        throw new Error('Too many verification code requests. Please wait a minute and try again.');
-      }
-      // Never reveal non-existence; return generic neutral message
-    }
-    return EMPLOYEE_OTP_CONFIRMATION_MSG;
-  }
-
-  return EMPLOYEE_OTP_CONFIRMATION_MSG;
-}
-
-/**
- * Verify employee OTP and obtain active authenticated employee session.
- */
-export async function verifyEmployeeOtp(email: string, token: string): Promise<AuthUser> {
-  const cleanEmail = email.trim().toLowerCase();
-  const cleanToken = token.trim();
-
-  if (!cleanEmail || !cleanToken) {
-    throw new Error('Both email and verification code are required.');
-  }
-
-  // 0. Demo employee sandbox verification
-  if (
-    (cleanEmail === 'demo-employee@rtrmobiles.com' || cleanEmail === 'employee@demo.com') &&
-    (cleanToken === '123456' || cleanToken === '000000')
-  ) {
-    setDemoMode(true);
-    return {
-      id: 'demo-employee-00000000-0000-0000-0000-000000000001',
-      email: cleanEmail,
-      username: 'demo-employee',
-      name: 'Demo Employee (Sandbox)',
-      role: 'employee',
-      isDemo: true,
-      assignedShopId: 'demo-shop-00000000-0000-0000-0000-000000000001',
-      assignedShopName: 'Demo Retail Outlet',
-      assignedShopCode: 'SH-DEMO'
-    };
-  }
-
-  // 1. Primary: Server-side API endpoint
-  try {
-    let res = await fetch('/api/auth/employee/verify-otp', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email: cleanEmail, token: cleanToken })
-    });
-    if (res.status === 404) {
-      res = await fetch('/api/auth/employee-verify-otp', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: cleanEmail, token: cleanToken })
-      });
-    }
-
-    if (res.ok) {
-      const data = await res.json();
-      if (data.session && isSupabaseConfigured && supabase) {
-        await supabase.auth.setSession({
-          access_token: data.session.access_token,
-          refresh_token: data.session.refresh_token
-        });
-      }
-      setDemoMode(Boolean(data.user?.isDemo));
-      return data.user;
-    }
-
-    if (res.status === 401) {
-      const data = await res.json().catch(() => ({}));
-      throw new Error(data.message || INVALID_OTP_MSG);
-    }
-
-    if (res.status === 403) {
-      const data = await res.json().catch(() => ({}));
-      throw new Error(data.message || 'Account is deactivated or unauthorized. Please contact your manager.');
-    }
-
-    if (res.status === 429) {
-      throw new Error('Too many attempts. Please wait a moment and try again.');
-    }
-  } catch (err: any) {
-    if (
-      err.message === INVALID_OTP_MSG ||
-      err.message?.includes('Invalid') ||
-      err.message?.includes('deactivated') ||
-      err.message?.includes('unauthorized') ||
-      err.message?.includes('assigned to an active shop') ||
-      err.message?.includes('Too many')
-    ) {
-      throw err;
-    }
-    // Fall through to direct Supabase verifyOtp
-  }
-
-  // 2. Direct Supabase fallback
-  if (isSupabaseConfigured && supabase) {
-    const { data: verifyData, error: verifyError } = await supabase.auth.verifyOtp({
-      email: cleanEmail,
-      token: cleanToken,
-      type: 'email'
-    });
-
-    if (verifyError || !verifyData.user) {
-      throw new Error(INVALID_OTP_MSG);
-    }
-
-    // Role check
-    const { data: membership } = await supabase
-      .from('business_memberships')
-      .select('business_id, role, is_active')
-      .eq('user_id', verifyData.user.id)
-      .maybeSingle();
-
-    if (!membership || !membership.is_active || membership.role !== 'employee') {
-      await supabase.auth.signOut().catch(() => {});
-      throw new Error('Account is deactivated or unauthorized. Please contact your manager.');
-    }
-
-    // Shop assignment check
-    const { data: sm } = await supabase
-      .from('shop_memberships')
-      .select('shop_id, shops(id, name, code, is_active)')
-      .eq('user_id', verifyData.user.id)
-      .maybeSingle();
-
-    const shop = (sm as any)?.shops;
-    if (!sm || !shop || !shop.is_active) {
-      await supabase.auth.signOut().catch(() => {});
-      throw new Error('Your employee account is not currently assigned to an active shop. Please contact your manager.');
-    }
-
-    setDemoMode(false);
-    return {
-      id: verifyData.user.id,
-      email: verifyData.user.email || cleanEmail,
-      username: cleanEmail.split('@')[0] || cleanEmail,
-      name: verifyData.user.user_metadata?.full_name || 'Shop Staff',
-      role: 'employee',
-      isDemo: false,
-      assignedShopId: sm.shop_id,
-      assignedShopName: shop.name,
-      assignedShopCode: shop.code
-    };
-  }
-
-  throw new Error(NETWORK_ERROR_MSG);
-}
+import { supabase, isSupabaseConfigured } from '../lib/supabase.js';
+import { DEMO_USERNAME, DEMO_PASSWORD_PLACEHOLDER } from '@crimpston/shared';
+import { setDemoMode } from './demoMode.js';
+
+export { DEMO_USERNAME, DEMO_PASSWORD_PLACEHOLDER };
+
+export interface AuthUser {
+  id: string;
+  email: string;
+  username: string;
+  name: string;
+  role: 'owner' | 'demo' | 'employee';
+  isDemo?: boolean;
+  assignedShopId?: string;
+  assignedShopName?: string;
+  assignedShopCode?: string;
+}
+
+export const INCORRECT_CREDENTIALS_MSG = "Incorrect username or password. Please try again.";
+export const RECOVERY_CONFIRMATION_MSG = "If an account matches the information provided, password reset instructions will be sent to its registered email address.";
+export const NETWORK_ERROR_MSG = "Unable to connect to authentication service. Please check your connection and try again.";
+export const OWNER_ONLY_ACCESS_MSG = "Access restricted to Business Owner only.";
+export const EMPLOYEE_OTP_CONFIRMATION_MSG = "If an active employee account exists for this email, a verification code has been sent.";
+export const INVALID_OTP_MSG = "Invalid or expired verification code. Please request a new code.";
+
+export { getRememberedUsername, setRememberedUsername } from './rememberUsername.js';
+
+const configuredOwnerEmail = (import.meta.env?.VITE_OWNER_EMAIL || 'vinov042007@gmail.com').trim().toLowerCase();
+
+export const VERIFIED_USERNAME_MAP: Record<string, string> = {
+  'owner': configuredOwnerEmail,
+  'vino': configuredOwnerEmail,
+  'rtrowner': configuredOwnerEmail,
+  'rtrmobiles': configuredOwnerEmail,
+  'owner@rtrmobiles.com': configuredOwnerEmail,
+  'vinoth42007@gmail.com': configuredOwnerEmail,
+  'vinov042007@gmail.com': configuredOwnerEmail,
+  'demo-owner': 'demo-owner@rtrmobiles.com'
+};
+
+export function resolveLoginEmail(identifier: string): string | null {
+  const clean = identifier.trim().toLowerCase();
+  if (!clean) return null;
+  if (clean.includes('@')) return clean;
+  return VERIFIED_USERNAME_MAP[clean] || null;
+}
+
+/**
+ * Sign in with username (or email) and password
+ */
+export async function signIn(username: string, password: string): Promise<AuthUser> {
+  const cleanUsername = username.trim();
+  if (!cleanUsername || !password) {
+    throw new Error(INCORRECT_CREDENTIALS_MSG);
+  }
+
+  // 1. Try server-side authentication endpoint (/api/auth/login)
+  try {
+    const res = await fetch('/api/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: cleanUsername, password })
+    });
+
+    if (res.ok) {
+      const data = await res.json();
+      if (data.session && isSupabaseConfigured && supabase) {
+        await supabase.auth.setSession({
+          access_token: data.session.access_token,
+          refresh_token: data.session.refresh_token
+        });
+      }
+      if (data.user?.role === 'demo' || data.user?.isDemo) {
+        setDemoMode(true);
+      } else {
+        setDemoMode(false);
+      }
+      return data.user;
+    }
+
+    if (res.status === 401) {
+      throw new Error(INCORRECT_CREDENTIALS_MSG);
+    }
+
+    if (res.status === 403) {
+      const data = await res.json().catch(() => ({}));
+      throw new Error(data.message || 'Access restricted. Please contact your system administrator.');
+    }
+
+    if (res.status === 429) {
+      throw new Error('Too many login attempts. Please wait a moment and try again.');
+    }
+
+    // 5xx / 504 / gateway errors trigger the direct Supabase client fallback
+    throw new Error(`API server status ${res.status}`);
+  } catch (err: any) {
+    // If it's an explicit 401, 403, or 429 response from the backend, bubble up immediately
+    if (
+      err.message === INCORRECT_CREDENTIALS_MSG || 
+      err.message?.includes('restricted') ||
+      err.message?.includes('Too many')
+    ) {
+      throw err;
+    }
+
+    // 2. Direct Supabase fallback if backend API server is offline or proxy failed
+    if (isSupabaseConfigured && supabase) {
+      const email = resolveLoginEmail(cleanUsername);
+
+      if (!email) {
+        throw new Error(INCORRECT_CREDENTIALS_MSG);
+      }
+
+      const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
+        email,
+        password
+      });
+
+      if (authError || !authData.user) {
+        // Demo account sandbox check: completely isolated from network and Supabase
+        if (cleanUsername.toLowerCase() === DEMO_USERNAME.toLowerCase() || cleanUsername.toLowerCase() === 'demo-owner@rtrmobiles.com') {
+          if (password === DEMO_PASSWORD_PLACEHOLDER) {
+            setDemoMode(true);
+            return {
+              id: 'deae5634-055a-4045-a6ac-fc00ed9e247a',
+              email: 'demo-owner@rtrmobiles.com',
+              username: DEMO_USERNAME,
+              name: 'Demo Owner (Sandbox)',
+              role: 'demo',
+              isDemo: true
+            };
+          }
+          throw new Error(INCORRECT_CREDENTIALS_MSG);
+        }
+
+        // Differentiate auth errors:
+        if (authError?.status === 429 || authError?.message?.toLowerCase().includes('rate limit')) {
+          throw new Error('Too many login attempts. Please wait a moment and try again.');
+        }
+        if (
+          authError?.message === 'Failed to fetch' || 
+          authError?.message?.toLowerCase().includes('network') ||
+          (authError as any)?.name === 'AuthRetryableFetchError'
+        ) {
+          throw new Error(NETWORK_ERROR_MSG);
+        }
+        throw new Error(INCORRECT_CREDENTIALS_MSG);
+      }
+
+      const isDemo = authData.user.email === 'demo-owner@rtrmobiles.com' || cleanUsername.toLowerCase() === 'demo-owner';
+      if (isDemo) {
+        setDemoMode(true);
+        return {
+          id: authData.user.id,
+          email: authData.user.email || email,
+          username: DEMO_USERNAME,
+          name: authData.user.user_metadata?.full_name || 'Demo Owner (Sandbox)',
+          role: 'demo',
+          isDemo: true
+        };
+      }
+
+      const { data: membership } = await supabase
+        .from('business_memberships')
+        .select('business_id, role, is_active')
+        .eq('user_id', authData.user.id)
+        .maybeSingle();
+
+      if (!membership || !membership.is_active) {
+        await supabase.auth.signOut().catch(() => {});
+        throw new Error('Account is deactivated or unauthorized. Please contact your manager.');
+      }
+
+      if (membership.role === 'employee') {
+        const { data: sm } = await supabase
+          .from('shop_memberships')
+          .select('shop_id, shops(id, name, code, is_active)')
+          .eq('user_id', authData.user.id)
+          .maybeSingle();
+
+        const shop = (sm as any)?.shops;
+        if (!sm || !shop || !shop.is_active) {
+          await supabase.auth.signOut().catch(() => {});
+          throw new Error('Your employee account is not currently assigned to an active shop. Please contact your manager.');
+        }
+
+        setDemoMode(false);
+        return {
+          id: authData.user.id,
+          email: authData.user.email || email,
+          username: cleanUsername,
+          name: authData.user.user_metadata?.full_name || 'Shop Staff',
+          role: 'employee',
+          isDemo: false,
+          assignedShopId: sm.shop_id,
+          assignedShopName: shop.name,
+          assignedShopCode: shop.code
+        };
+      }
+
+      if (membership.role !== 'owner') {
+        await supabase.auth.signOut().catch(() => {});
+        throw new Error(OWNER_ONLY_ACCESS_MSG);
+      }
+
+      setDemoMode(false);
+      return {
+        id: authData.user.id,
+        email: authData.user.email || email,
+        username: cleanUsername,
+        name: authData.user.user_metadata?.full_name || 'Business Owner',
+        role: 'owner',
+        isDemo: false
+      };
+    }
+
+    // Direct fallback for Demo account when Supabase is unconfigured / mock environment
+    if (cleanUsername.toLowerCase() === DEMO_USERNAME.toLowerCase() || cleanUsername.toLowerCase() === 'demo-owner@rtrmobiles.com') {
+      if (password === DEMO_PASSWORD_PLACEHOLDER) {
+        setDemoMode(true);
+        return {
+          id: 'deae5634-055a-4045-a6ac-fc00ed9e247a',
+          email: 'demo-owner@rtrmobiles.com',
+          username: DEMO_USERNAME,
+          name: 'Demo Owner (Sandbox)',
+          role: 'demo',
+          isDemo: true
+        };
+      }
+      throw new Error(INCORRECT_CREDENTIALS_MSG);
+    }
+
+    throw new Error(NETWORK_ERROR_MSG);
+  }
+
+  throw new Error(INCORRECT_CREDENTIALS_MSG);
+}
+
+/**
+ * Computes canonical password-recovery redirect URL based on environment.
+ * Local development strictly returns http://localhost:5173/reset-password.
+ * Deployed/production environments strictly return https://rtr-management-cfn4.vercel.app/reset-password.
+ */
+export function getPasswordResetRedirectUrl(): string {
+  if (typeof window === 'undefined' || !window.location) {
+    return 'https://rtr-management-cfn4.vercel.app/reset-password';
+  }
+
+  const hostname = window.location.hostname;
+  const isLocal = hostname === 'localhost' || hostname === '127.0.0.1';
+
+  if (isLocal) {
+    return `${window.location.origin}/reset-password`;
+  }
+
+  const origin = window.location.origin;
+  if (origin && origin.startsWith('https://') && !origin.includes('localhost') && !origin.includes('127.0.0.1')) {
+    return `${origin}/reset-password`;
+  }
+
+  return 'https://rtr-management-cfn4.vercel.app/reset-password';
+}
+
+/**
+ * Request password recovery instructions for a username or email
+ */
+export async function requestPasswordReset(identifier: string): Promise<string> {
+  const clean = identifier.trim();
+  if (!clean) {
+    return RECOVERY_CONFIRMATION_MSG;
+  }
+
+  const redirectUrl = getPasswordResetRedirectUrl();
+
+  // 1. Primary: Send request through secure backend endpoint
+  try {
+    const res = await fetch('/api/auth/forgot-password', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        identifier: clean,
+        redirectTo: redirectUrl
+      })
+    });
+
+    if (res.ok) {
+      const data = await res.json();
+      return data.message || RECOVERY_CONFIRMATION_MSG;
+    }
+
+    if (res.status === 429) {
+      const data = await res.json().catch(() => ({}));
+      throw new Error(data.message || 'Email rate limit exceeded. Please wait a minute before requesting another reset link.');
+    }
+
+    if (res.status === 404 || res.status >= 500) {
+      // Backend endpoint not deployed on host or server error; fall through to direct Supabase recovery
+      throw new Error('BACKEND_UNAVAILABLE');
+    }
+
+    if (res.status >= 400) {
+      const data = await res.json().catch(() => ({}));
+      throw new Error(data.message || 'Unable to submit password recovery request.');
+    }
+  } catch (err: any) {
+    if (err.message !== 'BACKEND_UNAVAILABLE' && err.message && (
+      err.message.includes('rate limit') || 
+      err.message.includes('wait') || 
+      err.message.includes('Unable') ||
+      err.message.includes('deliver') ||
+      err.message.includes('exceeded')
+    )) {
+      throw err;
+    }
+
+    // 2. Direct Supabase fallback if backend API server is offline
+    if (isSupabaseConfigured && supabase) {
+      const email = resolveLoginEmail(clean) || (clean.includes('@') ? clean : null);
+      if (email) {
+        const { error } = await supabase.auth.resetPasswordForEmail(email, {
+          redirectTo: redirectUrl
+        });
+        if (error) {
+          if (error.status === 429 || error.message.toLowerCase().includes('rate limit')) {
+            throw new Error('Email rate limit exceeded. Please wait a minute before requesting another reset link.');
+          }
+          throw new Error(error.message || 'Failed to send password recovery email.');
+        }
+        return RECOVERY_CONFIRMATION_MSG;
+      }
+    }
+
+    throw err;
+  }
+
+  return RECOVERY_CONFIRMATION_MSG;
+}
+
+/**
+ * Update password using current active recovery session via authoritative Supabase Auth.
+ * Safely signs out of the temporary recovery session upon completion to guarantee
+ * that subsequent logins strictly authenticate with the new credentials.
+ */
+export async function updatePassword(newPassword: string): Promise<void> {
+  if (!isSupabaseConfigured || !supabase) {
+    throw new Error('Authentication service is not configured.');
+  }
+
+  if (!newPassword || newPassword.length < 12) {
+    throw new Error('Password must be at least 12 characters long.');
+  }
+
+  // 1. Verify that a valid authenticated session exists
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session?.user) {
+    throw new Error('No active recovery session found. Please request a new recovery link.');
+  }
+
+  // 2. Authoritatively update password directly via Supabase Auth client using recovery session
+  const { error } = await supabase.auth.updateUser({
+    password: newPassword
+  });
+
+  if (error) {
+    throw new Error(error.message || 'Failed to update password. Recovery session may have expired.');
+  }
+
+  // 3. Invalidate temporary recovery session so normal login is required with new credentials
+  await supabase.auth.signOut().catch(() => {});
+  try {
+    localStorage.removeItem('rtr_current_user');
+    localStorage.removeItem('rtr_session_expiry');
+  } catch {}
+}
+/**
+ * Request passwordless verification code (OTP) for an employee.
+ */
+export async function requestEmployeeOtp(email: string): Promise<string> {
+  const cleanEmail = email.trim().toLowerCase();
+  if (!cleanEmail) {
+    throw new Error('Please enter a valid email address.');
+  }
+
+  // 0. Demo employee sandbox handling
+  if (cleanEmail === 'demo-employee@rtrmobiles.com' || cleanEmail === 'employee@demo.com') {
+    return EMPLOYEE_OTP_CONFIRMATION_MSG;
+  }
+
+  // 1. Primary: Server-side API endpoint
+  try {
+    let res = await fetch('/api/auth/employee/request-otp', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: cleanEmail })
+    });
+    if (res.status === 404) {
+      res = await fetch('/api/auth/employee-request-otp', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: cleanEmail })
+      });
+    }
+
+    if (res.ok) {
+      const data = await res.json();
+      return data.message || EMPLOYEE_OTP_CONFIRMATION_MSG;
+    }
+
+    if (res.status === 429) {
+      const data = await res.json().catch(() => ({}));
+      throw new Error(data.message || 'Too many verification code requests. Please wait a minute and try again.');
+    }
+
+    if (res.status === 400) {
+      const data = await res.json().catch(() => ({}));
+      throw new Error(data.message || 'Please enter a valid email format.');
+    }
+  } catch (err: any) {
+    if (err.message?.includes('wait') || err.message?.includes('valid email')) {
+      throw err;
+    }
+    // Fallback to Supabase client if server endpoint unavailable
+  }
+
+  // 2. Direct Supabase fallback
+  if (isSupabaseConfigured && supabase) {
+    const { error } = await supabase.auth.signInWithOtp({
+      email: cleanEmail,
+      options: {
+        shouldCreateUser: false
+      }
+    });
+
+    if (error) {
+      if (error.status === 429 || error.message.toLowerCase().includes('rate limit')) {
+        throw new Error('Too many verification code requests. Please wait a minute and try again.');
+      }
+      // Never reveal non-existence; return generic neutral message
+    }
+    return EMPLOYEE_OTP_CONFIRMATION_MSG;
+  }
+
+  return EMPLOYEE_OTP_CONFIRMATION_MSG;
+}
+
+/**
+ * Verify employee OTP and obtain active authenticated employee session.
+ */
+export async function verifyEmployeeOtp(email: string, token: string): Promise<AuthUser> {
+  const cleanEmail = email.trim().toLowerCase();
+  const cleanToken = token.trim();
+
+  if (!cleanEmail || !cleanToken) {
+    throw new Error('Both email and verification code are required.');
+  }
+
+  // 0. Demo employee sandbox verification
+  if (
+    (cleanEmail === 'demo-employee@rtrmobiles.com' || cleanEmail === 'employee@demo.com') &&
+    (cleanToken === '123456' || cleanToken === '000000')
+  ) {
+    setDemoMode(true);
+    return {
+      id: 'demo-employee-00000000-0000-0000-0000-000000000001',
+      email: cleanEmail,
+      username: 'demo-employee',
+      name: 'Demo Employee (Sandbox)',
+      role: 'employee',
+      isDemo: true,
+      assignedShopId: 'demo-shop-00000000-0000-0000-0000-000000000001',
+      assignedShopName: 'Demo Retail Outlet',
+      assignedShopCode: 'SH-DEMO'
+    };
+  }
+
+  // 1. Primary: Server-side API endpoint
+  try {
+    let res = await fetch('/api/auth/employee/verify-otp', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: cleanEmail, token: cleanToken })
+    });
+    if (res.status === 404) {
+      res = await fetch('/api/auth/employee-verify-otp', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: cleanEmail, token: cleanToken })
+      });
+    }
+
+    if (res.ok) {
+      const data = await res.json();
+      if (data.session && isSupabaseConfigured && supabase) {
+        await supabase.auth.setSession({
+          access_token: data.session.access_token,
+          refresh_token: data.session.refresh_token
+        });
+      }
+      setDemoMode(Boolean(data.user?.isDemo));
+      return data.user;
+    }
+
+    if (res.status === 401) {
+      const data = await res.json().catch(() => ({}));
+      throw new Error(data.message || INVALID_OTP_MSG);
+    }
+
+    if (res.status === 403) {
+      const data = await res.json().catch(() => ({}));
+      throw new Error(data.message || 'Account is deactivated or unauthorized. Please contact your manager.');
+    }
+
+    if (res.status === 429) {
+      throw new Error('Too many attempts. Please wait a moment and try again.');
+    }
+  } catch (err: any) {
+    if (
+      err.message === INVALID_OTP_MSG ||
+      err.message?.includes('Invalid') ||
+      err.message?.includes('deactivated') ||
+      err.message?.includes('unauthorized') ||
+      err.message?.includes('assigned to an active shop') ||
+      err.message?.includes('Too many')
+    ) {
+      throw err;
+    }
+    // Fall through to direct Supabase verifyOtp
+  }
+
+  // 2. Direct Supabase fallback
+  if (isSupabaseConfigured && supabase) {
+    const { data: verifyData, error: verifyError } = await supabase.auth.verifyOtp({
+      email: cleanEmail,
+      token: cleanToken,
+      type: 'email'
+    });
+
+    if (verifyError || !verifyData.user) {
+      throw new Error(INVALID_OTP_MSG);
+    }
+
+    // Role check
+    const { data: membership } = await supabase
+      .from('business_memberships')
+      .select('business_id, role, is_active')
+      .eq('user_id', verifyData.user.id)
+      .maybeSingle();
+
+    if (!membership || !membership.is_active || membership.role !== 'employee') {
+      await supabase.auth.signOut().catch(() => {});
+      throw new Error('Account is deactivated or unauthorized. Please contact your manager.');
+    }
+
+    // Shop assignment check
+    const { data: sm } = await supabase
+      .from('shop_memberships')
+      .select('shop_id, shops(id, name, code, is_active)')
+      .eq('user_id', verifyData.user.id)
+      .maybeSingle();
+
+    const shop = (sm as any)?.shops;
+    if (!sm || !shop || !shop.is_active) {
+      await supabase.auth.signOut().catch(() => {});
+      throw new Error('Your employee account is not currently assigned to an active shop. Please contact your manager.');
+    }
+
+    setDemoMode(false);
+    return {
+      id: verifyData.user.id,
+      email: verifyData.user.email || cleanEmail,
+      username: cleanEmail.split('@')[0] || cleanEmail,
+      name: verifyData.user.user_metadata?.full_name || 'Shop Staff',
+      role: 'employee',
+      isDemo: false,
+      assignedShopId: sm.shop_id,
+      assignedShopName: shop.name,
+      assignedShopCode: shop.code
+    };
+  }
+
+  throw new Error(NETWORK_ERROR_MSG);
+}

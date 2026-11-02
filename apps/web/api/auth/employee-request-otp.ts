@@ -88,11 +88,20 @@ export default async function handler(req: any, res: any) {
       return genericResponse();
     }
 
-    // Dispatch Supabase OTP with shouldCreateUser: false
+    const canonicalRedirect = process.env.NODE_ENV === 'production'
+      ? 'https://rtr-management-cfn4.vercel.app/login'
+      : (process.env.APP_URL || 'http://localhost:5173/login');
+
+    const targetRedirect = (typeof req.body?.redirectTo === 'string' && req.body.redirectTo.startsWith('http'))
+      ? req.body.redirectTo
+      : canonicalRedirect;
+
+    // Dispatch Supabase OTP with shouldCreateUser: false and configured redirect
     const { error: otpError } = await supabaseAnon.auth.signInWithOtp({
       email: cleanEmail,
       options: {
-        shouldCreateUser: false
+        shouldCreateUser: false,
+        emailRedirectTo: targetRedirect
       }
     });
 
