@@ -54,17 +54,20 @@ interface WorkspaceLayoutProps {
 }
 
 const WorkspaceLayout: React.FC<WorkspaceLayoutProps> = ({ currentUser, isOnline, onSignOut }) => {
+  const isEmployee = currentUser.role === 'employee';
+
   return (
     <div className="min-h-screen bg-[#EEF2F6] text-[#102A4C] flex flex-col font-sans">
       <Navbar
         userRole={currentUser.role}
         userName={currentUser.name}
         userId={currentUser.id}
+        assignedShopName={currentUser.assignedShopName}
         isOnline={isOnline}
         onSignOut={onSignOut}
       />
       <InstallAppBanner />
-      <main className="flex-1 w-full lg:pl-[205px] print:pl-0 animate-fade-in overflow-x-hidden">
+      <main className={`flex-1 w-full ${isEmployee ? 'pl-0' : 'lg:pl-[205px]'} print:pl-0 animate-fade-in overflow-x-hidden`}>
         <div className="w-full max-w-[1400px] mx-auto px-3 sm:px-6 lg:px-8 py-4 sm:py-6">
           <Suspense fallback={<div className="py-6"><TableSkeleton rows={5} /></div>}>
             <Outlet />

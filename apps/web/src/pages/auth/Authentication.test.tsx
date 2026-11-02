@@ -525,9 +525,11 @@ describe('Secure Owner Authentication Suite', () => {
         </ToastProvider>
       );
 
-      // Workspace layout with Navbar elements is rendered
-      expect(html).toContain('lg:pl-[205px]');
+      // Employee workspace layout has no left sidebar and no lg:pl-[205px] padding
+      expect(html).not.toContain('lg:pl-[205px]');
+      expect(html).not.toContain('aria-label="Main Desktop Navigation"');
       expect(html).toContain('Shop Staff');
+      expect(html).toContain('SHOP EMPLOYEE • Branch 1');
       expect(html).not.toContain('Business Owner');
     });
   });

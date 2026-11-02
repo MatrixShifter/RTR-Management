@@ -143,4 +143,48 @@ describe('Navbar Component — Responsive Sidebar & Top Header Architecture', ()
     expect(html).toContain('aria-expanded="false"');
     expect(html).toContain('aria-controls="mobile-navigation-drawer"');
   });
+
+  it('completely removes sidebar, hamburger button, and mobile drawer when userRole is employee', () => {
+    const html = renderToString(
+      <MemoryRouter initialEntries={['/']}>
+        <Navbar
+          userRole="employee"
+          userName="Shop Staff"
+          assignedShopName="Supreme Mobiles"
+          isOnline={true}
+          onSignOut={vi.fn()}
+        />
+      </MemoryRouter>
+    );
+
+    // Sidebar navigation and hamburger controls must be removed for employees
+    expect(html).not.toContain('aria-label="Main Desktop Navigation"');
+    expect(html).not.toContain('aria-label="Open navigation menu"');
+    expect(html).not.toContain('mobile-navigation-drawer');
+    expect(html).not.toContain('w-[205px]');
+
+    // Employee branding, live indicator, and profile badge remain
+    expect(html).toContain('RTR');
+    expect(html).toContain('Wholesale Management');
+    expect(html).toContain('SHOP EMPLOYEE • Supreme Mobiles');
+    expect(html).toContain('Shop Staff');
+  });
+
+  it('strictly excludes Settings link from employee profile menu', () => {
+    const html = renderToString(
+      <MemoryRouter initialEntries={['/']}>
+        <Navbar
+          userRole="employee"
+          userName="Shop Staff"
+          assignedShopName="Branch 1"
+          isOnline={true}
+          onSignOut={vi.fn()}
+        />
+      </MemoryRouter>
+    );
+
+    // Settings must NOT appear for employee anywhere in Navbar
+    expect(html).not.toContain('Settings');
+    expect(html).not.toContain('/settings');
+  });
 });

@@ -73,14 +73,12 @@ export const Navbar: React.FC<NavbarProps> = ({
     window.addEventListener('click', handleOutsideClick);
     return () => window.removeEventListener('click', handleOutsideClick);
   }, []);
-  // Primary navigation links for the simplified Records ledger workspace
+  // Primary navigation links for the simplified Records ledger workspace (Owner only)
   const isEmployee = userRole === 'employee';
-  const primaryOwnerLinks = isEmployee
-    ? [{ label: 'My Shop Records', to: '/', icon: ClipboardList, alias: 'Records' }]
-    : [
-        { label: 'Records', to: '/', icon: ClipboardList, alias: 'Records' },
-        { label: 'Statements', to: '/statements', icon: FileSpreadsheet, alias: 'Reports' }
-      ];
+  const primaryOwnerLinks = [
+    { label: 'Records', to: '/', icon: ClipboardList, alias: 'Records' },
+    { label: 'Statements', to: '/statements', icon: FileSpreadsheet, alias: 'Reports' }
+  ];
 
   const isCurrentActive = (to: string) => {
     if (to === '/' && (location.pathname === '/' || location.pathname === '/records')) return true;
@@ -107,24 +105,29 @@ export const Navbar: React.FC<NavbarProps> = ({
       >
         <div className="w-full px-3 sm:px-6 h-full flex items-center justify-between gap-3">
           <span className="sr-only">{activeTitle}</span>
+          <span className="sr-only">{userRole === 'employee' ? (assignedShopName ? `SHOP EMPLOYEE • ${assignedShopName}` : 'SHOP EMPLOYEE') : userRole.toUpperCase()}</span>
 
           {/* Left: Hamburger + RTR Logo + Brand Name */}
           <div className="flex items-center space-x-2 sm:space-x-3">
-            {/* Mobile hamburger button */}
-            <button
-              onClick={() => setMobileMenuOpen(true)}
-              className="lg:hidden min-h-[44px] min-w-[44px] flex items-center justify-center p-2 text-slate-300 hover:text-white hover:bg-slate-800/80 rounded-xl transition-colors focus:outline-none cursor-pointer"
-              aria-label="Open navigation menu"
-              aria-expanded={mobileMenuOpen ? "true" : "false"}
-              aria-controls="mobile-navigation-drawer"
-            >
-              <Menu className="w-5 h-5" />
-            </button>
+            {/* Mobile hamburger button - Owner only */}
+            {!isEmployee && (
+              <button
+                onClick={() => setMobileMenuOpen(true)}
+                className="lg:hidden min-h-[44px] min-w-[44px] flex items-center justify-center p-2 text-slate-300 hover:text-white hover:bg-slate-800/80 rounded-xl transition-colors focus:outline-none cursor-pointer"
+                aria-label="Open navigation menu"
+                aria-expanded={mobileMenuOpen ? "true" : "false"}
+                aria-controls="mobile-navigation-drawer"
+              >
+                <Menu className="w-5 h-5" />
+              </button>
+            )}
 
-            {/* Desktop hamburger icon display matching reference UI */}
-            <div className="hidden lg:flex items-center justify-center p-1.5 text-slate-300">
-              <Menu className="w-5 h-5" />
-            </div>
+            {/* Desktop hamburger icon display matching reference UI - Owner only */}
+            {!isEmployee && (
+              <div className="hidden lg:flex items-center justify-center p-1.5 text-slate-300">
+                <Menu className="w-5 h-5" />
+              </div>
+            )}
 
             <Link to="/" className="flex items-center space-x-2.5 py-1">
               <div className="w-8 h-8 rounded-lg bg-crimpston-electric bg-[#168BFF] flex items-center justify-center font-black text-white text-xs tracking-wider shadow-sm flex-shrink-0 overflow-hidden p-0.5">
@@ -179,17 +182,19 @@ export const Navbar: React.FC<NavbarProps> = ({
                       {userRole === 'employee' ? (assignedShopName ? `SHOP EMPLOYEE • ${assignedShopName}` : 'SHOP EMPLOYEE') : userRole.toUpperCase()}
                     </span>
                   </div>
-                  <div className="py-1">
-                    <Link
-                      to="/settings"
-                      onClick={() => setUserMenuOpen(false)}
-                      className="flex items-center gap-2.5 px-3.5 py-2 hover:bg-[#152744] text-slate-200 hover:text-white transition-colors"
-                    >
-                      <Settings className="w-4 h-4 text-slate-400" />
-                      <span>Settings</span>
-                    </Link>
-                  </div>
-                  <div className="border-t border-[#1F3A60]/80 pt-1">
+                  {!isEmployee && (
+                    <div className="py-1">
+                      <Link
+                        to="/settings"
+                        onClick={() => setUserMenuOpen(false)}
+                        className="flex items-center gap-2.5 px-3.5 py-2 hover:bg-[#152744] text-slate-200 hover:text-white transition-colors"
+                      >
+                        <Settings className="w-4 h-4 text-slate-400" />
+                        <span>Settings</span>
+                      </Link>
+                    </div>
+                  )}
+                  <div className={!isEmployee ? "border-t border-[#1F3A60]/80 pt-1" : "pt-1"}>
                     <button
                       type="button"
                       onClick={() => {
@@ -228,15 +233,17 @@ export const Navbar: React.FC<NavbarProps> = ({
                     <p className="font-semibold text-white truncate">{userName || 'Business Owner'}</p>
                     <span className="text-[10px] text-[#7DD3FC] font-semibold">{userRole === 'employee' ? (assignedShopName ? `SHOP EMPLOYEE • ${assignedShopName}` : 'SHOP EMPLOYEE') : userRole.toUpperCase()}</span>
                   </div>
-                  <Link
-                    to="/settings"
-                    onClick={() => setUserMenuOpen(false)}
-                    className="flex items-center gap-2.5 px-3 py-2 hover:bg-[#152744] text-slate-200"
-                  >
-                    <Settings className="w-4 h-4 text-slate-400" />
-                    <span>Settings</span>
-                  </Link>
-                  <div className="border-t border-[#1F3A60]/80 pt-1">
+                  {!isEmployee && (
+                    <Link
+                      to="/settings"
+                      onClick={() => setUserMenuOpen(false)}
+                      className="flex items-center gap-2.5 px-3 py-2 hover:bg-[#152744] text-slate-200"
+                    >
+                      <Settings className="w-4 h-4 text-slate-400" />
+                      <span>Settings</span>
+                    </Link>
+                  )}
+                  <div className={!isEmployee ? "border-t border-[#1F3A60]/80 pt-1" : "pt-1"}>
                     <button
                       type="button"
                       onClick={() => {
@@ -257,12 +264,13 @@ export const Navbar: React.FC<NavbarProps> = ({
       </header>
 
       {/* ========================================================
-          2. COMPACT DESKTOP LEFT SIDEBAR (Records & Settings Only)
+          2. COMPACT DESKTOP LEFT SIDEBAR (Owner Only)
          ======================================================== */}
-      <aside 
-        className="fixed top-14 bottom-0 left-0 w-64 bg-crimpston-navy w-[205px] bg-[#0C1E38] text-slate-200 z-30 hidden lg:flex lg:flex-col border-r border-[#152744] shadow-sm select-none print:hidden"
-        aria-label="Main Desktop Navigation"
-      >
+      {!isEmployee && (
+        <aside 
+          className="fixed top-14 bottom-0 left-0 w-64 bg-crimpston-navy w-[205px] bg-[#0C1E38] text-slate-200 z-30 hidden lg:flex lg:flex-col border-r border-[#152744] shadow-sm select-none print:hidden"
+          aria-label="Main Desktop Navigation"
+        >
         <div className="p-3 space-y-1">
           {primaryOwnerLinks.map(link => {
             const Icon = link.icon;
@@ -299,7 +307,7 @@ export const Navbar: React.FC<NavbarProps> = ({
 
         {/* Hidden screen-reader helpers to preserve accessibility & test assertions */}
         <div className="sr-only">
-          <span>{userRole === 'employee' ? (assignedShopName ? `SHOP EMPLOYEE • ${assignedShopName}` : 'SHOP EMPLOYEE') : userRole.toUpperCase()}</span>
+          <span>{userRole.toUpperCase()}</span>
           <span>Logout</span>
           <span>System connected and live</span>
           <span>Live</span>
@@ -307,11 +315,12 @@ export const Navbar: React.FC<NavbarProps> = ({
           <span>{isOnline ? 'Live' : 'Offline'}</span>
         </div>
       </aside>
+      )}
 
       {/* ========================================================
           3. MOBILE NAVIGATION DRAWER
          ======================================================== */}
-      {mobileMenuOpen && (
+      {!isEmployee && mobileMenuOpen && (
         <div 
           className="fixed inset-0 z-50 lg:hidden overflow-hidden" 
           id="mobile-navigation-drawer"
@@ -362,7 +371,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                   <div className="flex items-center justify-between gap-1">
                     <span className="truncate font-semibold text-xs text-white max-w-[120px]">{userName}</span>
                     <span className="text-[9px] font-bold px-1.5 py-0.5 rounded uppercase tracking-wider bg-blue-400/20 text-blue-300">
-                      {userRole === 'employee' ? (assignedShopName ? `SHOP EMPLOYEE • ${assignedShopName}` : 'SHOP EMPLOYEE') : userRole.toUpperCase()}
+                      {userRole.toUpperCase()}
                     </span>
                   </div>
                   <div className="flex items-center gap-1.5 text-[10px] text-slate-400 mt-0.5">
