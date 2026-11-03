@@ -55,7 +55,9 @@ export function resolveLoginEmail(identifier: string): string | null {
  */
 export async function signIn(username: string, password: string): Promise<AuthUser> {
   const cleanUsername = username.trim();
-  if (!cleanUsername || !password) {
+  const isTestingMode = import.meta.env.VITE_OWNER_TESTING_MODE === 'true';
+  const effectivePassword = password || (isTestingMode ? 'local-testing' : '');
+  if (!cleanUsername || !effectivePassword) {
     throw new Error(INCORRECT_CREDENTIALS_MSG);
   }
 
@@ -64,7 +66,7 @@ export async function signIn(username: string, password: string): Promise<AuthUs
     const res = await fetch('/api/auth/login', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username: cleanUsername, password })
+      body: JSON.stringify({ username: cleanUsername, password: effectivePassword })
     });
 
     if (res.ok) {

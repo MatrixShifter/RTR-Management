@@ -36,6 +36,8 @@ export const Login: React.FC<LoginProps> = ({
     return initialTab === 'employee' ? 'employee' : 'owner';
   });
 
+  const isOwnerTestingMode = Boolean(import.meta.env.VITE_OWNER_TESTING_MODE === 'true' && import.meta.env.MODE !== 'production');
+
   // Owner Login state
   const [username, setUsername] = useState(() => getRememberedUsername());
   const [password, setPassword] = useState('');
@@ -275,8 +277,8 @@ export const Login: React.FC<LoginProps> = ({
                         setPassword(e.target.value);
                         if (errorMsg) setErrorMsg(null);
                       }}
-                      placeholder="••••••••••••"
-                      required
+                      placeholder={isOwnerTestingMode ? "Testing mode: password optional" : "••••••••••••"}
+                      required={!isOwnerTestingMode}
                       disabled={isLoading}
                       className="w-full pl-9 pr-10 py-2.5 text-xs sm:text-sm bg-white border border-slate-200 rounded-xl text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
                     />

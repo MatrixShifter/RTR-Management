@@ -58,6 +58,46 @@ describe('Authentication API Endpoints (/api/auth)', { timeout: 25000 }, () => {
       expect(res.body.user.email).toMatch(/owner@rtrmobiles\.com|rtrmobile92@gmail\.com|vinov042007@gmail\.com/);
     });
 
+    it('authenticates owner via legitimate Supabase testing flow when OWNER_TESTING_MODE is active in local dev', async () => {
+      const prevMode = process.env.OWNER_TESTING_MODE;
+      const prevNodeEnv = process.env.NODE_ENV;
+      process.env.OWNER_TESTING_MODE = 'true';
+      process.env.NODE_ENV = 'development';
+
+      vi.spyOn(supabaseAnon.auth, 'signInWithPassword').mockResolvedValueOnce({
+        data: { user: null, session: null },
+        error: new Error('Invalid login credentials') as any
+      });
+
+      vi.spyOn(supabaseAdmin.auth.admin, 'generateLink').mockResolvedValueOnce({
+        data: {
+          user: { id: 'ac088d6d-6aef-40b0-8388-51e5d74063a6', email: 'rtrmobile92@gmail.com' } as any,
+          properties: { hashed_token: 'valid-test-hash' } as any
+        },
+        error: null
+      });
+
+      vi.spyOn(supabaseAnon.auth, 'verifyOtp').mockResolvedValueOnce({
+        data: {
+          user: { id: 'ac088d6d-6aef-40b0-8388-51e5d74063a6', email: 'rtrmobile92@gmail.com', user_metadata: { role: 'owner', full_name: 'Business Owner' } } as any,
+          session: { access_token: 'authentic-testing-token', refresh_token: 'refresh', expires_at: 1234567, expires_in: 3600 } as any
+        },
+        error: null
+      });
+
+      const res = await request(app)
+        .post('/api/auth/login')
+        .send({ username: 'owner', password: 'any-testing-password' });
+
+      expect(res.status).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(res.body.session.access_token).toBe('authentic-testing-token');
+      expect(res.body.user.role).toBe('owner');
+
+      process.env.OWNER_TESTING_MODE = prevMode;
+      process.env.NODE_ENV = prevNodeEnv;
+    });
+
     it('authenticates valid owner account using email address', async () => {
       vi.spyOn(supabaseAnon.auth, 'signInWithPassword').mockResolvedValueOnce({
         data: {

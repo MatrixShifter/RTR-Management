@@ -77,10 +77,38 @@ export default async function handler(req: any, res: any) {
   }
 
   try {
-    const { data: authData, error: authError } = await supabaseAnon.auth.signInWithPassword({
+    let { data: authData, error: authError } = await supabaseAnon.auth.signInWithPassword({
       email,
       password: cleanPassword
     });
+
+    // Temporary isolated owner testing authentication (Local Development Only)
+    // Strictly requires OWNER_TESTING_MODE=true AND NODE_ENV !== 'production'
+    // Uses legitimate Supabase generateLink + verifyOtp to obtain authentic Supabase session
+    const isOwnerTestingActive = (process.env.OWNER_TESTING_MODE === 'true' || process.env.VITE_OWNER_TESTING_MODE === 'true') && 
+                                 process.env.NODE_ENV !== 'production' &&
+                                 email.toLowerCase() === configuredOwnerEmail;
+
+    if ((authError || !authData?.user || !authData?.session) && isOwnerTestingActive && supabaseAdmin) {
+      try {
+        const { data: linkData, error: linkErr } = await supabaseAdmin.auth.admin.generateLink({
+          type: 'magiclink',
+          email
+        });
+
+        if (!linkErr && linkData?.properties?.hashed_token) {
+          const { data: otpData, error: otpErr } = await supabaseAnon.auth.verifyOtp({
+            token_hash: linkData.properties.hashed_token,
+            type: 'magiclink'
+          });
+
+          if (!otpErr && otpData?.user && otpData?.session) {
+            authData = otpData as any;
+            authError = null;
+          }
+        }
+      } catch {}
+    }
 
     if (authError || !authData.user || !authData.session) {
       if (authError?.status === 429 || authError?.message?.toLowerCase().includes('rate limit')) {

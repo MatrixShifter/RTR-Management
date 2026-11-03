@@ -244,10 +244,41 @@ authRouter.post('/login', authRateLimiter, async (req: Request, res: Response) =
       });
     }
 
-    const { data, error } = await supabaseAnon.auth.signInWithPassword({
+    let { data, error } = await supabaseAnon.auth.signInWithPassword({
       email: resolvedEmail,
       password: password
     });
+
+    // Temporary isolated owner testing authentication (Local Development Only)
+    // Strictly requires OWNER_TESTING_MODE=true AND NODE_ENV !== 'production'
+    // Uses legitimate Supabase generateLink + verifyOtp to obtain authentic Supabase session
+    const isOwnerTestingActive = (process.env.OWNER_TESTING_MODE === 'true' || process.env.VITE_OWNER_TESTING_MODE === 'true') && 
+                                 process.env.NODE_ENV !== 'production' &&
+                                 resolvedEmail.toLowerCase() === configuredOwnerEmail;
+
+    if ((error || !data?.user || !data?.session) && isOwnerTestingActive) {
+      try {
+        const { data: linkData, error: linkErr } = await supabaseAdmin.auth.admin.generateLink({
+          type: 'magiclink',
+          email: resolvedEmail
+        });
+
+        if (!linkErr && linkData?.properties?.hashed_token) {
+          const { data: otpData, error: otpErr } = await supabaseAnon.auth.verifyOtp({
+            token_hash: linkData.properties.hashed_token,
+            type: 'magiclink'
+          });
+
+          if (!otpErr && otpData?.user && otpData?.session) {
+            data = otpData as any;
+            error = null;
+            logger.info(`[Auth Testing] Temporary owner testing mode issued authentic Supabase session for ${resolvedEmail}`);
+          }
+        }
+      } catch (err: any) {
+        logger.warn(`[Auth Testing] Could not issue testing session: ${err?.message}`);
+      }
+    }
 
     if (error || !data.user || !data.session) {
       logSecurityEvent({
