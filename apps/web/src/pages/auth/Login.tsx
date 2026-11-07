@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { 
   ArrowRight, 
   Eye, 
@@ -32,11 +32,30 @@ export const Login: React.FC<LoginProps> = ({
   onNavigateToForgot,
   initialTab
 }) => {
+  // If user arrived at /login with password recovery parameters in the URL hash or query string
+  // (e.g. from Supabase email redirect fallback or external mail client opening /login),
+  // immediately intercept and forward them to /reset-password preserving all tokens
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const hash = window.location.hash || '';
+    const search = window.location.search || '';
+    const isRecovery = 
+      hash.includes('type=recovery') || 
+      search.includes('type=recovery') ||
+      hash.includes('access_token') ||
+      search.includes('code=') ||
+      search.includes('token_hash=') ||
+      hash.includes('error_code=') ||
+      search.includes('error_code=');
+
+    if (isRecovery) {
+      window.location.replace('/reset-password' + search + hash);
+    }
+  }, []);
+
   const [activeTab, setActiveTab] = useState<'owner' | 'employee'>(() => {
     return initialTab === 'employee' ? 'employee' : 'owner';
   });
-
-  const isOwnerTestingMode = Boolean(import.meta.env.VITE_OWNER_TESTING_MODE === 'true' && import.meta.env.MODE !== 'production');
 
   // Owner Login state
   const [username, setUsername] = useState(() => getRememberedUsername());
@@ -115,6 +134,27 @@ export const Login: React.FC<LoginProps> = ({
       setIsLoading(false);
     }
   };
+
+  if (typeof window !== 'undefined') {
+    const hash = window.location.hash || '';
+    const search = window.location.search || '';
+    if (
+      hash.includes('type=recovery') || 
+      search.includes('type=recovery') ||
+      hash.includes('access_token') ||
+      search.includes('code=') ||
+      search.includes('token_hash=') ||
+      hash.includes('error_code=') ||
+      search.includes('error_code=')
+    ) {
+      return (
+        <div className="min-h-screen bg-slate-50 flex flex-col justify-center items-center py-12 px-4">
+          <div className="w-8 h-8 border-3 border-blue-600/30 border-t-blue-600 rounded-full animate-spin" />
+          <p className="mt-4 text-xs text-slate-500">Redirecting to password recovery...</p>
+        </div>
+      );
+    }
+  }
 
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col justify-center py-12 px-4 sm:px-6 lg:px-8">
@@ -277,8 +317,8 @@ export const Login: React.FC<LoginProps> = ({
                         setPassword(e.target.value);
                         if (errorMsg) setErrorMsg(null);
                       }}
-                      placeholder={isOwnerTestingMode ? "Testing mode: password optional" : "••••••••••••"}
-                      required={!isOwnerTestingMode}
+                      placeholder="••••••••••••"
+                      required
                       disabled={isLoading}
                       className="w-full pl-9 pr-10 py-2.5 text-xs sm:text-sm bg-white border border-slate-200 rounded-xl text-slate-900 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
                     />

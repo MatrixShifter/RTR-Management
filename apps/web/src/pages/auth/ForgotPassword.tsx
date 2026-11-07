@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { ArrowLeft, Mail, CheckCircle2, AlertCircle } from 'lucide-react';
 import { requestPasswordReset, RECOVERY_CONFIRMATION_MSG } from '../../services/auth.js';
 
@@ -12,6 +12,24 @@ export const ForgotPassword: React.FC<ForgotPasswordProps> = ({ onNavigateToLogi
   const [isSubmitted, setIsSubmitted] = useState(false);
   const [feedbackMsg, setFeedbackMsg] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  // If user arrived from an older Supabase recovery link configured with /forgot-password,
+  // forward immediately to /reset-password while preserving token hashes and query params
+  useEffect(() => {
+    const hash = window.location.hash || '';
+    const search = window.location.search || '';
+    if (
+      hash.includes('type=recovery') || 
+      search.includes('type=recovery') || 
+      hash.includes('access_token') || 
+      search.includes('code=') ||
+      search.includes('token_hash=') ||
+      hash.includes('error_code=') ||
+      search.includes('error_code=')
+    ) {
+      window.location.replace('/reset-password' + search + hash);
+    }
+  }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();

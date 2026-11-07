@@ -216,4 +216,48 @@ describe('MonthlyShopStatement Component Suite', () => {
     expect(html).toContain('Type-C Braided Cable');
     expect(html).toContain('Gamma Accessories');
   });
+
+  it('aggregates all transactions across all months when All Months (Full Year) is selected', () => {
+    const html = renderToString(
+      <MonthlyShopStatement
+        initialShops={mockShops}
+        initialRecords={mockRecords}
+        initialMonth={0}
+        initialYear={2026}
+      />
+    );
+
+    // Full year 2026 includes both September (2500) and October (3500) = 6000
+    expect(html).toContain('₹6,000');
+    // Customer price: 3000 (Oct) + 4000 (Sep) = 7000
+    expect(html).toContain('₹7,000');
+    // Profit: 500 (Oct) + 1500 (Sep) = +2000
+    expect(html).toContain('+₹2,000');
+    expect(html).toContain('All Months');
+    expect(html).toContain('All Months (Full Year)');
+  });
+
+  it('integrates Category Breakdown and displays product categories from catalog', () => {
+    const mockProducts = [
+      { id: 'prod-glass', name: 'Tempered Glass 9D', sku: 'TG-9D', category: 'Tempered Glass' as const, minStock: 5, isActive: true },
+      { id: 'prod-charger', name: 'Fast Charger 25W', sku: 'FC-25W', category: 'Chargers & Adapters' as const, minStock: 5, isActive: true }
+    ];
+
+    const html = renderToString(
+      <MonthlyShopStatement
+        initialShops={mockShops}
+        initialRecords={mockRecords}
+        initialProducts={mockProducts}
+        initialShopId="shop-alpha"
+        initialMonth={10}
+        initialYear={2026}
+      />
+    );
+
+    // Displays Category badge and toggles
+    expect(html).toContain('Tempered Glass');
+    expect(html).toContain('Chargers &amp; Adapters');
+    expect(html).toContain('Categories');
+    expect(html).toContain('Products');
+  });
 });

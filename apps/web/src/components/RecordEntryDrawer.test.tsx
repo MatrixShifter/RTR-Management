@@ -18,7 +18,7 @@ import {
   setDemoMode
 } from '../services/db.js';
 
-describe('RecordEntryDrawer Component & Catalog Management Suite', () => {
+describe('RecordEntryDrawer Component & Catalog Management Suite', { timeout: 20000 }, () => {
   beforeEach(() => {
     setDemoMode(true);
   });

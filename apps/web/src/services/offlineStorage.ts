@@ -10,6 +10,7 @@
  */
 
 import { Shop, Product, BusinessRecord, DeliveryRecord } from './db.js';
+import { safeLogger } from '../lib/safeLogger.js';
 
 const DB_NAME = 'rtr_wholesale_offline_db';
 const DB_VERSION = 1;
@@ -182,7 +183,7 @@ async function runTransaction<T>(
     });
   } catch (err: any) {
     if (err?.name === 'QuotaExceededError') {
-      console.warn('[OfflineStorage] Storage quota exceeded. Evicting old items.');
+      safeLogger.warn('Storage quota exceeded, evicting old items');
     }
     // Fall back to in-memory store
     const mem = getMemoryStore(storeName);

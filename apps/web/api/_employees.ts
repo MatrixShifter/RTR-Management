@@ -367,14 +367,14 @@ export async function handleCreateEmployee(req: any, res: any) {
     if (isNewlyCreatedAuth && targetUserId) {
       try {
         await supabaseAdmin.auth.admin.deleteUser(targetUserId);
-      } catch (cleanupErr) {
-        console.error('Failed to cleanup orphaned auth user during compensation:', cleanupErr);
+      } catch {
+        // Suppress raw error output
       }
     }
 
     return res.status(500).json({
       error: 'Internal Server Error',
-      message: err?.message || 'Failed to provision employee account.'
+      message: 'Failed to provision employee account.'
     });
   }
 }

@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Lock, Eye, EyeOff, CheckCircle2, AlertCircle, ArrowLeft, ShieldAlert, KeyRound } from 'lucide-react';
 import { updatePassword, resolveLoginEmail } from '../../services/auth.js';
 import { supabase, isSupabaseConfigured } from '../../lib/supabase.js';
+import { safeLogger } from '../../lib/safeLogger.js';
 
 interface ResetPasswordProps {
   onNavigateToLogin?: () => void;
@@ -91,23 +92,12 @@ export const ResetPassword: React.FC<ResetPasswordProps> = ({
           return;
         }
 
-        // 1. Check existing active Supabase session first
-        // If client's internal URL detector already verified the token/code, accept it immediately
-        const { data: { session: initialSession } } = await supabase.auth.getSession();
-        if (initialSession?.user) {
-          if (isMounted) {
-            setHasValidRecoverySession(true);
-            setIsVerifyingSession(false);
-          }
-          return;
-        }
-
         // Parse both query parameters (?code=...) and hash fragment parameters (#access_token=...)
         const searchParams = new URLSearchParams(window.location.search);
         const hashStr = window.location.hash.startsWith('#') ? window.location.hash.slice(1) : window.location.hash;
         const hashParams = new URLSearchParams(hashStr);
 
-        // 2. Check for error parameters in either URL query or hash fragment (e.g. expired link from Supabase)
+        // 1. Check for error parameters in either URL query or hash fragment (e.g. expired link from Supabase)
         const errorDesc = hashParams.get('error_description') ||
                           searchParams.get('error_description') ||
                           hashParams.get('error') ||
@@ -135,6 +125,17 @@ export const ResetPassword: React.FC<ResetPasswordProps> = ({
           return;
         }
 
+        // 2. Check existing active Supabase session first
+        // If client's internal URL detector already verified the token/code, accept it immediately
+        const { data: { session: initialSession } } = await supabase.auth.getSession();
+        if (initialSession?.user) {
+          if (isMounted) {
+            setHasValidRecoverySession(true);
+            setIsVerifyingSession(false);
+          }
+          return;
+        }
+
         // 3. Handle PKCE authorization code in query string: ?code=...
         const code = searchParams.get('code');
         if (code) {
@@ -154,7 +155,7 @@ export const ResetPassword: React.FC<ResetPasswordProps> = ({
               }
 
               if (process.env.NODE_ENV !== 'production') {
-                console.warn('[Recovery Session Error]', 'PKCE exchange was unsuccessful');
+                safeLogger.warn('Recovery session PKCE exchange unsuccessful');
               }
               if (isMounted) {
                 setErrorMsg(error.message || 'The password reset link is invalid or has expired.');
@@ -199,7 +200,7 @@ export const ResetPassword: React.FC<ResetPasswordProps> = ({
               }
 
               if (process.env.NODE_ENV !== 'production') {
-                console.warn('[Recovery Session Error]', 'OTP token hash verification was unsuccessful');
+                safeLogger.warn('Recovery session OTP token hash verification unsuccessful');
               }
               if (isMounted) {
                 setErrorMsg(error.message || 'The password reset link is invalid or has expired.');
@@ -244,7 +245,7 @@ export const ResetPassword: React.FC<ResetPasswordProps> = ({
               }
 
               if (process.env.NODE_ENV !== 'production') {
-                console.warn('[Recovery Session Error]', 'Session initialization was unsuccessful');
+                safeLogger.warn('Recovery session initialization unsuccessful');
               }
               if (isMounted) {
                 setErrorMsg(error.message || 'The password reset link is invalid or has expired.');
@@ -401,7 +402,7 @@ export const ResetPassword: React.FC<ResetPasswordProps> = ({
           Create New Password
         </h1>
         <p className="mt-1.5 text-xs sm:text-sm text-slate-500">
-          Set a strong, secure password for your RTR Business Owner account
+          Set a strong, secure password for your RTR account
         </p>
       </div>
 

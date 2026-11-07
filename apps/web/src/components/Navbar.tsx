@@ -73,25 +73,26 @@ export const Navbar: React.FC<NavbarProps> = ({
     window.addEventListener('click', handleOutsideClick);
     return () => window.removeEventListener('click', handleOutsideClick);
   }, []);
-  // Primary navigation links for the simplified Records ledger workspace (Owner only)
+
+  // Primary navigation links for the owner workspace
   const isEmployee = userRole === 'employee';
   const primaryOwnerLinks = [
-    { label: 'Records', to: '/', icon: ClipboardList, alias: 'Records' },
+    { label: 'Records', to: '/records', icon: ClipboardList, alias: 'Records' },
     { label: 'Statements', to: '/statements', icon: FileSpreadsheet, alias: 'Reports' }
   ];
 
   const isCurrentActive = (to: string) => {
-    if (to === '/' && (location.pathname === '/' || location.pathname === '/records')) return true;
-    if (to === '/statements' && (location.pathname === '/statements' || location.pathname === '/reports')) return true;
-    if (to === '/settings' && (location.pathname === '/settings' || location.pathname === '/management')) return true;
+    if (to === '/records') return location.pathname === '/records' || location.pathname === '/' || location.pathname === '/dashboard';
+    if (to === '/statements') return location.pathname.startsWith('/statements') || location.pathname.startsWith('/reports') || location.pathname.startsWith('/analytics');
+    if (to === '/settings') return location.pathname.startsWith('/settings') || location.pathname.startsWith('/management');
     return location.pathname === to;
   };
 
-  const activeTitle = location.pathname === '/' || location.pathname === '/records'
+  const activeTitle = (location.pathname === '/' || location.pathname === '/records' || location.pathname === '/dashboard')
     ? 'Records'
-    : location.pathname === '/statements' || location.pathname === '/reports'
+    : location.pathname.startsWith('/statements') || location.pathname.startsWith('/reports') || location.pathname.startsWith('/analytics')
     ? 'Statements'
-    : location.pathname === '/settings' || location.pathname === '/management'
+    : location.pathname.startsWith('/settings') || location.pathname.startsWith('/management')
     ? 'Settings'
     : 'Wholesale Ledger';
 

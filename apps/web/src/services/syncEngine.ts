@@ -29,6 +29,7 @@ import {
   updateDeliveryStatus,
   settleDeliveryPayment
 } from './db.js';
+import { safeLogger } from '../lib/safeLogger.js';
 
 let isSyncInProgress = false;
 
@@ -162,7 +163,7 @@ export async function synchronizeUserData(userId: string): Promise<{
         await saveOfflineDeliveries(userId, deliveries);
       }
     } catch (pullErr) {
-      console.warn('[SyncEngine] Failed to refresh local cache from server:', pullErr);
+      safeLogger.warn('Failed to refresh local cache from server', pullErr);
     }
 
     // 5. Update sync metadata
@@ -215,7 +216,7 @@ export function initializeAutoSync(getUserId: () => string | null): () => void {
     const userId = getUserId();
     if (userId && navigator.onLine) {
       synchronizeUserData(userId).catch((err) => {
-        console.warn('[AutoSync] Background sync exception:', err);
+        safeLogger.warn('Background sync exception', err);
       });
     }
   };

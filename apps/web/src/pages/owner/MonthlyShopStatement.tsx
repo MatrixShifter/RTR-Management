@@ -12,16 +12,20 @@ import {
   Package, 
   Store,
   RefreshCw,
-  ExternalLink
+  ExternalLink,
+  Layers
 } from 'lucide-react';
-import { 
-  type Shop, 
+import {
+  type Shop,
   type BusinessRecord,
-  getShops, 
-  getBusinessRecords, 
-  normalizeDateString 
+  type Product,
+  getShops,
+  getBusinessRecords,
+  getProducts,
+  normalizeDateString
 } from '../../services/db.js';
 import { RecordDetailsModal } from '../../components/RecordDetailsModal.js';
+import { safeLogger } from '../../lib/safeLogger.js';
 
 const MONTH_NAMES = [
   'January', 'February', 'March', 'April', 'May', 'June',
@@ -31,15 +35,29 @@ const MONTH_NAMES = [
 export interface MonthlyShopStatementProps {
   initialShops?: Shop[];
   initialRecords?: BusinessRecord[];
+  initialProducts?: Product[];
   initialShopId?: string;
   initialMonth?: number;
   initialYear?: number;
+}
+
+export interface CategoryBreakdownItem {
+  category: string;
+  transactionCount: number;
+  totalQuantity: number;
+  totalAmount: number;
+  totalCustomerPrice: number;
+  totalProfit: number;
+  recordsWithCpCount: number;
+  missingCpCount: number;
+  profitMarginPercent: number | null;
 }
 
 interface ProductBreakdownItem {
   productId: string;
   productName: string;
   productSku: string;
+  category?: string;
   totalQuantity: number;
   transactionCount: number;
   totalAmount: number;
@@ -71,6 +89,7 @@ interface ShopBreakdownItem {
 export const MonthlyShopStatement: React.FC<MonthlyShopStatementProps> = ({
   initialShops,
   initialRecords,
+  initialProducts,
   initialShopId,
   initialMonth,
   initialYear
@@ -89,6 +108,9 @@ export const MonthlyShopStatement: React.FC<MonthlyShopStatementProps> = ({
   // Data States
   const [shops, setShops] = useState<Shop[]>(initialShops || []);
   const [records, setRecords] = useState<BusinessRecord[]>(initialRecords || []);
+  const [productsList, setProductsList] = useState<Product[]>(initialProducts || []);
+  const [selectedCategory, setSelectedCategory] = useState<string>('all');
+  const [breakdownView, setBreakdownView] = useState<'products' | 'categories'>('products');
   const [loading, setLoading] = useState<boolean>(!initialRecords || !initialShops);
   const [, setError] = useState<string | null>(null);
 
@@ -107,14 +129,16 @@ export const MonthlyShopStatement: React.FC<MonthlyShopStatementProps> = ({
     try {
       setLoading(true);
       setError(null);
-      const [fetchedShops, fetchedRecords] = await Promise.all([
+      const [fetchedShops, fetchedRecords, fetchedProducts] = await Promise.all([
         getShops(),
-        getBusinessRecords()
+        getBusinessRecords(),
+        getProducts()
       ]);
       setShops(fetchedShops);
       setRecords(fetchedRecords);
+      setProductsList(fetchedProducts);
     } catch (err: any) {
-      console.error('Failed to load statement data:', err);
+      safeLogger.error('Failed to load statement data', err);
       setError(err?.message || 'Failed to load statements.');
     } finally {
       setLoading(false);
@@ -144,7 +168,7 @@ export const MonthlyShopStatement: React.FC<MonthlyShopStatementProps> = ({
 
   // Filter records by Month & Year, and optionally by Status
   const monthFilteredRecords = useMemo(() => {
-    const targetMonthStr = `${selectedYear}-${String(selectedMonth).padStart(2, '0')}`;
+    const targetMonthStr = selectedMonth > 0 ? `${selectedYear}-${String(selectedMonth).padStart(2, '0')}` : `${selectedYear}`;
     return records.filter(r => {
       const norm = normalizeDateString(r.date);
       if (!norm.startsWith(targetMonthStr)) return false;
@@ -161,10 +185,11 @@ export const MonthlyShopStatement: React.FC<MonthlyShopStatementProps> = ({
 
   // Helper to build product breakdown from a list of records
   const buildProductBreakdown = useCallback((recList: BusinessRecord[]): ProductBreakdownItem[] => {
-    const prodMap = new Map<string, {
+    interface ProdAccumulator {
       productId: string;
       productName: string;
       productSku: string;
+      category?: string;
       totalQuantity: number;
       transactionCount: number;
       totalAmount: number;
@@ -172,16 +197,20 @@ export const MonthlyShopStatement: React.FC<MonthlyShopStatementProps> = ({
       totalProfit: number;
       recordsWithCpCount: number;
       missingCpCount: number;
-    }>();
+    }
+
+    const prodMap = new Map<string, ProdAccumulator>();
 
     for (const r of recList) {
       const key = r.productId || r.productName;
-      let existing = prodMap.get(key);
-      if (!existing) {
-        existing = {
+      let item = prodMap.get(key);
+      if (!item) {
+        const prodObj = productsList.find(p => p.id === r.productId || p.name.trim().toLowerCase() === r.productName.trim().toLowerCase());
+        item = {
           productId: r.productId || '',
           productName: r.productName,
-          productSku: r.productSku || '',
+          productSku: r.productSku || (prodObj?.sku || ''),
+          category: prodObj?.category || 'Other Accessories',
           totalQuantity: 0,
           transactionCount: 0,
           totalAmount: 0,
@@ -190,23 +219,23 @@ export const MonthlyShopStatement: React.FC<MonthlyShopStatementProps> = ({
           recordsWithCpCount: 0,
           missingCpCount: 0
         };
-        prodMap.set(key, existing);
+        prodMap.set(key, item);
       }
 
-      existing.totalQuantity += (Number(r.quantity) || 1);
-      existing.transactionCount += 1;
-      existing.totalAmount += (Number(r.totalAmount) || 0);
+      item.totalQuantity += (Number(r.quantity) || 1);
+      item.transactionCount += 1;
+      item.totalAmount += (Number(r.totalAmount) || 0);
 
       if (r.customerPrice !== undefined && r.customerPrice !== null) {
-        existing.totalCustomerPrice += Number(r.customerPrice);
-        existing.recordsWithCpCount += 1;
+        item.totalCustomerPrice += Number(r.customerPrice);
+        item.recordsWithCpCount += 1;
         if (r.profit !== undefined && r.profit !== null) {
-          existing.totalProfit += Number(r.profit);
+          item.totalProfit += Number(r.profit);
         } else {
-          existing.totalProfit += (Number(r.customerPrice) - Number(r.totalAmount));
+          item.totalProfit += (Number(r.customerPrice) - Number(r.totalAmount));
         }
       } else {
-        existing.missingCpCount += 1;
+        item.missingCpCount += 1;
       }
     }
 
@@ -235,6 +264,72 @@ export const MonthlyShopStatement: React.FC<MonthlyShopStatementProps> = ({
 
     return items;
   }, [productSortField, productSortAsc]);
+  // Helper to build category breakdown from records
+  const buildCategoryBreakdown = useCallback((recList: BusinessRecord[]): CategoryBreakdownItem[] => {
+    const catMap = new Map<string, {
+      category: string;
+      transactionCount: number;
+      totalQuantity: number;
+      totalAmount: number;
+      totalCustomerPrice: number;
+      totalProfit: number;
+      recordsWithCpCount: number;
+      missingCpCount: number;
+    }>();
+
+    for (const r of recList) {
+      const prod = productsList.find(p => p.id === r.productId || p.name.trim().toLowerCase() === r.productName.trim().toLowerCase());
+      const cat = prod?.category || 'Other Accessories';
+      let existing = catMap.get(cat);
+      if (!existing) {
+        existing = {
+          category: cat,
+          transactionCount: 0,
+          totalQuantity: 0,
+          totalAmount: 0,
+          totalCustomerPrice: 0,
+          totalProfit: 0,
+          recordsWithCpCount: 0,
+          missingCpCount: 0
+        };
+        catMap.set(cat, existing);
+      }
+      existing.transactionCount += 1;
+      existing.totalQuantity += (Number(r.quantity) || 1);
+      existing.totalAmount += (Number(r.totalAmount) || 0);
+
+      if (r.customerPrice !== undefined && r.customerPrice !== null) {
+        existing.totalCustomerPrice += Number(r.customerPrice);
+        existing.recordsWithCpCount += 1;
+        if (r.profit !== undefined && r.profit !== null) {
+          existing.totalProfit += Number(r.profit);
+        } else {
+          existing.totalProfit += (Number(r.customerPrice) - Number(r.totalAmount));
+        }
+      } else {
+        existing.missingCpCount += 1;
+      }
+    }
+
+    const items: CategoryBreakdownItem[] = Array.from(catMap.values()).map(c => {
+      const margin = c.recordsWithCpCount > 0 && c.totalAmount > 0
+        ? Math.round((c.totalProfit / c.totalAmount) * 1000) / 10
+        : null;
+      return {
+        category: c.category,
+        transactionCount: c.transactionCount,
+        totalQuantity: c.totalQuantity,
+        totalAmount: Math.round(c.totalAmount * 100) / 100,
+        totalCustomerPrice: Math.round(c.totalCustomerPrice * 100) / 100,
+        totalProfit: Math.round(c.totalProfit * 100) / 100,
+        recordsWithCpCount: c.recordsWithCpCount,
+        missingCpCount: c.missingCpCount,
+        profitMarginPercent: margin
+      };
+    });
+
+    return items.sort((a, b) => b.totalProfit - a.totalProfit);
+  }, [productsList]);
 
   // Aggregate shop breakdown for All Shops mode
   const shopBreakdownList: ShopBreakdownItem[] = useMemo(() => {
@@ -371,6 +466,24 @@ export const MonthlyShopStatement: React.FC<MonthlyShopStatementProps> = ({
     };
   }, [selectedShopId, shopBreakdownList, selectedShop]);
 
+  const currentSingleShopCategories = useMemo(() => {
+    return buildCategoryBreakdown(currentSingleShopData?.records || []);
+  }, [buildCategoryBreakdown, currentSingleShopData]);
+
+  const availableCategories = useMemo(() => {
+    const cats = new Set<string>();
+    (currentSingleShopData?.products || []).forEach(p => {
+      if (p.category) cats.add(p.category);
+    });
+    return Array.from(cats);
+  }, [currentSingleShopData]);
+
+  const filteredSingleShopProducts = useMemo(() => {
+    const prods = currentSingleShopData?.products || [];
+    if (selectedCategory === 'all') return prods;
+    return prods.filter(p => p.category === selectedCategory);
+  }, [currentSingleShopData, selectedCategory]);
+
   // Filtered transactions for individual shop with search term
   const singleShopFilteredTransactions = useMemo(() => {
     if (!currentSingleShopData) return [];
@@ -395,7 +508,7 @@ export const MonthlyShopStatement: React.FC<MonthlyShopStatementProps> = ({
 
   // Export to CSV / Excel
   const handleExportCSV = () => {
-    const monthName = MONTH_NAMES[selectedMonth - 1];
+    const monthName = selectedMonth > 0 ? MONTH_NAMES[selectedMonth - 1] : 'Full Year';
     let csvContent = '';
 
     if (selectedShopId === '__all__') {
@@ -445,7 +558,8 @@ export const MonthlyShopStatement: React.FC<MonthlyShopStatementProps> = ({
     const link = document.createElement('a');
     const safeShopStr = selectedShopId === '__all__' ? 'All-Shops' : (currentSingleShopData?.shopName.replace(/[^a-zA-Z0-9]/g, '_') || 'Shop');
     link.setAttribute('href', url);
-    link.setAttribute('download', `RTR_Statement_${safeShopStr}_${selectedYear}_${String(selectedMonth).padStart(2, '0')}.csv`);
+    const monthPart = selectedMonth > 0 ? String(selectedMonth).padStart(2, '0') : 'FullYear';
+    link.setAttribute('download', `RTR_Statement_${safeShopStr}_${selectedYear}_${monthPart}.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -518,6 +632,7 @@ export const MonthlyShopStatement: React.FC<MonthlyShopStatementProps> = ({
             onChange={e => setSelectedMonth(Number(e.target.value))}
             className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs sm:text-sm font-medium text-slate-800 focus:outline-none focus:ring-2 focus:ring-[#168BFF]"
           >
+            <option value={0}>All Months (Full Year)</option>
             {MONTH_NAMES.map((name, idx) => (
               <option key={idx + 1} value={idx + 1}>
                 {name}
@@ -589,7 +704,7 @@ export const MonthlyShopStatement: React.FC<MonthlyShopStatementProps> = ({
           <div>
             <h1 className="text-xl font-bold text-slate-900">RTR MOBILES — WHOLESALE MANAGEMENT</h1>
             <h2 className="text-sm font-semibold text-slate-700 mt-0.5">
-              Monthly Purchase & Profit Statement — {MONTH_NAMES[selectedMonth - 1]} {selectedYear}
+              Monthly Purchase & Profit Statement — {selectedMonth > 0 ? MONTH_NAMES[selectedMonth - 1] : 'All Months'} {selectedYear}
             </h2>
             <p className="text-xs text-slate-500">
               Scope: {selectedShopId === '__all__' ? 'Consolidated All Registered Shops' : (currentSingleShopData?.shopName || 'Retail Shop')}
@@ -798,7 +913,7 @@ export const MonthlyShopStatement: React.FC<MonthlyShopStatementProps> = ({
                 Consolidated Shop-Wise Performance
               </h2>
               <p className="text-xs text-slate-500 mt-0.5">
-                Statement for {MONTH_NAMES[selectedMonth - 1]} {selectedYear}. Expand rows to inspect product breakdown.
+                Statement for {selectedMonth > 0 ? MONTH_NAMES[selectedMonth - 1] : 'All Months'} {selectedYear}. Expand rows to inspect product breakdown.
               </p>
             </div>
             <div className="text-xs font-bold text-slate-400 uppercase">
@@ -809,7 +924,7 @@ export const MonthlyShopStatement: React.FC<MonthlyShopStatementProps> = ({
           {shopBreakdownList.length === 0 ? (
             <div className="p-12 text-center text-slate-400">
               <Store className="w-10 h-10 mx-auto text-slate-300 mb-2" />
-              <p className="text-sm font-medium">No transactions recorded for any shop in {MONTH_NAMES[selectedMonth - 1]} {selectedYear}.</p>
+              <p className="text-sm font-medium">No transactions recorded for any shop in {selectedMonth > 0 ? MONTH_NAMES[selectedMonth - 1] : 'All Months'} {selectedYear}.</p>
             </div>
           ) : (
             <div className="overflow-x-auto">
@@ -1013,9 +1128,35 @@ export const MonthlyShopStatement: React.FC<MonthlyShopStatementProps> = ({
           <div className="bg-white rounded-2xl border border-[#DCE4EC] shadow-2xs overflow-hidden">
             <div className="p-4 sm:p-5 border-b border-[#E2E8F0] flex flex-col sm:flex-row sm:items-center justify-between gap-3">
               <div>
-                <h3 className="text-base sm:text-lg font-bold text-[#102A4C]">
-                  Product-Wise Purchase & Profit Breakdown
-                </h3>
+                <div className="flex flex-col sm:flex-row sm:items-center gap-2">
+                  <h3 className="text-base sm:text-lg font-bold text-[#102A4C]">
+                    Purchase & Profit Breakdown
+                  </h3>
+                  <div className="flex items-center gap-1.5 bg-slate-100 p-1 rounded-xl">
+                    <button
+                      type="button"
+                      onClick={() => setBreakdownView('products')}
+                      className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-all ${
+                        breakdownView === 'products'
+                          ? 'bg-[#168BFF] text-white shadow-xs'
+                          : 'text-slate-600 hover:text-slate-900'
+                      }`}
+                    >
+                      Products
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setBreakdownView('categories')}
+                      className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-all ${
+                        breakdownView === 'categories'
+                          ? 'bg-[#168BFF] text-white shadow-xs'
+                          : 'text-slate-600 hover:text-slate-900'
+                      }`}
+                    >
+                      Categories
+                    </button>
+                  </div>
+                </div>
                 <p className="text-xs text-slate-500 mt-0.5">
                   Aggregate wholesale supply cost vs customer price per product line.
                 </p>
@@ -1023,6 +1164,21 @@ export const MonthlyShopStatement: React.FC<MonthlyShopStatementProps> = ({
 
               {/* Sort controls */}
               <div className="flex items-center gap-2 print:hidden">
+                {breakdownView === 'products' && availableCategories.length > 0 && (
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-xs font-semibold text-slate-500">Category:</span>
+                    <select
+                      value={selectedCategory}
+                      onChange={e => setSelectedCategory(e.target.value)}
+                      className="rounded-xl border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-800"
+                    >
+                      <option value="all">All Categories</option>
+                      {availableCategories.map(c => (
+                        <option key={c} value={c}>{c}</option>
+                      ))}
+                    </select>
+                  </div>
+                )}
                 <span className="text-xs font-semibold text-slate-500">Sort by:</span>
                 <select
                   value={productSortField}
@@ -1044,10 +1200,79 @@ export const MonthlyShopStatement: React.FC<MonthlyShopStatementProps> = ({
               </div>
             </div>
 
-            {(!currentSingleShopData?.products || currentSingleShopData.products.length === 0) ? (
+            
+            {breakdownView === 'categories' ? (
+              <div className="overflow-x-auto">
+                <table className="w-full text-left border-collapse text-xs sm:text-sm">
+                  <thead className="bg-[#F8FAFC] text-slate-700 font-semibold border-b border-[#CBD5E1]">
+                    <tr>
+                      <th className="py-3 px-3 sm:px-4">Product Category</th>
+                      <th className="py-3 px-3 sm:px-4 text-center">Transactions</th>
+                      <th className="py-3 px-3 sm:px-4 text-center">Quantity (pcs)</th>
+                      <th className="py-3 px-3 sm:px-4 text-right">Wholesale Cost (Amount)</th>
+                      <th className="py-3 px-3 sm:px-4 text-right">Customer Price (CP)</th>
+                      <th className="py-3 px-3 sm:px-4 text-right">Profit (₹)</th>
+                      <th className="py-3 px-3 sm:px-4 text-center">Margin %</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {currentSingleShopCategories.map((cat, cIdx) => (
+                      <tr key={cIdx} className="hover:bg-slate-50/80 transition-colors">
+                        <td className="py-3 px-3 sm:px-4 font-bold text-[#102A4C]">
+                          <span className="inline-flex items-center gap-1.5">
+                            <Layers className="w-3.5 h-3.5 text-[#168BFF]" />
+                            {cat.category}
+                          </span>
+                        </td>
+                        <td className="py-3 px-3 sm:px-4 text-center text-slate-700 font-medium">
+                          {cat.transactionCount}
+                        </td>
+                        <td className="py-3 px-3 sm:px-4 text-center text-slate-700 font-medium">
+                          {cat.totalQuantity}
+                        </td>
+                        <td className="py-3 px-3 sm:px-4 text-right font-bold text-[#102A4C] tabular-nums">
+                          ₹{cat.totalAmount.toLocaleString('en-IN')}
+                        </td>
+                        <td className="py-3 px-3 sm:px-4 text-right font-bold text-[#168BFF] tabular-nums">
+                          ₹{cat.totalCustomerPrice.toLocaleString('en-IN')}
+                        </td>
+                        <td className={`py-3 px-3 sm:px-4 text-right font-extrabold tabular-nums ${
+                          cat.totalProfit > 0 
+                            ? 'text-emerald-700' 
+                            : cat.totalProfit === 0 
+                              ? 'text-slate-600' 
+                              : 'text-rose-600'
+                        }`}>
+                          {cat.totalProfit > 0 
+                            ? `+₹${cat.totalProfit.toLocaleString('en-IN')}` 
+                            : cat.totalProfit === 0 
+                              ? '₹0' 
+                              : `-₹${Math.abs(cat.totalProfit).toLocaleString('en-IN')}`}
+                        </td>
+                        <td className="py-3 px-3 sm:px-4 text-center font-bold">
+                          {cat.profitMarginPercent !== null ? (
+                            <span className={`px-2 py-0.5 rounded-full text-xs ${
+                              cat.profitMarginPercent > 0 
+                                ? 'bg-emerald-50 text-emerald-800' 
+                                : cat.profitMarginPercent === 0 
+                                  ? 'bg-slate-100 text-slate-700' 
+                                  : 'bg-rose-50 text-rose-800'
+                            }`}>
+                              {cat.profitMarginPercent}%
+                            </span>
+                          ) : (
+                            <span className="text-slate-400 italic">N/A</span>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : (!currentSingleShopData?.products || currentSingleShopData.products.length === 0) ? (
               <div className="p-10 text-center text-slate-400">
                 <Package className="w-8 h-8 mx-auto text-slate-300 mb-2" />
-                <p className="text-sm">No products supplied to this shop in {MONTH_NAMES[selectedMonth - 1]} {selectedYear}.</p>
+                <p className="text-sm">No products supplied to this shop in {selectedMonth > 0 ? MONTH_NAMES[selectedMonth - 1] : 'All Months'} {selectedYear}.</p>
               </div>
             ) : (
               <div className="overflow-x-auto">
@@ -1064,10 +1289,17 @@ export const MonthlyShopStatement: React.FC<MonthlyShopStatementProps> = ({
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
-                    {currentSingleShopData.products.map((prod, pIdx) => (
+                    {filteredSingleShopProducts.map((prod, pIdx) => (
                       <tr key={pIdx} className="hover:bg-slate-50/80 transition-colors">
                         <td className="py-3 px-3 sm:px-4 font-bold text-[#102A4C]">
-                          <div>{prod.productName}</div>
+                          <div>
+                            <span>{prod.productName}</span>
+                            {prod.category && (
+                              <span className="ml-2 inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold bg-blue-50 text-[#168BFF] border border-blue-100">
+                                {prod.category}
+                              </span>
+                            )}
+                          </div>
                           {prod.productSku && (
                             <span className="text-[10px] text-slate-400 font-mono">{prod.productSku}</span>
                           )}

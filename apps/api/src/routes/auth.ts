@@ -249,38 +249,7 @@ authRouter.post('/login', authRateLimiter, async (req: Request, res: Response) =
       password: password
     });
 
-    // Temporary isolated owner testing authentication (Local Development Only)
-    // Strictly requires OWNER_TESTING_MODE=true AND NODE_ENV !== 'production'
-    // Uses legitimate Supabase generateLink + verifyOtp to obtain authentic Supabase session
-    const isOwnerTestingActive = (process.env.OWNER_TESTING_MODE === 'true' || process.env.VITE_OWNER_TESTING_MODE === 'true') && 
-                                 process.env.NODE_ENV !== 'production' &&
-                                 resolvedEmail.toLowerCase() === configuredOwnerEmail;
-
-    if ((error || !data?.user || !data?.session) && isOwnerTestingActive) {
-      try {
-        const { data: linkData, error: linkErr } = await supabaseAdmin.auth.admin.generateLink({
-          type: 'magiclink',
-          email: resolvedEmail
-        });
-
-        if (!linkErr && linkData?.properties?.hashed_token) {
-          const { data: otpData, error: otpErr } = await supabaseAnon.auth.verifyOtp({
-            token_hash: linkData.properties.hashed_token,
-            type: 'magiclink'
-          });
-
-          if (!otpErr && otpData?.user && otpData?.session) {
-            data = otpData as any;
-            error = null;
-            logger.info(`[Auth Testing] Temporary owner testing mode issued authentic Supabase session for ${resolvedEmail}`);
-          }
-        }
-      } catch (err: any) {
-        logger.warn(`[Auth Testing] Could not issue testing session: ${err?.message}`);
-      }
-    }
-
-    if (error || !data.user || !data.session) {
+    if (error || !data?.user || !data?.session) {
       logSecurityEvent({
         action: 'USER_LOGIN',
         category: 'auth_login',
@@ -514,7 +483,7 @@ authRouter.post('/forgot-password', passwordRecoveryRateLimiter, async (req: Req
 
     const targetEmail = await resolveIdentifierToEmail(identifier);
     if (targetEmail) {
-      let isOwner = false;
+      let isAuthorizedUser = false;
 
       // 1. Direct check against known owner emails & aliases
       if (
@@ -527,11 +496,11 @@ authRouter.post('/forgot-password', passwordRecoveryRateLimiter, async (req: Req
         targetEmail === 'rtrmobile92@gmail.com' ||
         targetEmail === 'vinov042007@gmail.com'
       ) {
-        isOwner = true;
+        isAuthorizedUser = true;
       }
 
-      // 2. Database check via profiles and business_memberships
-      if (!isOwner) {
+      // 2. Database check via profiles and business_memberships (both owner and employee)
+      if (!isAuthorizedUser) {
         const { data: profile } = await supabaseAdmin
           .from('profiles')
           .select('id, email')
@@ -545,14 +514,14 @@ authRouter.post('/forgot-password', passwordRecoveryRateLimiter, async (req: Req
             .eq('user_id', profile.id)
             .maybeSingle();
 
-          if (membership && membership.role === 'owner' && membership.is_active) {
-            isOwner = true;
+          if (membership && membership.is_active) {
+            isAuthorizedUser = true;
           }
         }
       }
 
       // 3. Fallback check via auth.users
-      if (!isOwner) {
+      if (!isAuthorizedUser) {
         try {
           const { data: { users } } = await supabaseAdmin.auth.admin.listUsers();
           const user = users?.find(u => u.email?.toLowerCase() === targetEmail.toLowerCase());
@@ -563,8 +532,8 @@ authRouter.post('/forgot-password', passwordRecoveryRateLimiter, async (req: Req
               .eq('user_id', user.id)
               .maybeSingle();
 
-            if (membership && membership.role === 'owner' && membership.is_active) {
-              isOwner = true;
+            if (membership && membership.is_active) {
+              isAuthorizedUser = true;
             }
           }
         } catch {
@@ -572,13 +541,13 @@ authRouter.post('/forgot-password', passwordRecoveryRateLimiter, async (req: Req
         }
       }
 
-      if (isOwner) {
+      if (isAuthorizedUser) {
         const isProductionEnv = config.NODE_ENV === 'production' || process.env.VERCEL === '1' || process.env.NODE_ENV === 'production';
         const reqOrigin = ((req.headers.origin as string) || (req.headers.referer as string) || '').toLowerCase();
-        const isProductionRequest = isProductionEnv || reqOrigin.includes('rtr-management-cfn4.vercel.app') || reqOrigin.includes('.vercel.app');
+        const isProductionRequest = isProductionEnv || reqOrigin.includes('rtr-management.vercel.app') || reqOrigin.includes('rtr-management-cfn4.vercel.app') || reqOrigin.includes('.vercel.app');
 
         // Production destination strictly defaults to production URL
-        let redirectUrl = 'https://rtr-management-cfn4.vercel.app/reset-password';
+        let redirectUrl = 'https://rtr-management.vercel.app/reset-password';
 
         if (typeof redirectTo === 'string' && redirectTo.trim()) {
           try {
@@ -587,19 +556,23 @@ authRouter.post('/forgot-password', passwordRecoveryRateLimiter, async (req: Req
 
             if (isProductionRequest && isLocal) {
               // Strictly forbid localhost in production
-              redirectUrl = 'https://rtr-management-cfn4.vercel.app/reset-password';
+              redirectUrl = 'https://rtr-management.vercel.app/reset-password';
             } else if (isLocal && !isProductionRequest) {
               redirectUrl = 'http://localhost:5173/reset-password';
             } else if (
+              parsedRedirect.hostname === 'rtr-management.vercel.app' ||
               parsedRedirect.hostname === 'rtr-management-cfn4.vercel.app' ||
               parsedRedirect.hostname.endsWith('.vercel.app') || 
               parsedRedirect.hostname === 'rtrmobiles.com' ||
               parsedRedirect.hostname.endsWith('.rtrmobiles.com')
             ) {
-              redirectUrl = parsedRedirect.href;
+              parsedRedirect.pathname = '/reset-password';
+              parsedRedirect.search = '';
+              parsedRedirect.hash = '';
+              redirectUrl = parsedRedirect.toString();
             }
           } catch {
-            redirectUrl = isProductionRequest ? 'https://rtr-management-cfn4.vercel.app/reset-password' : 'http://localhost:5173/reset-password';
+            redirectUrl = isProductionRequest ? 'https://rtr-management.vercel.app/reset-password' : 'http://localhost:5173/reset-password';
           }
         } else if (!isProductionRequest) {
           redirectUrl = 'http://localhost:5173/reset-password';
@@ -710,17 +683,17 @@ authRouter.post('/reset-password', passwordRecoveryRateLimiter, async (req: Requ
       });
     }
 
-    // 2. Role authorization guard: verify account is an active Business Owner
+    // 2. Authorization guard: verify account has active membership or is authoritative owner
     const { data: membership } = await supabaseAdmin
       .from('business_memberships')
       .select('role, is_active')
       .eq('user_id', user.id)
       .maybeSingle();
 
-    if (membership && (membership.role !== 'owner' || !membership.is_active)) {
+    if (membership && !membership.is_active) {
       return res.status(403).json({
         success: false,
-        message: 'Access restricted to Business Owner only.'
+        message: 'Account is deactivated or unauthorized. Please contact your manager.'
       });
     }
 
@@ -914,5 +887,92 @@ authRouter.get('/verify-session', async (req: Request, res: Response) => {
       errorCategory: 'verification_failed'
     });
     return res.status(401).json({ valid: false, message: 'Session verification failed.' });
+  }
+});
+
+/**
+ * POST /api/auth/refresh
+ * Securely refreshes access tokens using refresh token rotation.
+ * Supports standard Supabase sessions and isolated demo sessions.
+ */
+authRouter.post('/refresh', async (req: Request, res: Response) => {
+  const { refresh_token } = req.body || {};
+  if (!refresh_token || typeof refresh_token !== 'string') {
+    return res.status(400).json({ success: false, message: 'Missing refresh token.' });
+  }
+
+  // Isolated demo refresh
+  if (refresh_token.startsWith('demo-refresh-')) {
+    const newDemoToken = `demo-session-${crypto.randomUUID()}`;
+    return res.status(200).json({
+      success: true,
+      session: {
+        access_token: newDemoToken,
+        refresh_token: `demo-refresh-${crypto.randomUUID()}`,
+        expires_at: Math.floor(Date.now() / 1000) + 86400,
+        expires_in: 86400
+      },
+      user: {
+        id: 'deae5634-055a-4045-a6ac-fc00ed9e247a',
+        email: 'demo-owner@rtrmobiles.com',
+        username: process.env.DEMO_USERNAME || DEMO_USERNAME,
+        name: 'Demo Owner (Sandbox)',
+        role: 'demo',
+        isDemo: true
+      }
+    });
+  }
+
+  try {
+    const { data, error } = await supabaseAnon.auth.refreshSession({ refresh_token });
+    if (error || !data.session || !data.user) {
+      return res.status(401).json({ success: false, message: 'Invalid or expired refresh token.' });
+    }
+
+    // Verify membership role & status
+    const { data: membership } = await supabaseAdmin
+      .from('business_memberships')
+      .select('business_id, role, is_active')
+      .eq('user_id', data.user.id)
+      .maybeSingle();
+
+    if (membership && !membership.is_active) {
+      return res.status(403).json({ success: false, message: 'Account is deactivated.' });
+    }
+
+    let userPayload: any = {
+      id: data.user.id,
+      email: data.user.email,
+      name: data.user.user_metadata?.full_name || (membership?.role === 'employee' ? 'Shop Staff' : 'Business Owner'),
+      role: membership?.role || 'owner'
+    };
+
+    if (membership?.role === 'employee') {
+      const { data: shopMember } = await supabaseAdmin
+        .from('shop_memberships')
+        .select('shop_id, shops(id, name, code, is_active)')
+        .eq('user_id', data.user.id)
+        .maybeSingle();
+
+      if (shopMember) {
+        userPayload.assignedShopId = shopMember.shop_id;
+        userPayload.assignedShopName = (shopMember as any).shops?.name;
+        userPayload.assignedShopCode = (shopMember as any).shops?.code;
+      }
+    }
+
+    return res.status(200).json({
+      success: true,
+      session: {
+        access_token: data.session.access_token,
+        refresh_token: data.session.refresh_token,
+        expires_at: data.session.expires_at,
+        expires_in: data.session.expires_in
+      },
+      user: userPayload
+    });
+  } catch (err: any) {
+    logger.error('Session refresh error', { message: err?.message });
+    return res.status(500).json({ success: false, message: 'Failed to refresh session.' });
   }
 });

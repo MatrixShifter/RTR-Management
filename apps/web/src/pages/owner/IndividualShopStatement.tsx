@@ -26,6 +26,7 @@ import {
 } from '../../services/db.js';
 import { RecordDetailsModal } from '../../components/RecordDetailsModal.js';
 import { TableSkeleton } from '../../components/ui/Skeleton.js';
+import { safeLogger } from '../../lib/safeLogger.js';
 
 const MONTH_NAMES = [
   'January', 'February', 'March', 'April', 'May', 'June',
@@ -72,7 +73,7 @@ export const IndividualShopStatement: React.FC<IndividualShopStatementProps> = (
   const urlYear = parseInt(searchParams.get('year') || '', 10);
   const urlStatus = searchParams.get('status');
 
-  const initialMonth = !isNaN(urlMonth) && urlMonth >= 1 && urlMonth <= 12 ? urlMonth : defaultMonth;
+  const initialMonth = !isNaN(urlMonth) && urlMonth >= 0 && urlMonth <= 12 ? urlMonth : defaultMonth;
   const initialYear = !isNaN(urlYear) && urlYear >= 2020 && urlYear <= 2040 ? urlYear : defaultYear;
   const initialStatus: 'all' | 'delivered' | 'pending' = 
     urlStatus === 'delivered' || urlStatus === 'pending' ? urlStatus : 'all';
@@ -130,7 +131,7 @@ export const IndividualShopStatement: React.FC<IndividualShopStatementProps> = (
       setShops(fetchedShops);
       setRecords(fetchedRecords);
     } catch (err: any) {
-      console.error('Failed to load statement data:', err);
+      safeLogger.error('Failed to load statement data', err);
       setError(err?.message || 'Failed to load shop statement data.');
     } finally {
       setLoading(false);
@@ -186,7 +187,7 @@ export const IndividualShopStatement: React.FC<IndividualShopStatementProps> = (
 
   // Filter shop records by selected Month, Year, and Delivery Status
   const periodFilteredRecords = useMemo(() => {
-    const targetMonthStr = `${selectedYear}-${String(selectedMonth).padStart(2, '0')}`;
+    const targetMonthStr = selectedMonth > 0 ? `${selectedYear}-${String(selectedMonth).padStart(2, '0')}` : `${selectedYear}`;
     return shopRecords.filter(r => {
       const norm = normalizeDateString(r.date);
       if (!norm.startsWith(targetMonthStr)) return false;
@@ -409,7 +410,7 @@ export const IndividualShopStatement: React.FC<IndividualShopStatementProps> = (
 
   // Export to CSV / Excel
   const handleExportCSV = () => {
-    const monthName = MONTH_NAMES[selectedMonth - 1];
+    const monthName = selectedMonth > 0 ? MONTH_NAMES[selectedMonth - 1] : 'Full Year';
     const sName = shop?.name || targetShopId;
     const sCode = shop?.code || targetShopId;
     let csv = '';
@@ -541,7 +542,7 @@ export const IndividualShopStatement: React.FC<IndividualShopStatementProps> = (
                 <span>Monthly Purchase & Profit Statement</span>
                 <span className="text-slate-300">•</span>
                 <span className="font-semibold text-slate-700">
-                  {`${MONTH_NAMES[selectedMonth - 1]} ${selectedYear}`}
+                  {`${selectedMonth > 0 ? MONTH_NAMES[selectedMonth - 1] : 'All Months'} ${selectedYear}`}
                 </span>
               </p>
             </div>
@@ -594,7 +595,8 @@ export const IndividualShopStatement: React.FC<IndividualShopStatementProps> = (
               onChange={e => updateFilters(Number(e.target.value), selectedYear, statusFilter)}
               className="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs sm:text-sm font-semibold text-slate-800 focus:outline-none focus:ring-2 focus:ring-[#168BFF]"
             >
-              {MONTH_NAMES.map((name, idx) => (
+              <option value={0}>All Months (Full Year)</option>
+            {MONTH_NAMES.map((name, idx) => (
                 <option key={idx + 1} value={idx + 1}>
                   {name}
                 </option>
@@ -653,7 +655,7 @@ export const IndividualShopStatement: React.FC<IndividualShopStatementProps> = (
               Individual Shop Statement: {shopDisplayName} ({shopDisplayCode})
             </h2>
             <p className="text-xs text-slate-600">
-              Period: {MONTH_NAMES[selectedMonth - 1]} {selectedYear} | Status: {statusFilter.toUpperCase()}
+              Period: {selectedMonth > 0 ? MONTH_NAMES[selectedMonth - 1] : 'All Months'} {selectedYear} | Status: {statusFilter.toUpperCase()}
             </p>
           </div>
           <div className="text-right text-xs text-slate-500">
@@ -814,7 +816,7 @@ export const IndividualShopStatement: React.FC<IndividualShopStatementProps> = (
           <div className="p-12 text-center text-slate-400">
             <Package className="w-10 h-10 mx-auto text-slate-300 mb-2" />
             <p className="text-sm font-medium">
-              No products supplied to {shopDisplayName} during {MONTH_NAMES[selectedMonth - 1]} {selectedYear}.
+              No products supplied to {shopDisplayName} during {selectedMonth > 0 ? MONTH_NAMES[selectedMonth - 1] : 'All Months'} {selectedYear}.
             </p>
           </div>
         ) : (

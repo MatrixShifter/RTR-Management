@@ -28,6 +28,7 @@ import {
   getShops,
   type Shop
 } from '../services/db.js';
+import { safeLogger } from '../lib/safeLogger.js';
 import type { EmployeeRecord, CreateEmployeeInput } from '@crimpston/shared';
 
 export const EmployeeManagementSection: React.FC = () => {
@@ -74,7 +75,7 @@ export const EmployeeManagementSection: React.FC = () => {
       setEmployees(empList);
       setShops(shopList.filter(s => s.isActive !== false));
     } catch (err: any) {
-      console.error('Failed to load employee data:', err);
+      safeLogger.error('Failed to load employee data', err);
     } finally {
       setIsLoading(false);
     }

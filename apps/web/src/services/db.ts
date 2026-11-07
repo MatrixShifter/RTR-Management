@@ -30,6 +30,7 @@ import {
   type CreateEmployeeInput,
 } from '@crimpston/shared';
 import { supabase, isSupabaseConfigured } from '../lib/supabase.js';
+import { safeLogger } from '../lib/safeLogger.js';
 import {
   saveOfflineShops,
   getOfflineShops,
@@ -455,7 +456,7 @@ function getLocalItem<T>(key: string, defaultValue: T): T {
     if (!raw) return defaultValue;
     return JSON.parse(raw);
   } catch (err) {
-    console.warn(`Error reading ${key} from storage:`, err);
+    safeLogger.warn(`Error reading ${key} from storage`, err);
     return defaultValue;
   }
 }
@@ -469,7 +470,7 @@ function setLocalCache<T>(key: string, value: T): void {
     }
     localStorage.setItem(key, JSON.stringify(value));
   } catch (err) {
-    console.warn(`Error saving cache for ${key}:`, err);
+    safeLogger.warn(`Error saving cache for ${key}`, err);
   }
 }
 
@@ -524,12 +525,12 @@ function setLocalItem<T>(key: string, value: T): void {
       window.dispatchEvent(new CustomEvent('rtr_data_sync', { detail: { key } }));
     }
   } catch (err) {
-    console.error(`Error saving ${key} to storage:`, err);
+    safeLogger.error(`Error saving ${key} to storage`, err);
   }
 }
 
-// Supabase network timeout wrapper for responsive fallback
-async function withTimeout<T = any>(promise: Promise<T> | any, timeoutMs = 800): Promise<T> {
+// Supabase network timeout wrapper for responsive fallback (12s production standard)
+async function withTimeout<T = any>(promise: Promise<T> | any, timeoutMs = 12000): Promise<T> {
   let timer: any;
   const timeoutPromise = new Promise<never>((_, reject) => {
     timer = setTimeout(() => reject(new Error('Supabase network timeout')), timeoutMs);
@@ -543,11 +544,69 @@ async function withTimeout<T = any>(promise: Promise<T> | any, timeoutMs = 800):
 
 const DEFAULT_BUSINESS_ID = '4fba6fb7-4e1b-4106-ac84-908f821d73c3';
 let cachedBusinessId: string | null = null;
+let cachedUserId: string | null = null;
+let cachedUserIdExpiresAt: number = 0;
+const USER_ID_CACHE_TTL_MS = 60000;
+
+if (typeof window !== 'undefined') {
+  window.addEventListener('rtr:session-expired', () => {
+    cachedUserId = null;
+    cachedUserIdExpiresAt = 0;
+    cachedBusinessId = null;
+  });
+}
+
+// Thread-safe singleton mutex for Supabase refreshSession to prevent concurrent refresh-token rotation collisions
+let activeRefreshPromise: Promise<string | null> | null = null;
+
+/**
+ * Safely refreshes the Supabase auth session using a deduplicated mutex.
+ * When multiple API calls or components request a fresh token concurrently,
+ * all callers await the exact same in-flight refresh promise instead of competing.
+ */
+export async function refreshSessionSafely(): Promise<string | null> {
+  if (!isSupabaseConfigured || !supabase || isDemoMode()) return null;
+  if (activeRefreshPromise) {
+    return activeRefreshPromise;
+  }
+
+  activeRefreshPromise = (async () => {
+    try {
+      const { data, error } = await supabase.auth.refreshSession();
+      if (!error && data.session?.access_token) {
+        return data.session.access_token;
+      }
+
+      // Check if error is an explicit token revocation from Supabase GoTrue
+      const errMsg = error?.message?.toLowerCase() || '';
+      const isExplicitRevocation = error?.status === 400 && (
+        errMsg.includes('refresh_token_already_used') ||
+        errMsg.includes('invalid_grant') ||
+        errMsg.includes('already used') ||
+        errMsg.includes('revoked')
+      );
+
+      if (isExplicitRevocation) {
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent('rtr:session-expired'));
+        }
+      }
+      return null;
+    } catch {
+      // Network transient error: do NOT dispatch session-expired
+      return null;
+    } finally {
+      activeRefreshPromise = null;
+    }
+  })();
+
+  return activeRefreshPromise;
+}
 
 /**
  * Retrieves a fresh, verified access token from the active Supabase session.
- * If the current token is close to expiry (within 60s) or expired, refreshes it automatically.
- * If session is missing or unrefreshable, dispatches 'rtr:session-expired' and returns null.
+ * Proactively refreshes if the current token is close to expiry (within 60s) or expired.
+ * Never dispatches premature session-expired on transient network errors.
  */
 export async function getValidAuthToken(): Promise<string | null> {
   if (isDemoMode()) {
@@ -566,34 +625,34 @@ export async function getValidAuthToken(): Promise<string | null> {
   }
   if (!isSupabaseConfigured || !supabase) return null;
 
+  // If a refresh is already in flight, wait for it
+  if (activeRefreshPromise) {
+    return activeRefreshPromise;
+  }
+
   try {
     const { data: { session } } = await supabase.auth.getSession();
     if (!session?.access_token) {
-      if (typeof window !== 'undefined') {
-        window.dispatchEvent(new CustomEvent('rtr:session-expired'));
-      }
-      return null;
+      return await refreshSessionSafely();
     }
 
     const expiresAt = session.expires_at ? session.expires_at * 1000 : 0;
     const now = Date.now();
-    // If expired or expiring within 60 seconds, refresh session
-    if (expiresAt && expiresAt - now < 60000) {
-      const { data: refreshData, error: refreshErr } = await supabase.auth.refreshSession();
-      if (refreshErr || !refreshData.session?.access_token) {
+    const isExpired = expiresAt > 0 && expiresAt <= now;
+    // If expired or expiring within 60 seconds (or if expires_at is unverified), refresh proactively
+    if (isExpired || !expiresAt || expiresAt - now < 60000) {
+      const refreshed = await refreshSessionSafely();
+      if (!refreshed && isExpired) {
         if (typeof window !== 'undefined') {
           window.dispatchEvent(new CustomEvent('rtr:session-expired'));
         }
         return null;
       }
-      return refreshData.session.access_token;
+      return refreshed || session.access_token;
     }
 
     return session.access_token;
   } catch {
-    if (typeof window !== 'undefined') {
-      window.dispatchEvent(new CustomEvent('rtr:session-expired'));
-    }
     return null;
   }
 }
@@ -601,13 +660,17 @@ export async function getValidAuthToken(): Promise<string | null> {
 /**
  * Performs an authenticated fetch against the RTR backend API.
  * Ensures the Authorization Bearer header contains a verified, valid access token.
- * If unauthorized (401), automatically attempts a session refresh once and retries.
- * If refresh fails or returns 401 again, dispatches 'rtr:session-expired' and throws an error.
+ * Differentiates cleanly between:
+ * - 401 Unauthorized (attempts a serialized token refresh and retries once)
+ * - 403 Forbidden (authorization/role restriction; does NOT trigger session logout)
  */
 export async function authenticatedFetch(url: string, init?: RequestInit): Promise<Response> {
-  const token = await getValidAuthToken();
+  let token = await getValidAuthToken();
   if (!token) {
-    throw new Error('Invalid or expired session token.');
+    token = await refreshSessionSafely();
+  }
+  if (!token) {
+    throw new Error('Authentication token required.');
   }
 
   const headers = new Headers(init?.headers || {});
@@ -618,31 +681,21 @@ export async function authenticatedFetch(url: string, init?: RequestInit): Promi
 
   let res = await fetch(url, { ...init, headers });
 
+  // On 401, access token may have just expired on the server; attempt serialized refresh and retry ONCE
   if (res.status === 401 && isSupabaseConfigured && supabase && !isDemoMode()) {
-    try {
-      const { data: refreshData, error: refreshErr } = await supabase.auth.refreshSession();
-      if (!refreshErr && refreshData.session?.access_token) {
-        const retryHeaders = new Headers(init?.headers || {});
-        retryHeaders.set('Authorization', `Bearer ${refreshData.session.access_token}`);
-        if (!retryHeaders.has('Content-Type') && init?.body && typeof init.body === 'string') {
-          retryHeaders.set('Content-Type', 'application/json');
-        }
-        res = await fetch(url, { ...init, headers: retryHeaders });
-      } else {
-        if (typeof window !== 'undefined') {
-          window.dispatchEvent(new CustomEvent('rtr:session-expired'));
-        }
-        throw new Error('Invalid or expired session token.');
+    const refreshedToken = await refreshSessionSafely();
+    if (refreshedToken) {
+      const retryHeaders = new Headers(init?.headers || {});
+      retryHeaders.set('Authorization', `Bearer ${refreshedToken}`);
+      if (!retryHeaders.has('Content-Type') && init?.body && typeof init.body === 'string') {
+        retryHeaders.set('Content-Type', 'application/json');
       }
-    } catch {
-      if (typeof window !== 'undefined') {
-        window.dispatchEvent(new CustomEvent('rtr:session-expired'));
-      }
-      throw new Error('Invalid or expired session token.');
+      res = await fetch(url, { ...init, headers: retryHeaders });
     }
   }
 
-  if (res.status === 401) {
+  // If still 401 after retry: token is genuinely invalid
+  if (res.status === 401 && !isDemoMode()) {
     if (typeof window !== 'undefined') {
       window.dispatchEvent(new CustomEvent('rtr:session-expired'));
     }
@@ -661,25 +714,30 @@ export async function ensureAuthenticatedSession(): Promise<string> {
     return 'b46689e9-754e-49b5-b79b-ebc1ee42538f';
   }
 
+  const now = Date.now();
+  if (cachedUserId && now < cachedUserIdExpiresAt) {
+    return cachedUserId;
+  }
+
   try {
     const { data: { session } } = await supabase.auth.getSession();
     if (session?.user?.id) {
+      cachedUserId = session.user.id;
+      cachedUserIdExpiresAt = now + USER_ID_CACHE_TTL_MS;
       return session.user.id;
     }
 
-    // Attempt proactive token refresh if session exists but needs refresh
-    const { data: refreshData, error: refreshErr } = await supabase.auth.refreshSession();
-    if (!refreshErr && refreshData.session?.user?.id) {
-      return refreshData.session.user.id;
+    const token = await refreshSessionSafely();
+    if (token) {
+      const { data: { session: postRefresh } } = await supabase.auth.getSession();
+      if (postRefresh?.user?.id) {
+        cachedUserId = postRefresh.user.id;
+        cachedUserIdExpiresAt = now + USER_ID_CACHE_TTL_MS;
+        return postRefresh.user.id;
+      }
     }
   } catch {
-    if (process.env.NODE_ENV !== 'production') {
-      console.warn('Could not establish Supabase auth session');
-    }
-  }
-
-  if (typeof window !== 'undefined') {
-    window.dispatchEvent(new CustomEvent('rtr:session-expired'));
+    safeLogger.warn('Could not establish Supabase auth session');
   }
 
   return 'b46689e9-754e-49b5-b79b-ebc1ee42538f';
@@ -699,7 +757,7 @@ async function getBusinessId(): Promise<string> {
         return data.id;
       }
     } catch (e) {
-      console.warn('Failed to resolve business id:', e);
+      safeLogger.warn('Failed to resolve business id', e);
     }
   }
   return DEFAULT_BUSINESS_ID;
@@ -730,7 +788,7 @@ async function getCurrentUserId(): Promise<string> {
       const userId = await ensureAuthenticatedSession();
       if (userId) return userId;
     } catch (e) {
-      console.warn('Failed to resolve current user id:', e);
+      safeLogger.warn('Failed to resolve current user id', e);
     }
   }
   return 'b46689e9-754e-49b5-b79b-ebc1ee42538f';
@@ -759,15 +817,8 @@ export async function getShops(): Promise<Shop[]> {
             .from('shops')
             .select('id, name, code, address, phone, is_active, created_at')
             .order('name'),
-          6000
+          12000
         );
-        if (error) {
-          if (error.code === '42501' || (error as any).status === 401) {
-            if (typeof window !== 'undefined') {
-              window.dispatchEvent(new CustomEvent('rtr:session-expired'));
-            }
-          }
-        }
         if (!error && Array.isArray(data)) {
           const nonDemo = data.filter((s: any) => !isDemoShop(s));
           const shops: Shop[] = nonDemo.map((s: any) => ({
@@ -785,7 +836,7 @@ export async function getShops(): Promise<Shop[]> {
           return shops;
         }
       } catch (err) {
-        console.warn('Supabase getShops error, using local fallback:', err);
+        safeLogger.warn('Supabase getShops error, using local fallback', err);
       }
     }
     // Fall back to IndexedDB offline store first
@@ -913,7 +964,7 @@ export async function saveShop(input: Omit<Shop, 'id'> & { id?: string }): Promi
       if (isDatabaseCapacityError(err)) {
         throw (err instanceof DatabaseCapacityError) ? err : new DatabaseCapacityError((err as any)?.message, (err as any)?.code);
       }
-      console.warn('Supabase saveShop error, using local fallback:', err);
+      safeLogger.warn('Supabase saveShop error, using local fallback', err);
     }
   }
 
@@ -960,7 +1011,7 @@ export async function checkShopUsage(id: string): Promise<{ inUse: boolean; coun
       if (err.message?.includes('session token')) {
         throw err;
       }
-      console.warn('checkShopUsage API error, falling back to direct Supabase query:', err);
+      safeLogger.warn('checkShopUsage API error, falling back to direct query', err);
     }
 
     try {
@@ -981,7 +1032,7 @@ export async function checkShopUsage(id: string): Promise<{ inUse: boolean; coun
                          (transToRes.count || 0);
       return { inUse: totalCount > 0, count: totalCount };
     } catch (supErr) {
-      console.warn('Direct Supabase checkShopUsage error:', supErr);
+      safeLogger.warn('Direct checkShopUsage error', supErr);
     }
   }
 
@@ -1061,7 +1112,7 @@ export async function deleteShop(id: string): Promise<DeleteCatalogResult> {
       if (apiErr.message?.includes('Unauthorized') || apiErr.message?.includes('restricted') || apiErr.message?.includes('session token')) {
         throw apiErr;
       }
-      console.warn('API /api/shops/:id failed, attempting direct Supabase mutation:', apiErr);
+      safeLogger.warn('API /api/shops/:id failed, attempting direct mutation', apiErr);
     }
 
     if (!apiSuccess) {
@@ -1148,15 +1199,8 @@ export async function getProducts(): Promise<Product[]> {
             .from('products')
             .select('id, name, sku, category, min_stock_threshold, is_active, created_at')
             .order('name'),
-          6000
+          12000
         );
-        if (error) {
-          if (error.code === '42501' || (error as any).status === 401) {
-            if (typeof window !== 'undefined') {
-              window.dispatchEvent(new CustomEvent('rtr:session-expired'));
-            }
-          }
-        }
         if (!error && Array.isArray(data)) {
           const nonDemo = data.filter((p: any) => !isDemoProduct(p));
           const localProds = getLocalItem<Product[]>(STORAGE_KEYS.PRODUCTS, []);
@@ -1181,7 +1225,7 @@ export async function getProducts(): Promise<Product[]> {
           return prods;
         }
       } catch (err) {
-        console.warn('Supabase getProducts error, using local fallback:', err);
+        safeLogger.warn('Supabase getProducts error, using local fallback', err);
       }
     }
     // Fall back to IndexedDB offline store first
@@ -1305,7 +1349,7 @@ export async function saveProduct(input: Omit<Product, 'id'> & { id?: string }):
       if (isDatabaseCapacityError(err)) {
         throw (err instanceof DatabaseCapacityError) ? err : new DatabaseCapacityError((err as any)?.message, (err as any)?.code);
       }
-      console.warn('Supabase saveProduct error, using local fallback:', err);
+      safeLogger.warn('Supabase saveProduct error, using local fallback', err);
     }
   }
 
@@ -1347,7 +1391,7 @@ export async function checkProductUsage(id: string): Promise<{ inUse: boolean; c
       if (err.message?.includes('session token')) {
         throw err;
       }
-      console.warn('checkProductUsage API error, falling back to direct Supabase query:', err);
+      safeLogger.warn('checkProductUsage API error, falling back to direct query', err);
     }
 
     try {
@@ -1361,7 +1405,7 @@ export async function checkProductUsage(id: string): Promise<{ inUse: boolean; c
       const totalCount = (delivRes.count || 0) + (moveRes.count || 0) + (repRes.count || 0) + (transRes.count || 0);
       return { inUse: totalCount > 0, count: totalCount };
     } catch (dbErr) {
-      console.warn('Direct Supabase product usage check error:', dbErr);
+      safeLogger.warn('Direct product usage check error', dbErr);
     }
   }
 
@@ -1438,13 +1482,13 @@ export async function deleteProduct(id: string): Promise<DeleteCatalogResult> {
         if (res.status === 401 || res.status === 403) {
           throw new Error(errJson.message || 'Unauthorized: Access restricted to Business Owner only.');
         }
-        console.warn(`DELETE /api/products/${id} failed (HTTP ${res.status}):`, errJson.message);
+        safeLogger.warn(`DELETE /api/products/${id} failed (HTTP ${res.status})`, errJson.message);
       }
     } catch (apiErr: any) {
       if (apiErr.message?.includes('Unauthorized') || apiErr.message?.includes('restricted') || apiErr.message?.includes('session token')) {
         throw apiErr;
       }
-      console.warn('DELETE /api/products error, falling back to direct Supabase safe mutation:', apiErr);
+      safeLogger.warn('DELETE /api/products error, falling back to direct safe mutation', apiErr);
     }
 
     if (apiSuccess && serverResult) {
@@ -1518,7 +1562,7 @@ export async function deleteProduct(id: string): Promise<DeleteCatalogResult> {
         };
       }
     } catch (dbErr: any) {
-      console.error('Direct Supabase deleteProduct error:', dbErr);
+      safeLogger.error('Direct deleteProduct error', dbErr);
       throw new Error(dbErr.message || 'Failed to delete product from database.');
     }
   }
@@ -1564,16 +1608,8 @@ export async function getDeliveries(): Promise<DeliveryRecord[]> {
             .from('deliveries')
             .select('id, shop_id, delivery_date, status, notes, created_at, delivery_items(product_id, quantity, notes)')
             .order('delivery_date', { ascending: false }),
-          6000
+          12000
         );
-
-        if (error) {
-          if (error.code === '42501' || (error as any).status === 401) {
-            if (typeof window !== 'undefined') {
-              window.dispatchEvent(new CustomEvent('rtr:session-expired'));
-            }
-          }
-        }
         if (!error && Array.isArray(data)) {
           const [shops, prods, invoices] = await Promise.all([getShops(), getProducts(), getInvoices()]);
           const shopMap = new Map(shops.map(s => [s.id, s.name]));
@@ -1683,7 +1719,7 @@ export async function getDeliveries(): Promise<DeliveryRecord[]> {
           return nonDemoDeliveries;
         }
       } catch (err) {
-        console.warn('Supabase getDeliveries error, using local fallback:', err);
+        safeLogger.warn('Supabase getDeliveries error, using local fallback', err);
       }
     }
 
@@ -1806,7 +1842,7 @@ export async function recordDelivery(input: Omit<DeliveryRecord, 'id' | 'created
       }
 
       if (delivErr) {
-        console.error('Supabase recordDelivery error:', delivErr);
+        safeLogger.error('recordDelivery database error', delivErr);
         if (isDatabaseCapacityError(delivErr)) {
           throw new DatabaseCapacityError(delivErr.message, delivErr.code);
         }
@@ -1814,7 +1850,7 @@ export async function recordDelivery(input: Omit<DeliveryRecord, 'id' | 'created
       }
 
       if (delivData) {
-        // 2. Insert items (with unit_price if column exists, fallback to notes)
+        // 2. Concurrently insert items, initial payment (if any), and stock movements (if delivered)
         const itemsWithPrice = input.items.map(item => ({
           delivery_id: delivData.id,
           product_id: item.productId,
@@ -1823,70 +1859,76 @@ export async function recordDelivery(input: Omit<DeliveryRecord, 'id' | 'created
           notes: item.unitPrice !== undefined ? String(item.unitPrice) : null
         }));
 
-        let { error: itemsErr } = await supabase.from('delivery_items').insert(itemsWithPrice);
-        if (itemsErr && (itemsErr.message?.includes('unit_price') || itemsErr.code === '42703')) {
-          const baselineItems = input.items.map(item => ({
-            delivery_id: delivData.id,
-            product_id: item.productId,
-            quantity: item.quantity,
-            notes: item.unitPrice !== undefined ? String(item.unitPrice) : null
-          }));
-          const fallbackRes = await supabase.from('delivery_items').insert(baselineItems);
-          itemsErr = fallbackRes.error;
-        }
-
-        if (itemsErr) {
-          console.warn('Supabase delivery_items insert warning:', itemsErr);
-          if (isDatabaseCapacityError(itemsErr)) {
-            throw new DatabaseCapacityError(itemsErr.message, itemsErr.code);
+        const insertItemsPromise = (async () => {
+          let { error: itemsErr } = await supabase.from('delivery_items').insert(itemsWithPrice);
+          if (itemsErr && (itemsErr.message?.includes('unit_price') || itemsErr.code === '42703')) {
+            const baselineItems = input.items.map(item => ({
+              delivery_id: delivData.id,
+              product_id: item.productId,
+              quantity: item.quantity,
+              notes: item.unitPrice !== undefined ? String(item.unitPrice) : null
+            }));
+            const fallbackRes = await supabase.from('delivery_items').insert(baselineItems);
+            itemsErr = fallbackRes.error;
           }
-        }
 
-        // 3. Record payment in payments table if any payment made at creation
-        if (paidVal > 0) {
-          try {
-            await supabase.from('payments').insert({
+          if (itemsErr) {
+            safeLogger.warn('delivery_items insert warning', itemsErr);
+            if (isDatabaseCapacityError(itemsErr)) {
+              throw new DatabaseCapacityError(itemsErr.message, itemsErr.code);
+            }
+          }
+        })();
+
+        const insertPaymentPromise = (async () => {
+          if (paidVal > 0) {
+            try {
+              await supabase.from('payments').insert({
+                business_id: businessId,
+                shop_id: input.shopId,
+                delivery_id: delivData.id,
+                payment_date: input.deliveryDate,
+                amount: paidVal,
+                payment_method: 'CASH',
+                payment_reference: 'Initial Delivery Payment',
+                status: 'COMPLETED',
+                notes: 'Recorded at delivery creation',
+                recorded_by: userId
+              });
+            } catch {
+              // Non-fatal if payments table not yet created
+            }
+          }
+        })();
+
+        const insertMovementPromise = (async () => {
+          if (input.status === 'delivered') {
+            const movements = input.items.map(item => ({
               business_id: businessId,
               shop_id: input.shopId,
-              delivery_id: delivData.id,
-              payment_date: input.deliveryDate,
-              amount: paidVal,
-              payment_method: 'CASH',
-              payment_reference: 'Initial Delivery Payment',
-              status: 'COMPLETED',
-              notes: 'Recorded at delivery creation',
-              recorded_by: userId
-            });
-          } catch {
-            // Non-fatal if payments table not yet created
+              product_id: item.productId,
+              movement_type: 'DELIVERY_IN',
+              quantity: item.quantity,
+              reference_id: delivData.id,
+              is_provisional: false,
+              reason: `Delivery supply #${delivData.id.slice(-6)}`,
+              actor_id: userId
+            }));
+            try {
+              const { error: moveErr } = await supabase.from('stock_movements').insert(movements);
+              if (moveErr && isDatabaseCapacityError(moveErr)) {
+                throw new DatabaseCapacityError(moveErr.message, moveErr.code);
+              }
+            } catch (moveEx) {
+              if (isDatabaseCapacityError(moveEx)) {
+                throw moveEx;
+              }
+              // non-fatal
+            }
           }
-        }
+        })();
 
-        // 3. Insert stock movement
-        if (input.status === 'delivered') {
-          const movements = input.items.map(item => ({
-            business_id: businessId,
-            shop_id: input.shopId,
-            product_id: item.productId,
-            movement_type: 'DELIVERY_IN',
-            quantity: item.quantity,
-            reference_id: delivData.id,
-            is_provisional: false,
-            reason: `Delivery supply #${delivData.id.slice(-6)}`,
-            actor_id: userId
-          }));
-          try {
-            const { error: moveErr } = await supabase.from('stock_movements').insert(movements);
-            if (moveErr && isDatabaseCapacityError(moveErr)) {
-              throw new DatabaseCapacityError(moveErr.message, moveErr.code);
-            }
-          } catch (moveEx) {
-            if (isDatabaseCapacityError(moveEx)) {
-              throw moveEx;
-            }
-            // non-fatal
-          }
-        }
+        await Promise.all([insertItemsPromise, insertPaymentPromise, insertMovementPromise]);
 
         const newDelivery: DeliveryRecord = {
           ...input,
@@ -1901,7 +1943,7 @@ export async function recordDelivery(input: Omit<DeliveryRecord, 'id' | 'created
         return newDelivery;
       }
     } catch (err: any) {
-      console.error('Failed to record delivery in Supabase:', err);
+      safeLogger.error('Failed to record delivery in database', err);
       if (isDatabaseCapacityError(err)) {
         throw (err instanceof DatabaseCapacityError) ? err : new DatabaseCapacityError(err?.message, err?.code);
       }
@@ -2207,16 +2249,8 @@ export async function getBusinessRecords(filters?: BusinessRecordFilters): Promi
 
         const { data: viewRecords, error: viewErr } = await withTimeout(
           query,
-          6000
+          12000
         );
-
-        if (viewErr) {
-          if (viewErr.code === '42501' || (viewErr as any).status === 401) {
-            if (typeof window !== 'undefined') {
-              window.dispatchEvent(new CustomEvent('rtr:session-expired'));
-            }
-          }
-        }
 
         if (!viewErr && Array.isArray(viewRecords)) {
           const nonDemo = viewRecords.filter((r: any) => !r.shop_name?.startsWith('[DEMO]') && !r.shop_name?.startsWith('DEMO -'));
@@ -2227,7 +2261,7 @@ export async function getBusinessRecords(filters?: BusinessRecordFilters): Promi
           return sorted;
         }
       } catch (viewEx) {
-        console.warn('Direct v_business_records query error, attempting API / fallback:', viewEx);
+        safeLogger.warn('Direct v_business_records query error, attempting API fallback', viewEx);
       }
 
       // 2. Query through backend Express API (/api/records) which queries v_business_records via admin client
@@ -2274,7 +2308,7 @@ export async function getBusinessRecords(filters?: BusinessRecordFilters): Promi
         return filterBusinessRecords(all, filters);
       }
     } catch (fallbackErr) {
-      console.warn('Fallback record reconstruction error, checking IndexedDB:', fallbackErr);
+      safeLogger.warn('Fallback record reconstruction error, checking IndexedDB', fallbackErr);
     }
 
     // 4. Offline IndexedDB Cache Fallback
@@ -2294,12 +2328,37 @@ export async function getBusinessRecords(filters?: BusinessRecordFilters): Promi
 
 export async function saveBusinessRecord(input: SaveBusinessRecordInput): Promise<BusinessRecord> {
   SaveBusinessRecordSchema.parse(input);
-  const [shops, products] = await Promise.all([getShops(), getProducts()]);
 
-  // 1. Resolve or create Shop
-  let targetShop = shops.find(s => 
+  // Fast-path lookup from local storage cache to eliminate redundant network roundtrips
+  const localShops = getLocalItem<Shop[]>(isDemoMode() ? DEMO_STORAGE_KEYS.SHOPS : STORAGE_KEYS.SHOPS, []);
+  const localProducts = getLocalItem<Product[]>(isDemoMode() ? DEMO_STORAGE_KEYS.PRODUCTS : STORAGE_KEYS.PRODUCTS, []);
+
+  let targetShop = localShops.find(s => 
     input.shopId ? s.id === input.shopId : s.name.trim().toLowerCase() === input.shopName.trim().toLowerCase()
   );
+  let targetProduct = localProducts.find(p => 
+    input.productId ? p.id === input.productId : p.name.trim().toLowerCase() === input.productName.trim().toLowerCase()
+  );
+
+  // If either target is not in the local cache, fetch catalog
+  if (!targetShop || !targetProduct) {
+    const [shops, products] = await Promise.all([
+      targetShop ? Promise.resolve(localShops) : getShops(),
+      targetProduct ? Promise.resolve(localProducts) : getProducts()
+    ]);
+    if (!targetShop) {
+      targetShop = shops.find(s => 
+        input.shopId ? s.id === input.shopId : s.name.trim().toLowerCase() === input.shopName.trim().toLowerCase()
+      );
+    }
+    if (!targetProduct) {
+      targetProduct = products.find(p => 
+        input.productId ? p.id === input.productId : p.name.trim().toLowerCase() === input.productName.trim().toLowerCase()
+      );
+    }
+  }
+
+  // 1. Resolve or create Shop
   if (!targetShop) {
     const rawCode = input.shopName.trim().replace(/[^a-zA-Z0-9]/g, '').slice(0, 4).toUpperCase() || 'SHOP';
     const code = `RTR-${rawCode}-${Date.now().toString().slice(-4)}`;
@@ -2314,9 +2373,6 @@ export async function saveBusinessRecord(input: SaveBusinessRecordInput): Promis
   }
 
   // 2. Resolve or create Product
-  let targetProduct = products.find(p => 
-    input.productId ? p.id === input.productId : p.name.trim().toLowerCase() === input.productName.trim().toLowerCase()
-  );
   if (!targetProduct) {
     const rawSku = input.productName.trim().replace(/[^a-zA-Z0-9]/g, '').slice(0, 4).toUpperCase() || 'ACC';
     const sku = `SKU-${rawSku}-${Date.now().toString().slice(-4)}`;
@@ -2448,7 +2504,7 @@ export async function saveBusinessRecord(input: SaveBusinessRecordInput): Promis
     if (isDatabaseCapacityError(invErr)) {
       throw (invErr instanceof DatabaseCapacityError) ? invErr : new DatabaseCapacityError((invErr as any)?.message, (invErr as any)?.code);
     }
-    console.warn('Could not save invoice along with business record:', invErr);
+    safeLogger.warn('Could not save invoice along with business record', invErr);
   }
 
   clearMemoryCache();
@@ -2706,7 +2762,7 @@ export async function updateBusinessRecord(input: UpdateBusinessRecordInput): Pr
       if (isDatabaseCapacityError(err)) {
         throw (err instanceof DatabaseCapacityError) ? err : new DatabaseCapacityError((err as any)?.message, (err as any)?.code);
       }
-      console.warn('Supabase updateBusinessRecord error:', err);
+      safeLogger.warn('updateBusinessRecord error, using local fallback', err);
     }
   }
 
@@ -3000,7 +3056,7 @@ export async function updateDeliveryStatus(
         } else if (res.status === 400 && errJson.message?.includes('invalid status')) {
           throw new Error(errJson.message || 'Invalid delivery status provided.');
         }
-        console.warn(`PATCH /api/records/${targetId}/delivery-status failed (HTTP ${res.status}):`, errJson.message);
+        safeLogger.warn(`PATCH /api/records/${targetId}/delivery-status failed (HTTP ${res.status})`, errJson.message);
       }
     } catch (apiErr: any) {
       if (
@@ -3011,7 +3067,7 @@ export async function updateDeliveryStatus(
       ) {
         throw apiErr;
       }
-      console.warn('API /api/records/:id/delivery-status failed, falling back to direct Supabase update:', apiErr);
+      safeLogger.warn('API delivery-status update failed, falling back to direct update', apiErr);
     }
 
     // Direct Supabase fallback if backend API server did not confirm
@@ -3108,7 +3164,7 @@ export async function updateDeliveryStatus(
           confirmedStatus = ((data as any).status as 'delivered' | 'pending') || status;
         }
       } catch (dbErr: any) {
-        console.error('Direct Supabase updateDeliveryStatus error:', dbErr);
+        safeLogger.error('Direct updateDeliveryStatus error', dbErr);
         throw new Error(dbErr.message || 'Failed to update delivery status in database.');
       }
     }
@@ -3224,17 +3280,25 @@ export async function deleteBusinessRecord(deliveryId: string): Promise<void> {
       // Direct authenticated Supabase client deletion (governed strictly by RLS policies: deliveries_manage_owner)
       try {
         await ensureAuthenticatedSession();
-        // 1. Delete dependent payments and invoices linked to this delivery
-        const { data: invs } = await supabase.from('invoices').select('id').eq('delivery_id', targetId);
+        // Parallel Stage 1: fetch invoices and concurrently delete delivery items and direct payments
+        const [invsResult, itemsResult, paymentsResult] = await Promise.all([
+          supabase.from('invoices').select('id').eq('delivery_id', targetId),
+          supabase.from('delivery_items').delete().eq('delivery_id', targetId),
+          supabase.from('payments').delete().eq('delivery_id', targetId)
+        ]);
+
+        if (itemsResult.error) throw new Error(itemsResult.error.message);
+        if (paymentsResult.error) throw new Error(paymentsResult.error.message);
+
+        // Parallel Stage 2: delete invoice payments and invoices if any exist
+        const invs = invsResult.data;
         if (invs && invs.length > 0) {
           const invIds = invs.map(i => i.id);
           await supabase.from('payments').delete().in('invoice_id', invIds);
           await supabase.from('invoices').delete().in('id', invIds);
         }
-        await supabase.from('payments').delete().eq('delivery_id', targetId);
-        // 2. Delete delivery items
-        await supabase.from('delivery_items').delete().eq('delivery_id', targetId);
-        // 3. Delete delivery record (immutable stock_movements ledger is intentionally preserved)
+
+        // Final Stage: Delete delivery record (immutable stock_movements ledger is intentionally preserved)
         const { error: delErr } = await supabase.from('deliveries').delete().eq('id', targetId);
         if (delErr) {
           if (delErr.code === '23505' || delErr.message?.includes('immutable')) {
@@ -3244,7 +3308,7 @@ export async function deleteBusinessRecord(deliveryId: string): Promise<void> {
         }
         apiSuccess = true;
       } catch (dbErr: any) {
-        console.error('Direct Supabase deleteBusinessRecord error:', dbErr);
+        safeLogger.error('Direct deleteBusinessRecord error', dbErr);
         throw new Error(dbErr.message || apiError?.message || 'Failed to delete record from database.');
       }
     }
@@ -3381,7 +3445,7 @@ export async function settleRecordPayment(deliveryId: string, amountToPay?: numb
       if (isDatabaseCapacityError(e)) {
         throw (e instanceof DatabaseCapacityError) ? e : new DatabaseCapacityError((e as any)?.message, (e as any)?.code);
       }
-      console.warn('Could not settle payment in Supabase:', e);
+      safeLogger.warn('Could not settle payment in database', e);
     }
   }
 
@@ -3435,11 +3499,7 @@ export async function getDailyReports(): Promise<DailyReportRecord[]> {
           .order('report_date', { ascending: false });
 
         if (error) {
-          if (error.code === '42501' || (error as any).status === 401) {
-            if (typeof window !== 'undefined') {
-              window.dispatchEvent(new CustomEvent('rtr:session-expired'));
-            }
-          }
+          safeLogger.warn('getDailyReports query error', error);
         }
         if (!error && Array.isArray(data)) {
           const [shops, prods] = await Promise.all([getShops(), getProducts()]);
@@ -3475,7 +3535,7 @@ export async function getDailyReports(): Promise<DailyReportRecord[]> {
           return reports;
         }
       } catch (err) {
-        console.warn('Supabase getDailyReports error, using local fallback:', err);
+        safeLogger.warn('getDailyReports error, using local fallback', err);
       }
     }
     const local = getLocalItem<DailyReportRecord[]>(STORAGE_KEYS.REPORTS, []);
@@ -3519,7 +3579,7 @@ export async function submitDailyReport(input: Omit<DailyReportRecord, 'id' | 'c
         .single();
 
       if (repErr) {
-        console.error('Supabase submitDailyReport error:', repErr);
+        safeLogger.error('submitDailyReport error', repErr);
       } else if (repData) {
         // 2. Insert items
         if (!input.isZeroSales && input.items.length > 0) {
@@ -3541,7 +3601,7 @@ export async function submitDailyReport(input: Omit<DailyReportRecord, 'id' | 'c
         return newReport;
       }
     } catch (err) {
-      console.warn('Supabase submitDailyReport exception, using local fallback:', err);
+      safeLogger.warn('submitDailyReport exception, using local fallback', err);
     }
   }
 
@@ -3596,7 +3656,7 @@ export async function approveDailyReport(id: string): Promise<void> {
         }
       }
     } catch (err) {
-      console.warn('Supabase approveDailyReport error:', err);
+      safeLogger.warn('approveDailyReport error', err);
     }
   }
 
@@ -3637,11 +3697,7 @@ export async function getStockAudits(): Promise<StockAuditRecord[]> {
           .select('id, shop_id, product_id, counted_quantity, expected_quantity, variance, created_at, notes')
           .order('created_at', { ascending: false });
         if (error) {
-          if (error.code === '42501' || (error as any).status === 401) {
-            if (typeof window !== 'undefined') {
-              window.dispatchEvent(new CustomEvent('rtr:session-expired'));
-            }
-          }
+          safeLogger.warn('getDailyReports query error', error);
         }
         if (!error && Array.isArray(data)) {
           const audits: StockAuditRecord[] = data.map((c: any) => ({
@@ -3658,7 +3714,7 @@ export async function getStockAudits(): Promise<StockAuditRecord[]> {
           return audits;
         }
       } catch (err) {
-        console.warn('Supabase getStockAudits error, fallback to local:', err);
+        safeLogger.warn('getStockAudits error, fallback to local', err);
       }
     }
     return getLocalItem<StockAuditRecord[]>(STORAGE_KEYS.AUDITS, []);
@@ -3701,7 +3757,7 @@ export async function recordStockAudit(input: Omit<StockAuditRecord, 'id'>): Pro
         return newAudit;
       }
     } catch (err) {
-      console.warn('Supabase recordStockAudit error, fallback to local:', err);
+      safeLogger.warn('recordStockAudit error, fallback to local', err);
     }
   }
 
@@ -4404,7 +4460,7 @@ export async function getEmployees(): Promise<EmployeeRecord[]> {
     );
     return data.employees || [];
   } catch (err) {
-    console.error('getEmployees error:', err);
+    safeLogger.error('getEmployees error', err);
     return [];
   }
 }

@@ -13,6 +13,7 @@ import { StatusError } from './pages/StatusError.js';
 import { Navbar } from './components/Navbar.js';
 import { InstallAppBanner } from './components/InstallAppBanner.js';
 import { supabase, isSupabaseConfigured } from './lib/supabase.js';
+import { safeLogger } from './lib/safeLogger.js';
 
 // Route-level code splitting & lazy loading for heavy workspace pages
 const OwnerDashboard = lazy(() => import('./pages/owner/OwnerDashboard.js').then(m => ({ default: m.OwnerDashboard })));
@@ -35,7 +36,7 @@ export interface UserState {
 
 const STORAGE_USER_KEY = 'rtr_current_user';
 const STORAGE_EXPIRY_KEY = 'rtr_session_expiry';
-const SESSION_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
+const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days session persistence
 
 /**
  * Enforces a timeout on any promise to prevent indefinite hanging during bootstrap.
@@ -78,6 +79,21 @@ const WorkspaceLayout: React.FC<WorkspaceLayoutProps> = ({ currentUser, isOnline
   );
 };
 
+function isPasswordRecoveryUrl(): boolean {
+  if (typeof window === 'undefined') return false;
+  const hash = window.location.hash || '';
+  const search = window.location.search || '';
+  return (
+    hash.includes('type=recovery') ||
+    search.includes('type=recovery') ||
+    hash.includes('access_token') ||
+    search.includes('code=') ||
+    search.includes('token_hash=') ||
+    hash.includes('error_code=') ||
+    search.includes('error_code=')
+  );
+}
+
 export const AppContent: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
@@ -116,7 +132,7 @@ export const AppContent: React.FC = () => {
     } catch {}
 
     const p = location.pathname;
-    if (p.startsWith('/login') || p.startsWith('/forgot-password') || p.startsWith('/reset-password')) {
+    if (p.startsWith('/login') || p.startsWith('/forgot-password') || p.startsWith('/reset-password') || isPasswordRecoveryUrl()) {
       return false;
     }
     return true;
@@ -134,6 +150,18 @@ export const AppContent: React.FC = () => {
 
   // 1. Session verification & hydration
   const runInitSession = useCallback(async () => {
+    // If incoming URL is a password recovery link (#access_token=...&type=recovery or ?type=recovery or ?code=...)
+    if (isPasswordRecoveryUrl()) {
+      if (!location.pathname.startsWith('/reset-password')) {
+        const hash = window.location.hash || '';
+        const search = window.location.search || '';
+        navigate('/reset-password' + search + hash, { replace: true });
+      }
+      isVerifyingRef.current = false;
+      setIsBootstrapping(false);
+      return;
+    }
+
     // If user is currently on unauthenticated auth routes (/login, /forgot-password, /reset-password)
     // with no stored user session, do not make network calls or initialize a session
     const p = location.pathname;
@@ -150,17 +178,28 @@ export const AppContent: React.FC = () => {
 
     try {
       if (isSupabaseConfigured && supabase) {
-        // Enforce 2500ms timeout on Supabase session lookup to avoid browser lock freezes
+        // Enforce 6000ms timeout on Supabase session lookup to avoid browser lock freezes
         let session = null;
         try {
           const sessionPromise = supabase.auth.getSession().catch(() => ({ data: { session: null } }));
-          const res = await withTimeout(sessionPromise, 2500, 'Supabase session lookup timed out');
+          const res = await withTimeout(sessionPromise, 6000, 'Supabase session lookup timed out');
           session = res?.data?.session;
         } catch {
           session = null;
         }
 
         if (session?.user && session?.access_token) {
+          // If token is expiring within 60 seconds or already expired, proactively refresh
+          if (session.expires_at && session.expires_at * 1000 < Date.now() + 60000) {
+            try {
+              const refreshRes = await supabase.auth.refreshSession();
+              if (refreshRes?.data?.session) {
+                session = refreshRes.data.session;
+              }
+            } catch (err) {
+              safeLogger.warn('Proactive token refresh error', err);
+            }
+          }
           // If this token was already verified, skip duplicate network call
           if (lastVerifiedTokenRef.current === session.access_token && currentUserRef.current) {
             return;
@@ -229,8 +268,22 @@ export const AppContent: React.FC = () => {
                 localStorage.setItem(STORAGE_USER_KEY, JSON.stringify(userState));
                 localStorage.setItem(STORAGE_EXPIRY_KEY, String(Date.now() + SESSION_TTL_MS));
                 return;
-              } else if (res.status === 401 || res.status === 403 || res.status === 404) {
-                // If backend verification route is not available or rejected token,
+              } else if (res.status === 401) {
+                // If backend returned 401, token might have just expired or rotated: try 1 refresh
+                if (attempt === 1 && isSupabaseConfigured && supabase) {
+                  try {
+                    const refreshed = await supabase.auth.refreshSession();
+                    if (refreshed?.data?.session?.access_token) {
+                      session = refreshed.data.session;
+                      continue;
+                    }
+                  } catch {
+                    // fall through
+                  }
+                }
+                break;
+              } else if (res.status === 403 || res.status === 404) {
+                // If backend verification route is not available or explicitly forbidden,
                 // fall through to validate directly against authoritative Supabase
                 break;
               } else {
@@ -334,7 +387,7 @@ export const AppContent: React.FC = () => {
                 return;
               }
             } catch (fallbackErr) {
-              console.warn('Direct Supabase session verification fallback failed:', fallbackErr);
+              safeLogger.warn('Direct session verification fallback failed', fallbackErr);
             }
           }
 
@@ -364,21 +417,24 @@ export const AppContent: React.FC = () => {
               setDemoMode(true);
               setCurrentUser(parsed);
               setBootstrapError(null);
-            } else if (parsed && parsed.role === 'owner') {
-              // If Supabase is configured but has no active session, owner session has expired
+            } else if (parsed && (parsed.role === 'owner' || parsed.role === 'employee')) {
+              // Attempt to recover live session via refresh before wiping credentials
+              let recovered = false;
               if (isSupabaseConfigured && supabase) {
-                localStorage.removeItem(STORAGE_USER_KEY);
-                localStorage.removeItem(STORAGE_EXPIRY_KEY);
-                setCurrentUser(null);
-                warningRef.current('Your session has expired. Please sign in again.');
-              } else {
-                setDemoMode(false);
-                setCurrentUser(parsed);
-                setBootstrapError(null);
+                try {
+                  const refRes = await withTimeout(supabase.auth.refreshSession(), 6000, 'Session recovery timeout');
+                  if (refRes?.data?.session?.user) {
+                    recovered = true;
+                    setDemoMode(false);
+                    setCurrentUser(parsed);
+                    setBootstrapError(null);
+                    return;
+                  }
+                } catch {
+                  recovered = false;
+                }
               }
-            } else if (parsed && parsed.role === 'employee') {
-              // Employee: same rule — if Supabase configured but no live session, clear and force re-login
-              if (isSupabaseConfigured && supabase) {
+              if (!recovered && isSupabaseConfigured && supabase && navigator.onLine) {
                 localStorage.removeItem(STORAGE_USER_KEY);
                 localStorage.removeItem(STORAGE_EXPIRY_KEY);
                 setCurrentUser(null);
@@ -397,9 +453,7 @@ export const AppContent: React.FC = () => {
         }
       }
     } catch {
-      if (process.env.NODE_ENV !== 'production') {
-        console.warn('Could not restore stored session');
-      }
+      safeLogger.warn('Could not restore stored session');
     } finally {
       isVerifyingRef.current = false;
       setIsBootstrapping(false);
@@ -422,8 +476,13 @@ export const AppContent: React.FC = () => {
     if (isSupabaseConfigured && supabase) {
       const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event: any, session: any) => {
         if (!isMounted) return;
-        if (event === 'PASSWORD_RECOVERY') return;
-        if (location.pathname.startsWith('/reset-password')) return;
+        if (event === 'PASSWORD_RECOVERY') {
+          const hash = window.location.hash || '';
+          const search = window.location.search || '';
+          navigate('/reset-password' + search + hash, { replace: true });
+          return;
+        }
+        if (location.pathname.startsWith('/reset-password') || isPasswordRecoveryUrl()) return;
         if (event === 'SIGNED_OUT') {
           lastVerifiedTokenRef.current = null;
           setCurrentUser(null);
@@ -445,12 +504,35 @@ export const AppContent: React.FC = () => {
       authSub = subscription;
     }
 
+    // Cross-tab authentication synchronization: listen to storage changes from other browser tabs
+    const handleStorageChange = (e: StorageEvent) => {
+      if (!isMounted) return;
+      if (e.key === STORAGE_USER_KEY) {
+        if (!e.newValue) {
+          // Another tab logged out
+          lastVerifiedTokenRef.current = null;
+          setCurrentUser(null);
+          if (!location.pathname.startsWith('/login') && !location.pathname.startsWith('/forgot-password') && !location.pathname.startsWith('/reset-password')) {
+            navigate('/login', { replace: true });
+          }
+        } else {
+          try {
+            const parsed = JSON.parse(e.newValue);
+            setCurrentUser(parsed);
+          } catch {}
+        }
+      }
+    };
+
+    window.addEventListener('storage', handleStorageChange);
+
     return () => {
       isMounted = false;
       clearTimeout(watchdogTimer);
       authSub?.unsubscribe();
+      window.removeEventListener('storage', handleStorageChange);
     };
-  }, [runInitSession]);
+  }, [runInitSession, navigate]);
 
   // 2. Network connectivity listeners
   useEffect(() => {
@@ -501,7 +583,7 @@ export const AppContent: React.FC = () => {
       localStorage.setItem(STORAGE_USER_KEY, JSON.stringify(user));
       localStorage.setItem(STORAGE_EXPIRY_KEY, String(Date.now() + SESSION_TTL_MS));
     } catch (err) {
-      console.error('Failed to save session to localStorage:', err);
+      safeLogger.error('Failed to save session to storage', err);
     }
     const welcomeName = user.name || (user.role === 'employee' ? 'Shop Staff' : 'Business Owner');
     success(`Welcome back, ${welcomeName}`);
@@ -523,7 +605,7 @@ export const AppContent: React.FC = () => {
         navigator.serviceWorker.controller.postMessage({ action: 'clear-cache' });
       }
     } catch (err) {
-      console.error('Failed to clear session from localStorage:', err);
+      safeLogger.error('Failed to clear session from storage', err);
     }
     setCurrentUser(null);
     info('Signed out successfully.');
@@ -607,6 +689,8 @@ export const AppContent: React.FC = () => {
               isOnline={isOnline}
               onSignOut={handleSignOut}
             />
+          ) : isPasswordRecoveryUrl() ? (
+            <Navigate to={'/reset-password' + (typeof window !== 'undefined' ? (window.location.search || '') + (window.location.hash || '') : '')} replace />
           ) : (
             <Navigate to="/login" replace />
           )
@@ -633,18 +717,19 @@ export const AppContent: React.FC = () => {
           </>
         ) : (
           <>
-            <Route path="/" element={<OwnerDashboard />} />
+            <Route path="/" element={<Navigate to="/records" replace />} />
+            <Route path="/dashboard" element={<Navigate to="/records" replace />} />
             <Route path="/records" element={<OwnerDashboard />} />
+            <Route path="/shops" element={<Navigate to="/records" replace />} />
+            <Route path="/shops/:shopId" element={<Navigate to="/records" replace />} />
+            <Route path="/products" element={<Navigate to="/records" replace />} />
+            <Route path="/catalog" element={<Navigate to="/records" replace />} />
+            <Route path="/analytics" element={<Navigate to="/statements" replace />} />
             <Route path="/statements" element={<MonthlyShopStatement />} />
             <Route path="/statements/shop/:shopId" element={<IndividualShopStatement />} />
             <Route path="/reports" element={<MonthlyShopStatement />} />
             <Route path="/settings" element={<SettingsPage currentUser={currentUser!} isOnline={isOnline} onSignOut={handleSignOut} />} />
             <Route path="/management" element={<SettingsPage currentUser={currentUser!} isOnline={isOnline} onSignOut={handleSignOut} />} />
-            {/* Cleanly redirect legacy navigation links back to central Records ledger */}
-            <Route path="/shops" element={<Navigate to="/records" replace />} />
-            <Route path="/catalog" element={<Navigate to="/records" replace />} />
-            <Route path="/products" element={<Navigate to="/records" replace />} />
-            <Route path="/analytics" element={<Navigate to="/records" replace />} />
             <Route path="/deliveries" element={<Navigate to="/records" replace />} />
             <Route path="/stock-ledger" element={<Navigate to="/records" replace />} />
             <Route path="/payments" element={<Navigate to="/records" replace />} />

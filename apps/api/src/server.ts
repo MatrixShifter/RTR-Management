@@ -42,10 +42,21 @@ process.on('uncaughtException', (err: Error) => {
   process.exit(1);
 });
 
+let isShuttingDown = false;
 const gracefulShutdown = (signal: string) => {
-  logger.info(`${signal} received. Shutting down RTR API server gracefully...`);
+  if (isShuttingDown) return;
+  isShuttingDown = true;
+  logger.info(`${signal} received. Shutting down RTR API server gracefully (draining active connections)...`);
+
+  const forceKillTimer = setTimeout(() => {
+    logger.error('Graceful shutdown timed out after 10s. Forcing exit.');
+    process.exit(1);
+  }, 10000);
+  if (forceKillTimer.unref) forceKillTimer.unref();
+
   server.close(() => {
-    logger.info('RTR API server closed successfully.');
+    clearTimeout(forceKillTimer);
+    logger.info('All RTR API server connections drained and closed cleanly.');
     process.exit(0);
   });
 };

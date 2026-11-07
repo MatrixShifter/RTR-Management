@@ -5,11 +5,12 @@ export const RECOVERY_CONFIRMATION_MSG = "If an account matches the information 
 const ALLOWED_REDIRECT_HOSTS = new Set([
   'localhost',
   '127.0.0.1',
+  'rtr-management.vercel.app',
   'rtr-management-cfn4.vercel.app'
 ]);
 
 function sanitizeRedirectUrl(targetUrl?: string): string {
-  const fallback = 'https://rtr-management-cfn4.vercel.app/reset-password';
+  const fallback = 'https://rtr-management.vercel.app/reset-password';
   if (!targetUrl) return fallback;
 
   try {

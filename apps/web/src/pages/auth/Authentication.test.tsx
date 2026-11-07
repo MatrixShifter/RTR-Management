@@ -10,6 +10,7 @@ import {
   INCORRECT_CREDENTIALS_MSG, 
   RECOVERY_CONFIRMATION_MSG,
   NETWORK_ERROR_MSG,
+  getPasswordResetRedirectUrl,
   getRememberedUsername,
   setRememberedUsername,
   signIn,
@@ -469,6 +470,37 @@ describe('Secure Owner Authentication Suite', () => {
       expect(html).toContain('Create New Password');
       expect(html).toContain('Verifying secure recovery link...');
       expect(html).not.toContain('lg:pl-[205px]');
+    });
+
+    it('generates canonical reset password URL based on hostname', () => {
+      const url = getPasswordResetRedirectUrl();
+      expect(url).toContain('/reset-password');
+    });
+
+    it('intercepts recovery parameters on /login and renders redirect spinner instead of login form', () => {
+      const prevWindow = (globalThis as any).window;
+      (globalThis as any).window = {
+        location: {
+          pathname: '/login',
+          hash: '#access_token=test-recovery-token&type=recovery',
+          search: '',
+          replace: vi.fn()
+        }
+      };
+
+      try {
+        const html = renderToString(
+          <Login onLoginSuccess={() => {}} onNavigateToForgot={() => {}} />
+        );
+        expect(html).toContain('Redirecting to password recovery...');
+        expect(html).not.toContain('Welcome to RTR Wholesale Management');
+      } finally {
+        if (prevWindow) {
+          (globalThis as any).window = prevWindow;
+        } else {
+          delete (globalThis as any).window;
+        }
+      }
     });
   });
 

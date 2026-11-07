@@ -22,7 +22,13 @@ const EnvironmentSchema = z.object({
   CORS_ORIGIN: z.string().default('http://localhost:5173'),
   SUPABASE_URL: z.string().url().default(AUTHORITATIVE_PRODUCTION_SUPABASE_URL),
   SUPABASE_ANON_KEY: z.string().min(1).default('placeholder-anon-key'),
-  SUPABASE_SERVICE_ROLE_KEY: z.string().min(1).default('placeholder-service-role-key')
+  SUPABASE_SERVICE_ROLE_KEY: z.string().min(1).default('placeholder-service-role-key'),
+  REDIS_URL: z.string().url().optional(),
+  RATE_LIMIT_STANDARD_MAX: z.union([z.string(), z.number()]).default(300).transform(val => typeof val === 'number' ? val : parseInt(val, 10)),
+  RATE_LIMIT_AUTH_MAX: z.union([z.string(), z.number()]).default(30).transform(val => typeof val === 'number' ? val : parseInt(val, 10)),
+  RATE_LIMIT_MUTATION_MAX: z.union([z.string(), z.number()]).default(60).transform(val => typeof val === 'number' ? val : parseInt(val, 10)),
+  RATE_LIMIT_PAYMENT_MAX: z.union([z.string(), z.number()]).default(30).transform(val => typeof val === 'number' ? val : parseInt(val, 10)),
+  REQUEST_TIMEOUT_MS: z.union([z.string(), z.number()]).default(25000).transform(val => typeof val === 'number' ? val : parseInt(val, 10))
 }).superRefine((data, ctx) => {
   // Reject deprecated development project to prevent split-brain database states
   if (data.SUPABASE_URL.includes('lwyxzmrxxviiuzztpwar')) {
@@ -55,8 +61,9 @@ const EnvironmentSchema = z.object({
 const parsed = EnvironmentSchema.safeParse(process.env);
 
 if (!parsed.success) {
+  const invalidFields = Object.keys(parsed.error.flatten().fieldErrors);
   // eslint-disable-next-line no-console
-  console.error('Invalid environment variables:', parsed.error.flatten().fieldErrors);
+  console.error(`Invalid or missing environment configuration for fields: ${invalidFields.join(', ')}`);
   throw new Error('Environment configuration validation failed');
 }
 

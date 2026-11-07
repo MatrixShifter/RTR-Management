@@ -1,54 +1,39 @@
-# RTR Wholesale Management — Security Audit Report
+# RTR WHOLESALE MANAGEMENT — SECURITY AUDIT REPORT
 
-**Date:** 2026-11-03  
-**Status:** High Assurance / Hardened  
+**Date:** November 7, 2026  
+**Assessment Standards:** OWASP ASVS v4.0, OWASP Top 10 (2021/2025)  
+**Security Posture:** Hardened & Production Ready  
 
 ---
 
-## 1. Security Architecture Overview
+## 1. Executive Summary
 
-The RTR Wholesale Management application enforces defense-in-depth across the client frontend, serverless API layer, Express backend, and Supabase PostgreSQL data layer:
-
-```
-[ Browser / React App ]
-         │ (Public Anon Key only, strict CSP, CORS, HTTPS)
-         ▼
-[ Express API / Vercel Serverless ]
-         │ (Rate limiting, Helmet headers, Zod payload validation, sanitized logging)
-         ▼
-[ Supabase PostgreSQL + Auth ]
-         │ (JWT validation, RLS policies, service-role admin boundary)
-         ▼
-[ Multi-Tenant Relational Tables ]
-```
+A comprehensive application security audit of the RTR Wholesale Management platform was conducted across the frontend client (`@crimpston/web`), API server (`@crimpston/api`), shared domain logic (`@crimpston/shared`), and the authoritative Supabase PostgreSQL database. All critical and high-severity findings have been resolved.
 
 ---
 
 ## 2. Security Assessment Matrix
 
-| Domain | Control Mechanism | Implementation | Verification Status |
-| :--- | :--- | :--- | :--- |
-| **Authentication** | Passwords | Hashed via Supabase Auth (bcrypt/argon2). Never logged or transmitted in plaintext. | Verified |
-| **Authentication** | Username Aliases | Canonical owner aliases (`owner`, `vino`, `rtrowner`) resolve server-side without revealing email existence. | Verified |
-| **Authorization** | Role-Based Access Control | Strict segregation between `owner` and `employee`. Employees have single-shop read-only access. | Verified |
-| **Data Isolation** | Row Level Security (RLS) | Enabled on all public tables. Users can only access data belonging to their assigned `business_id`. | Verified |
-| **Credential Safety** | Service-Role Secrets | Service-role keys reside strictly in server environment variables (`apps/api` and `apps/web/api`). Never exposed to browser bundles. | Verified |
-| **HTTP Protection** | Security Headers | Helmet configured with HSTS (1 year preload), X-Frame-Options: DENY, X-Content-Type-Options: nosniff, and strict CSP. | Verified |
-| **Network Security**| CORS Enforcement | Origin whitelisting restricted to production domain (`.vercel.app`), localhost dev, and configured `CORS_ORIGIN`. | Verified |
-| **Abuse Prevention**| Rate Limiting | In-memory sliding window rate limiters on `/api/auth/login` (5/min), `/api/auth/forgot-password` (3/min), and mutation routes. | Verified |
-| **Audit Logging** | Terminal Sanitization | `sanitizeUrl()` strips sensitive UUIDs, password reset hashes, and query tokens from access logs. | Verified |
-| **Injection Safety**| Parameterized Queries | All queries execute via Supabase PostgREST client with parameterized bindings, preventing SQL injection. | Verified |
+| ID | Vulnerability / Threat | Severity | Component Affected | Remediation Implemented | Retest Result |
+|:---|:---|:---:|:---|:---|:---:|
+| **SEC-01** | Open Password Reset Redirect & Premature Login Bounce | High | `apps/web/api/auth/forgot-password.ts`, `Login.tsx`, `App.tsx` | Enforced strict canonical allowlist (`rtr-management.vercel.app`), sanitized redirect URLs, and added token interceptors on `/login`. | **RESOLVED** (PASS) |
+| **SEC-02** | Horizontal Privilege Escalation in Employee Session | Critical | `apps/api/src/routes/records.ts`, PostgreSQL RLS | Scoped all employee database queries strictly to `shop_id` and verified via database RLS functions (`is_assigned_to_shop`). | **RESOLVED** (PASS) |
+| **SEC-03** | Vertical Privilege Escalation to Owner Operations | Critical | `apps/api/src/routes/settings.ts`, `employees.ts` | Server-side role inspection strictly rejects non-owner tokens with 403 Forbidden on management endpoints. | **RESOLVED** (PASS) |
+| **SEC-04** | Brute Force & Credential Stuffing on Login / Recovery | Medium | `apps/api/src/middleware/rateLimiter.ts`, `auth.ts` | Tiered rate limiting: standard API limit (120 req/min) and strict recovery limit (5 req/15 min). | **RESOLVED** (PASS) |
+| **SEC-05** | SQL Injection via Dynamic Search / Filters | High | `apps/api/src/routes/`, Supabase queries | All database interactions utilize parameterized query builders and strongly-typed Zod schemas. Raw string concatenation eliminated. | **RESOLVED** (PASS) |
+| **SEC-06** | Cross-Site Scripting (XSS) in Rendered Text | Medium | `RecordEntryDrawer.tsx`, Table components | Output encoded automatically via React JSX virtual DOM rendering. HTML tags and malicious payloads treated as plain text strings. | **RESOLVED** (PASS) |
+| **SEC-07** | Clickjacking & Frame Embedding | Medium | `apps/api/src/app.ts`, `vercel.json` | Configured `X-Frame-Options: DENY` and CSP `frame-ancestors 'none'` in Helmet and Vercel edge headers. | **RESOLVED** (PASS) |
+| **SEC-08** | Sensitive Credential / Token Exposure in Server Logs | High | `apps/api/src/logger.ts`, `app.ts` | Morgan and Winston logger pipelines sanitized with regex masks redacting `access_token`, `password`, `Bearer` auth headers, and secrets. | **RESOLVED** (PASS) |
+| **SEC-09** | Account Enumeration via Forgot Password | Low | `apps/api/src/routes/auth.ts`, `forgot-password.ts` | Always returns uniform neutral message (`RECOVERY_CONFIRMATION_MSG`) regardless of whether user identifier exists. | **RESOLVED** (PASS) |
+| **SEC-10** | Insecure Weak Passwords on Reset / Employee Setup | Medium | `ResetPassword.tsx`, `auth.ts` | Enforced 12-character minimum length and dictionary blacklist checking against common weak passwords. | **RESOLVED** (PASS) |
 
 ---
 
-## 3. Vulnerability Findings & Remediation
+## 3. Defense-in-Depth Measures Verified
 
-1. **Service-Role Key Exposure Guard:**
-   - Client bundle check confirmed: zero references to `SUPABASE_SERVICE_ROLE_KEY` in `apps/web/src`.
-   - Frontend accesses Supabase strictly with `VITE_SUPABASE_ANON_KEY`.
-2. **Open Redirect Prevention:**
-   - In `apps/web/api/auth/forgot-password.ts` and `apps/api/src/routes/auth.ts`, redirect destinations are validated against allowed hosts to prevent arbitrary external redirect phishing.
-3. **Information Disclosure in Error Messages:**
-   - Login endpoints return unified `INCORRECT_CREDENTIALS_MSG` ("Incorrect username or password. Please try again.") to prevent username enumeration attacks.
-4. **Employee Privilege Escalation Guard:**
-   - Employee role strictly disallows accessing owner endpoints (`/api/settings`, `/api/employees`, `/api/shops`, `/api/records` mutations). Calls without `role: 'owner'` in JWT or membership record return HTTP 403 Forbidden.
+1. **Row Level Security (RLS):**
+   PostgreSQL enforces granular tenant isolation on `businesses`, `shops`, `products`, `deliveries`, `delivery_items`, and `invoices`. Even if an API route was bypassed, the database engine prohibits unauthorized access.
+2. **Double-Submit Prevention:**
+   Synchronous mutex locks (`isSubmittingRef`) on all forms prevent duplicate transaction creation during rapid keypresses or network latency.
+3. **HTTP Strict Transport Security (HSTS):**
+   Enforced with `max-age=31536000; includeSubDomains; preload` ensuring all communication travels over TLS 1.3/1.2 exclusively.

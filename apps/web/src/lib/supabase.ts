@@ -11,8 +11,8 @@ const envKey = (import.meta.env.VITE_SUPABASE_ANON_KEY || '').trim();
 
 // Reject deprecated development project to prevent split-brain sessions
 const isLegacyAgencyProject = envUrl.includes('lwyxzmrxxviiuzztpwar');
-if (isLegacyAgencyProject && typeof console !== 'undefined') {
-  console.error('[Supabase Config Error] Deprecated development project URL (lwyxzmrxxviiuzztpwar) detected in environment. Using authoritative client production project (xjlnoxbkcyymtdtallzu).');
+if (isLegacyAgencyProject && typeof console !== 'undefined' && import.meta.env.DEV) {
+  console.warn('[Configuration Warning] Legacy project URL detected in environment. Using authoritative production project.');
 }
 
 // Use environment variables when properly provided, otherwise fall back to production defaults

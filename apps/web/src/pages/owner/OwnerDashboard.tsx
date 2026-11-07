@@ -42,6 +42,7 @@ import {
   type DailyReportRecord
 } from '../../services/db.js';
 import { calculateRecordProfit, type Invoice, type PaymentRecord, type StockBalance, type DatabaseStorageHealth } from '@crimpston/shared';
+import { safeLogger } from '../../lib/safeLogger.js';
 
 export type FilterMode = 'all' | 'delivery' | 'pending';
 export type SortDirection = 'asc' | 'desc';
@@ -262,10 +263,44 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
   const [deliveryConfirmTarget, setDeliveryConfirmTarget] = useState<BusinessRecord | null>(null);
   const [isConfirmingDelivery, setIsConfirmingDelivery] = useState(false);
 
+  // Keyboard Shortcut: Pressing '+' opens Add Record modal
+  useEffect(() => {
+    const handleGlobalKeyDown = (e: KeyboardEvent) => {
+      const isPlus = e.key === '+' || e.key === 'Add' || (e.key === '=' && e.shiftKey) || e.code === 'NumpadAdd';
+      if (!isPlus) return;
+
+      if (e.ctrlKey || e.altKey || e.metaKey) return;
+
+      const target = e.target as HTMLElement | null;
+      if (target) {
+        const tagName = target.tagName.toUpperCase();
+        if (tagName === 'INPUT' || tagName === 'TEXTAREA' || tagName === 'SELECT' || target.isContentEditable) {
+          return;
+        }
+      }
+
+      if (isDrawerOpen || viewingRecord || settlingRecord || recordToDelete || deliveryConfirmTarget || capacityAlert) {
+        return;
+      }
+
+      e.preventDefault();
+      setEditingRecord(null);
+      setIsDrawerOpen(true);
+    };
+
+    window.addEventListener('keydown', handleGlobalKeyDown);
+    return () => {
+      window.removeEventListener('keydown', handleGlobalKeyDown);
+    };
+  }, [isDrawerOpen, viewingRecord, settlingRecord, recordToDelete, deliveryConfirmTarget, capacityAlert]);
+
   // Load live data from database with silent background reconciliation support
   const loadData = useCallback(async (options: { silent?: boolean } = {}) => {
     // Avoid background synchronization overriding pending user mutations in flight
     if (inFlightTogglesRef.current.size > 0) {
+      if (!options.silent) {
+        setIsLoading(false);
+      }
       return;
     }
     // Only display full skeleton on initial non-silent load when we don't have existing records
@@ -350,7 +385,7 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
       setShops(sList || []);
       setProducts(pList || []);
     } catch (err: any) {
-      console.error('Failed to load RTR wholesale records:', err);
+      safeLogger.error('Failed to load RTR wholesale records', err);
       if (!options.silent) {
         setError(err?.message || 'Failed to load wholesale records. Please check connection.');
       }
@@ -362,6 +397,11 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
   useEffect(() => {
     if (initialShops !== undefined || initialRecords !== undefined) return;
     loadData();
+
+    // Safety watchdog: ensure loading skeleton never blocks UI indefinitely on slow or timed-out networks
+    const watchdogTimer = setTimeout(() => {
+      setIsLoading(false);
+    }, 8000);
 
     let debounceTimer: ReturnType<typeof setTimeout> | null = null;
     const handleSync = (e?: Event) => {
@@ -399,6 +439,7 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
 
     window.addEventListener('rtr_data_sync', handleSync);
     return () => {
+      clearTimeout(watchdogTimer);
       if (debounceTimer) clearTimeout(debounceTimer);
       window.removeEventListener('rtr_data_sync', handleSync);
     };
@@ -434,8 +475,10 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
     setTimeout(() => setToastMessage(null), 4000);
     setEditingRecord(null);
 
-    // Silent background reconciliation (no UI flash, no unmount)
-    loadData({ silent: true });
+    // Silent background reconciliation (no UI flash; deferred to prevent network contention with optimistic render)
+    setTimeout(() => {
+      loadData({ silent: true });
+    }, 1000);
   };
 
   // Actions
@@ -612,8 +655,10 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
       setRecordToDelete(null);
       setToastMessage(`Record for ${target.productName} deleted successfully.`);
       setTimeout(() => setToastMessage(null), 3000);
-      // Silent background reconciliation (no page reload, no UI flash)
-      loadData({ silent: true });
+      // Silent background reconciliation (deferred to prevent UI lockup and network contention)
+      setTimeout(() => {
+        loadData({ silent: true });
+      }, 1000);
     } catch (err: any) {
       // Row remains visible; show truthful, actionable error
       if (isDatabaseCapacityError(err)) {
@@ -923,7 +968,7 @@ export const OwnerDashboard: React.FC<OwnerDashboardProps> = ({
   }
 
   // Render error state if completely blocked
-  if (error && records.length === 0 && shops.length === 0) {
+  if (error && records.length === 0) {
     return (
       <div className="py-8">
         <ErrorState

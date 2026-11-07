@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import { safeLogger } from '../lib/safeLogger.js';
 
 interface BeforeInstallPromptEvent extends Event {
   readonly platforms: string[];
@@ -79,7 +80,7 @@ export function usePwaInstall() {
         }
         setDeferredPrompt(null);
       } catch (err) {
-        console.warn('Install prompt error:', err);
+        safeLogger.warn('Install prompt error', err);
         setShowInstructions(true);
       }
     } else {

@@ -19,7 +19,7 @@ Navigate to **Authentication** &rarr; **Email Templates**.
 - **Subject:** `Reset Your RTR Wholesale Management Password`
 - **Body:** Copy and paste the HTML content from [`reset-password.html`](./reset-password.html).
 - **Plain Text Fallback:** Copy content from [`reset-password.txt`](./reset-password.txt).
-- **Key Variable:** Uses `{{ .ConfirmationURL }}` directing the owner to `https://rtr-management-cfn4.vercel.app/reset-password`.
+- **Key Variable:** Uses `{{ .ConfirmationURL }}` directing the owner to `https://rtr-management.vercel.app/reset-password`.
 
 ### Template 2: Invite User (Employee Invitations & Onboarding)
 - **Target Template in Dashboard:** `Invite User`
@@ -48,9 +48,12 @@ In the [Supabase Dashboard](https://supabase.com/dashboard/project/xjlnoxbkcyymt
 Navigate to **Authentication** &rarr; **URL Configuration**:
 
 1. **Site URL:**
-   - `https://rtr-management-cfn4.vercel.app`
+   - `https://rtr-management.vercel.app`
 2. **Redirect URLs (Allowlist):**
    - Add your production URLs:
+     - `https://rtr-management.vercel.app`
+     - `https://rtr-management.vercel.app/login`
+     - `https://rtr-management.vercel.app/reset-password`
      - `https://rtr-management-cfn4.vercel.app`
      - `https://rtr-management-cfn4.vercel.app/login`
      - `https://rtr-management-cfn4.vercel.app/reset-password`

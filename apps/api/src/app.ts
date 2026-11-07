@@ -7,6 +7,9 @@ import { config } from './config.js';
 import { sanitizeUrl } from './logger.js';
 import { standardRateLimiter } from './middleware/rateLimiter.js';
 import { errorHandler } from './middleware/errorHandler.js';
+import { requestTimeout } from './middleware/requestTimeout.js';
+import { idempotencyMiddleware } from './middleware/idempotency.js';
+import { supabaseAdmin } from './supabase.js';
 import { authRouter } from './routes/auth.js';
 import { recordsRouter } from './routes/records.js';
 import { shopsRouter } from './routes/shops.js';
@@ -98,11 +101,18 @@ if (config.NODE_ENV !== 'test') {
   );
 }
 
+// Request timeout protection (25s configurable window)
+app.use(requestTimeout());
+
 // Request parsers & rate limiting (100kb limit)
 app.use(express.json({ limit: '100kb' }));
+app.use(express.urlencoded({ extended: true, limit: '50kb' }));
 app.use(standardRateLimiter);
 
-// Health Endpoint (Does not leak secrets or internal DB credentials)
+// Enterprise Idempotency protection for mutations
+app.use(idempotencyMiddleware);
+
+// Liveness Health Endpoint (process uptime & status)
 app.get(['/api/health', '/health'], (_req, res) => {
   const health: HealthResponse = {
     status: 'healthy',
@@ -112,6 +122,45 @@ app.get(['/api/health', '/health'], (_req, res) => {
     version: '1.0.0'
   };
   res.status(200).json(health);
+});
+
+// Readiness Health Endpoint (verifies database connectivity & memory health)
+app.get(['/api/health/ready', '/health/ready'], async (_req, res) => {
+  const t0 = performance.now();
+  try {
+    const { error } = await supabaseAdmin.from('businesses').select('id').limit(1).maybeSingle();
+    const latencyMs = Math.round(performance.now() - t0);
+
+    if (error) {
+      return res.status(503).json({
+        status: 'not_ready',
+        database: 'unhealthy',
+        error: error.message,
+        timestamp: new Date().toISOString()
+      });
+    }
+
+    const mem = process.memoryUsage();
+    return res.status(200).json({
+      status: 'ready',
+      database: 'connected',
+      latencyMs,
+      memory: {
+        heapUsedMb: Math.round(mem.heapUsed / 1024 / 1024),
+        heapTotalMb: Math.round(mem.heapTotal / 1024 / 1024),
+        rssMb: Math.round(mem.rss / 1024 / 1024)
+      },
+      uptime: Math.floor(process.uptime()),
+      timestamp: new Date().toISOString()
+    });
+  } catch (err: any) {
+    return res.status(503).json({
+      status: 'not_ready',
+      database: 'disconnected',
+      error: err?.message || 'Database readiness verification failed',
+      timestamp: new Date().toISOString()
+    });
+  }
 });
 
 // Database Storage Health Endpoint (secure server-side telemetry)

@@ -99,14 +99,9 @@ export default defineConfig({
     }
   },
   server: {
-    host: '0.0.0.0',
+    host: '127.0.0.1',
     port: 5173,
     strictPort: true,
-    hmr: {
-      protocol: 'ws',
-      host: 'localhost',
-      clientPort: 5173
-    },
     proxy: {
       '/api': {
         target: process.env.API_TARGET_URL || process.env.API_BASE_URL || 'http://127.0.0.1:4000',

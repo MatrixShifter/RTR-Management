@@ -27,6 +27,9 @@ import {
 } from '../services/db.js';
 import { isDemoShop, isDemoProduct } from '@crimpston/shared';
 import { ManageCatalogModal } from './ManageCatalogModal.js';
+import { AddEditShopModal } from './AddEditShopModal.js';
+import { AddEditProductModal } from './AddEditProductModal.js';
+import { safeLogger } from '../lib/safeLogger.js';
 
 export interface RecordEntryDrawerProps {
   isOpen: boolean;
@@ -56,6 +59,8 @@ export const RecordEntryDrawer: React.FC<RecordEntryDrawerProps> = ({
   const [localProducts, setLocalProducts] = useState<Product[]>(() => products.filter(p => !isDemoProduct(p)));
   const [isManageShopsOpen, setIsManageShopsOpen] = useState<boolean>(false);
   const [isManageProductsOpen, setIsManageProductsOpen] = useState<boolean>(false);
+  const [isAddShopOpen, setIsAddShopOpen] = useState<boolean>(false);
+  const [isAddProductOpen, setIsAddProductOpen] = useState<boolean>(false);
 
   // Custom dropdown open states and container refs
   const [isShopDropdownOpen, setIsShopDropdownOpen] = useState<boolean>(false);
@@ -114,6 +119,17 @@ export const RecordEntryDrawer: React.FC<RecordEntryDrawerProps> = ({
   // UI / Error state
   const [validationErrors, setValidationErrors] = useState<Record<string, string>>({});
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
+  const isSubmittingRef = useRef<boolean>(false);
+  const firstFieldRef = useRef<HTMLInputElement>(null);
+
+  // Focus the first appropriate field (shop input) when drawer opens
+  useEffect(() => {
+    if (!isOpen) return;
+    const timer = setTimeout(() => {
+      firstFieldRef.current?.focus();
+    }, 50);
+    return () => clearTimeout(timer);
+  }, [isOpen]);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [capacityError, setCapacityError] = useState<{ title: string; message: string } | null>(null);
 
@@ -284,6 +300,42 @@ export const RecordEntryDrawer: React.FC<RecordEntryDrawerProps> = ({
           return;
         }
         handleAttemptClose();
+        return;
+      }
+
+      if (e.key === 'Enter') {
+        const target = e.target as HTMLElement | null;
+        if (target) {
+          const tagName = target.tagName.toUpperCase();
+          if (tagName === 'TEXTAREA' || target.isContentEditable) {
+            return;
+          }
+          if (tagName === 'BUTTON') {
+            return;
+          }
+        }
+
+        // Do not intercept if sub-modals are open
+        if (isManageShopsOpen || isManageProductsOpen || isAddShopOpen || isAddProductOpen) {
+          return;
+        }
+
+        // If dropdown is open with an active highlighted item, let dropdown handler select it
+        if (isShopDropdownOpen && highlightedShopIndex >= 0) {
+          return;
+        }
+        if (isProductDropdownOpen && highlightedProductIndex >= 0) {
+          return;
+        }
+
+        // Duplicate submission prevention
+        if (isSubmittingRef.current || isSubmitting) {
+          e.preventDefault();
+          return;
+        }
+
+        e.preventDefault();
+        handleSubmit();
       }
     };
 
@@ -294,9 +346,47 @@ export const RecordEntryDrawer: React.FC<RecordEntryDrawerProps> = ({
       document.body.style.overflow = 'unset';
       window.removeEventListener('keydown', handleKeyDown);
     };
-  }, [isOpen, isSubmitting, isShopDropdownOpen, isProductDropdownOpen, customShopName, selectedShopId, customProductName, selectedProductId, quantity, amount]);
+  }, [isOpen, isSubmitting, isShopDropdownOpen, isProductDropdownOpen, highlightedShopIndex, highlightedProductIndex, isManageShopsOpen, isManageProductsOpen, isAddShopOpen, isAddProductOpen, customShopName, selectedShopId, customProductName, selectedProductId, quantity, amount, date, customerPrice, deliveryStatus]);
 
   // Explicit shop selection from autocomplete or options
+  
+  
+  const handleCatalogRefresh = async () => {
+    try {
+      const [freshShops, freshProducts] = await Promise.all([getShops(), getProducts()]);
+      setLocalShops(freshShops.filter(s => !isDemoShop(s)));
+      setLocalProducts(freshProducts.filter(p => !isDemoProduct(p)));
+      if (onRefreshCatalog) {
+        await onRefreshCatalog();
+      }
+    } catch (err) {
+      safeLogger.warn('Failed to refresh catalog in drawer', err);
+    }
+  };
+
+  // Handlers for instant creation and immediate selection from Add Record
+  const handleShopCreated = (newShop: Shop) => {
+    handleShopSelect(newShop);
+    setIsAddShopOpen(false);
+    setIsNewShop(false);
+    setLocalShops(prev => {
+      const filtered = prev.filter(s => s.id !== newShop.id);
+      return [...filtered, newShop];
+    });
+    handleCatalogRefresh();
+  };
+
+  const handleProductCreated = (newProd: Product) => {
+    handleProductSelect(newProd);
+    setIsAddProductOpen(false);
+    setIsNewProduct(false);
+    setLocalProducts(prev => {
+      const filtered = prev.filter(p => p.id !== newProd.id);
+      return [...filtered, newProd];
+    });
+    handleCatalogRefresh();
+  };
+
   const handleShopSelect = (s: Shop) => {
     setSelectedShopId(s.id);
     setShopQuery(s.name);
@@ -315,6 +405,10 @@ export const RecordEntryDrawer: React.FC<RecordEntryDrawerProps> = ({
   const handleShopChange = (sId: string) => {
     setIsShopDropdownOpen(false);
     setHighlightedShopIndex(-1);
+    if (sId === '__add__') {
+      setIsAddShopOpen(true);
+      return;
+    }
     if (sId === '__manage__') {
       setIsManageShopsOpen(true);
       return;
@@ -363,6 +457,10 @@ export const RecordEntryDrawer: React.FC<RecordEntryDrawerProps> = ({
   const handleProductChange = (prodId: string) => {
     setIsProductDropdownOpen(false);
     setHighlightedProductIndex(-1);
+    if (prodId === '__add__') {
+      setIsAddProductOpen(true);
+      return;
+    }
     if (prodId === '__manage__') {
       setIsManageProductsOpen(true);
       return;
@@ -520,6 +618,8 @@ export const RecordEntryDrawer: React.FC<RecordEntryDrawerProps> = ({
     const paid = status === 'delivered' ? total : 0;
     const memo = editingRecord?.notes || '';
 
+    if (isSubmittingRef.current || isSubmitting) return;
+    isSubmittingRef.current = true;
     setIsSubmitting(true);
     try {
       if (editingRecord && editingRecord.deliveryId) {
@@ -561,7 +661,7 @@ export const RecordEntryDrawer: React.FC<RecordEntryDrawerProps> = ({
       }
       onClose();
     } catch (err: any) {
-      console.error('Failed to save manual record:', err);
+      safeLogger.error('Failed to save manual record', err);
       if (isDatabaseCapacityError(err)) {
         setCapacityError({
           title: DATABASE_STORAGE_FULL_TITLE,
@@ -573,6 +673,7 @@ export const RecordEntryDrawer: React.FC<RecordEntryDrawerProps> = ({
         setSubmitError(err?.message || 'Failed to save record. Please check your connection and values.');
       }
     } finally {
+      isSubmittingRef.current = false;
       setIsSubmitting(false);
     }
   };
@@ -703,32 +804,35 @@ export const RecordEntryDrawer: React.FC<RecordEntryDrawerProps> = ({
                     </span>
                   )}
                 </div>
-                {localShops.length > 0 && (
-                  <div className="flex items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setIsManageShopsOpen(true)}
-                      className="text-[11px] text-slate-500 hover:text-slate-800 font-medium cursor-pointer"
-                      title="Manage and delete shops"
-                    >
-                      Manage Shops
-                    </button>
-                    <span className="text-slate-300">|</span>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const nextState = !isNewShop;
-                        setIsNewShop(nextState);
-                        setIsShopDropdownOpen(false);
-                        if (nextState) setSelectedShopId('');
-                        else setCustomShopName('');
-                      }}
-                      className="text-[11px] text-[#168BFF] hover:text-[#0876E8] font-medium cursor-pointer"
-                    >
-                      {isNewShop ? "← Choose existing" : "+ New Shop"}
-                    </button>
-                  </div>
-                )}
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setIsManageShopsOpen(true)}
+                    className="text-[11px] text-[#168BFF] hover:text-[#0876E8] font-semibold flex items-center gap-1 cursor-pointer transition-colors"
+                    title="Manage and edit shops"
+                  >
+                    <Settings className="w-3 h-3 text-[#168BFF]" />
+                    <span>Manage Shops</span>
+                  </button>
+                  {localShops.length > 0 && (
+                    <>
+                      <span className="text-slate-300">|</span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const nextState = !isNewShop;
+                          setIsNewShop(nextState);
+                          setIsShopDropdownOpen(false);
+                          if (nextState) setSelectedShopId('');
+                          else setCustomShopName('');
+                        }}
+                        className="text-[11px] text-slate-500 hover:text-slate-700 font-medium cursor-pointer"
+                      >
+                        {isNewShop ? "← Choose existing" : "+ New Shop"}
+                      </button>
+                    </>
+                  )}
+                </div>
               </div>
 
               {!isNewShop && localShops.length > 0 ? (
@@ -736,6 +840,7 @@ export const RecordEntryDrawer: React.FC<RecordEntryDrawerProps> = ({
                   {/* Searchable Autocomplete Input with keyboard & click/touch navigation */}
                   <div className="relative flex items-center">
                     <input
+                      ref={firstFieldRef}
                       type="text"
                       role="combobox"
                       aria-expanded={isShopDropdownOpen}
@@ -848,6 +953,7 @@ export const RecordEntryDrawer: React.FC<RecordEntryDrawerProps> = ({
                         {s.name}
                       </option>
                     ))}
+                    <option value="__add__">+ Add Shop</option>
                     <option value="__new__">+ Register New Shop...</option>
                     <option value="__manage__">⚙ Manage Shops...</option>
                   </select>
@@ -900,11 +1006,23 @@ export const RecordEntryDrawer: React.FC<RecordEntryDrawerProps> = ({
                           type="button"
                           onMouseDown={(e) => {
                             e.preventDefault();
+                            setIsShopDropdownOpen(false);
+                            setIsAddShopOpen(true);
+                          }}
+                          className="w-full px-3.5 py-2.5 text-xs sm:text-sm text-left font-semibold text-[#168BFF] hover:bg-[#EAF4FF] flex items-center gap-2 cursor-pointer transition-colors"
+                        >
+                          <Plus className="w-4 h-4 flex-shrink-0" />
+                          <span>+ Add Shop</span>
+                        </button>
+                        <button
+                          type="button"
+                          onMouseDown={(e) => {
+                            e.preventDefault();
                             handleShopChange('__new__');
                           }}
-                          className="w-full px-3.5 py-2 text-xs sm:text-sm text-left font-medium text-[#168BFF] hover:bg-[#EAF4FF] flex items-center gap-2 cursor-pointer transition-colors"
+                          className="w-full px-3.5 py-2 text-xs sm:text-sm text-left font-medium text-slate-600 hover:bg-slate-100 flex items-center gap-2 cursor-pointer transition-colors"
                         >
-                          <Plus className="w-3.5 h-3.5 flex-shrink-0" />
+                          <Plus className="w-3.5 h-3.5 flex-shrink-0 text-slate-400" />
                           <span>+ Register New Shop...</span>
                         </button>
                         <button
@@ -954,32 +1072,35 @@ export const RecordEntryDrawer: React.FC<RecordEntryDrawerProps> = ({
                     </span>
                   )}
                 </div>
-                {localProducts.length > 0 && (
-                  <div className="flex items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setIsManageProductsOpen(true)}
-                      className="text-[11px] text-slate-500 hover:text-slate-800 font-medium cursor-pointer"
-                      title="Manage and delete products"
-                    >
-                      Manage Products
-                    </button>
-                    <span className="text-slate-300">|</span>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const nextState = !isNewProduct;
-                        setIsNewProduct(nextState);
-                        setIsProductDropdownOpen(false);
-                        if (nextState) setSelectedProductId('');
-                        else setCustomProductName('');
-                      }}
-                      className="text-[11px] text-[#168BFF] hover:text-[#0876E8] font-medium cursor-pointer"
-                    >
-                      {isNewProduct ? "← Choose existing" : "+ New Product"}
-                    </button>
-                  </div>
-                )}
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setIsManageProductsOpen(true)}
+                    className="text-[11px] text-[#168BFF] hover:text-[#0876E8] font-semibold flex items-center gap-1 cursor-pointer transition-colors"
+                    title="Manage and edit products"
+                  >
+                    <Settings className="w-3 h-3 text-[#168BFF]" />
+                    <span>Manage Products</span>
+                  </button>
+                  {localProducts.length > 0 && (
+                    <>
+                      <span className="text-slate-300">|</span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const nextState = !isNewProduct;
+                          setIsNewProduct(nextState);
+                          setIsProductDropdownOpen(false);
+                          if (nextState) setSelectedProductId('');
+                          else setCustomProductName('');
+                        }}
+                        className="text-[11px] text-slate-500 hover:text-slate-700 font-medium cursor-pointer"
+                      >
+                        {isNewProduct ? "← Choose existing" : "+ New Product"}
+                      </button>
+                    </>
+                  )}
+                </div>
               </div>
 
               {!isNewProduct && localProducts.length > 0 ? (
@@ -1099,6 +1220,7 @@ export const RecordEntryDrawer: React.FC<RecordEntryDrawerProps> = ({
                         {p.name}
                       </option>
                     ))}
+                    <option value="__add__">+ Add Product</option>
                     <option value="__new__">+ Enter New Product...</option>
                     <option value="__manage__">⚙ Manage Products...</option>
                   </select>
@@ -1151,11 +1273,23 @@ export const RecordEntryDrawer: React.FC<RecordEntryDrawerProps> = ({
                           type="button"
                           onMouseDown={(e) => {
                             e.preventDefault();
+                            setIsProductDropdownOpen(false);
+                            setIsAddProductOpen(true);
+                          }}
+                          className="w-full px-3.5 py-2.5 text-xs sm:text-sm text-left font-semibold text-[#168BFF] hover:bg-[#EAF4FF] flex items-center gap-2 cursor-pointer transition-colors"
+                        >
+                          <Plus className="w-4 h-4 flex-shrink-0" />
+                          <span>+ Add Product</span>
+                        </button>
+                        <button
+                          type="button"
+                          onMouseDown={(e) => {
+                            e.preventDefault();
                             handleProductChange('__new__');
                           }}
-                          className="w-full px-3.5 py-2 text-xs sm:text-sm text-left font-medium text-[#168BFF] hover:bg-[#EAF4FF] flex items-center gap-2 cursor-pointer transition-colors"
+                          className="w-full px-3.5 py-2 text-xs sm:text-sm text-left font-medium text-slate-600 hover:bg-slate-100 flex items-center gap-2 cursor-pointer transition-colors"
                         >
-                          <Plus className="w-3.5 h-3.5 flex-shrink-0" />
+                          <Plus className="w-3.5 h-3.5 flex-shrink-0 text-slate-400" />
                           <span>+ Enter New Product...</span>
                         </button>
                         <button
@@ -1342,6 +1476,24 @@ export const RecordEntryDrawer: React.FC<RecordEntryDrawerProps> = ({
         </div>
       </div>
 
+      {/* Dedicated Add Shop Modal */}
+      <AddEditShopModal
+        isOpen={isAddShopOpen}
+        onClose={() => setIsAddShopOpen(false)}
+        initialName={shopQuery}
+        onSaveSuccess={handleShopCreated}
+        existingShops={localShops}
+      />
+
+      {/* Dedicated Add Product Modal */}
+      <AddEditProductModal
+        isOpen={isAddProductOpen}
+        onClose={() => setIsAddProductOpen(false)}
+        initialName={productQuery}
+        onSaveSuccess={handleProductCreated}
+        existingProducts={localProducts}
+      />
+
       {/* Manage Shops Dialog */}
       <ManageCatalogModal
         isOpen={isManageShopsOpen}
@@ -1349,6 +1501,7 @@ export const RecordEntryDrawer: React.FC<RecordEntryDrawerProps> = ({
         type="shops"
         items={localShops}
         selectedId={selectedShopId}
+        onSelect={(item) => handleShopSelect(item as Shop)}
         onDelete={async (id) => {
           const res = await deleteShop(id);
           const updated = await getShops();
@@ -1370,6 +1523,7 @@ export const RecordEntryDrawer: React.FC<RecordEntryDrawerProps> = ({
         type="products"
         items={localProducts}
         selectedId={selectedProductId}
+        onSelect={(item) => handleProductSelect(item as Product)}
         onDelete={async (id) => {
           const res = await deleteProduct(id);
           const updated = await getProducts();

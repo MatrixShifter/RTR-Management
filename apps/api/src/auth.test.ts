@@ -1,10 +1,13 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach, afterAll } from 'vitest';
 import request from 'supertest';
 import { app } from './app.js';
 import { INCORRECT_CREDENTIALS_MSG, RECOVERY_CONFIRMATION_MSG, supabaseAdmin, supabaseAnon } from './routes/auth.js';
 import { getTestOwnerToken } from './testHelper.js';
 
 describe('Authentication API Endpoints (/api/auth)', { timeout: 25000 }, () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
   describe('POST /api/auth/login', () => {
     it('returns exact error message on invalid password without exposing details', async () => {
       const res = await request(app)
@@ -58,44 +61,19 @@ describe('Authentication API Endpoints (/api/auth)', { timeout: 25000 }, () => {
       expect(res.body.user.email).toMatch(/owner@rtrmobiles\.com|rtrmobile92@gmail\.com|vinov042007@gmail\.com/);
     });
 
-    it('authenticates owner via legitimate Supabase testing flow when OWNER_TESTING_MODE is active in local dev', async () => {
-      const prevMode = process.env.OWNER_TESTING_MODE;
-      const prevNodeEnv = process.env.NODE_ENV;
-      process.env.OWNER_TESTING_MODE = 'true';
-      process.env.NODE_ENV = 'development';
-
+    it('strictly rejects owner login with invalid credentials via Supabase Auth (401 Unauthorized)', async () => {
       vi.spyOn(supabaseAnon.auth, 'signInWithPassword').mockResolvedValueOnce({
         data: { user: null, session: null },
         error: new Error('Invalid login credentials') as any
       });
 
-      vi.spyOn(supabaseAdmin.auth.admin, 'generateLink').mockResolvedValueOnce({
-        data: {
-          user: { id: 'ac088d6d-6aef-40b0-8388-51e5d74063a6', email: 'rtrmobile92@gmail.com' } as any,
-          properties: { hashed_token: 'valid-test-hash' } as any
-        },
-        error: null
-      });
-
-      vi.spyOn(supabaseAnon.auth, 'verifyOtp').mockResolvedValueOnce({
-        data: {
-          user: { id: 'ac088d6d-6aef-40b0-8388-51e5d74063a6', email: 'rtrmobile92@gmail.com', user_metadata: { role: 'owner', full_name: 'Business Owner' } } as any,
-          session: { access_token: 'authentic-testing-token', refresh_token: 'refresh', expires_at: 1234567, expires_in: 3600 } as any
-        },
-        error: null
-      });
-
       const res = await request(app)
         .post('/api/auth/login')
-        .send({ username: 'owner', password: 'any-testing-password' });
+        .send({ username: 'owner', password: 'incorrect-password' });
 
-      expect(res.status).toBe(200);
-      expect(res.body.success).toBe(true);
-      expect(res.body.session.access_token).toBe('authentic-testing-token');
-      expect(res.body.user.role).toBe('owner');
-
-      process.env.OWNER_TESTING_MODE = prevMode;
-      process.env.NODE_ENV = prevNodeEnv;
+      expect(res.status).toBe(401);
+      expect(res.body.success).toBe(false);
+      expect(res.body.message).toBe('Incorrect username or password. Please try again.');
     });
 
     it('authenticates valid owner account using email address', async () => {
@@ -425,6 +403,11 @@ describe('Authentication API Endpoints (/api/auth)', { timeout: 25000 }, () => {
     it('ignores arbitrary targetUserId in body and only updates account tied to token', async () => {
       const token = await getTestOwnerToken();
 
+      const updateSpy = vi.spyOn(supabaseAdmin.auth.admin, 'updateUserById').mockResolvedValueOnce({
+        data: { user: { id: 'ac088d6d-6aef-40b0-8388-51e5d74063a6', email: 'rtrmobile92@gmail.com' } } as any,
+        error: null
+      });
+
       // Attacker attempts to provide a victim user ID or email
       const victimId = '00000000-0000-0000-0000-000000000000';
       const res = await request(app)
@@ -438,6 +421,7 @@ describe('Authentication API Endpoints (/api/auth)', { timeout: 25000 }, () => {
 
       expect(res.status).toBe(200);
       expect(res.body.success).toBe(true);
+      expect(updateSpy).toHaveBeenCalledWith('ac088d6d-6aef-40b0-8388-51e5d74063a6', { password: 'validEight123!' });
     });
 
     it('successfully resets password with valid token and enables login with new password', async () => {
@@ -614,5 +598,11 @@ describe('Authentication API Endpoints (/api/auth)', { timeout: 25000 }, () => {
       expect(res.body.success).toBe(false);
       expect(res.body.message).toContain('not currently assigned to an active shop');
     });
+  });
+
+  afterAll(async () => {
+    await supabaseAdmin.auth.admin.updateUserById('ac088d6d-6aef-40b0-8388-51e5d74063a6', {
+      password: 'RtrOwner@2026'
+    }).catch(() => {});
   });
 });

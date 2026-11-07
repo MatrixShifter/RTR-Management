@@ -16,6 +16,10 @@ if (fs.existsSync(distDir)) {
       'login.html',
       'forgot-password.html',
       'records.html',
+      'shops.html',
+      'products.html',
+      'analytics.html',
+      'statements.html',
       'settings.html',
       'error.html'
     ];

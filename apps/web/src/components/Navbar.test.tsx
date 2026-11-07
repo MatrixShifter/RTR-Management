@@ -16,10 +16,15 @@ describe('Navbar Component — Responsive Sidebar & Top Header Architecture', ()
       </MemoryRouter>
     );
 
-    // Verify Records is the central workspace link
+    // Verify Records, Statements, and Settings are the single primary reporting and workspace links
     expect(html).toContain('Records');
+    expect(html).toContain('Statements');
     expect(html).toContain('Settings');
     expect(html).toContain('Logout');
+
+    // Verify Analytics tab is completely consolidated and removed from sidebar
+    expect(html).not.toContain('Analytics');
+    expect(html).not.toContain('/analytics');
 
     // Verify obsolete separate tabs are removed from user interface
     expect(html).not.toContain('Stock Ledger');

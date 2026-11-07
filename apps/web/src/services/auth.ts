@@ -55,9 +55,7 @@ export function resolveLoginEmail(identifier: string): string | null {
  */
 export async function signIn(username: string, password: string): Promise<AuthUser> {
   const cleanUsername = username.trim();
-  const isTestingMode = import.meta.env.VITE_OWNER_TESTING_MODE === 'true';
-  const effectivePassword = password || (isTestingMode ? 'local-testing' : '');
-  if (!cleanUsername || !effectivePassword) {
+  if (!cleanUsername || !password) {
     throw new Error(INCORRECT_CREDENTIALS_MSG);
   }
 
@@ -66,7 +64,7 @@ export async function signIn(username: string, password: string): Promise<AuthUs
     const res = await fetch('/api/auth/login', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username: cleanUsername, password: effectivePassword })
+      body: JSON.stringify({ username: cleanUsername, password })
     });
 
     if (res.ok) {
@@ -284,11 +282,11 @@ export async function signIn(username: string, password: string): Promise<AuthUs
 /**
  * Computes canonical password-recovery redirect URL based on environment.
  * Local development strictly returns http://localhost:5173/reset-password.
- * Deployed/production environments strictly return https://rtr-management-cfn4.vercel.app/reset-password.
+ * Deployed/production environments strictly return https://rtr-management.vercel.app/reset-password.
  */
 export function getPasswordResetRedirectUrl(): string {
   if (typeof window === 'undefined' || !window.location) {
-    return 'https://rtr-management-cfn4.vercel.app/reset-password';
+    return 'https://rtr-management.vercel.app/reset-password';
   }
 
   const hostname = window.location.hostname;
@@ -303,7 +301,7 @@ export function getPasswordResetRedirectUrl(): string {
     return `${origin}/reset-password`;
   }
 
-  return 'https://rtr-management-cfn4.vercel.app/reset-password';
+  return 'https://rtr-management.vercel.app/reset-password';
 }
 
 /**
@@ -402,12 +400,38 @@ export async function updatePassword(newPassword: string): Promise<void> {
   }
 
   // 2. Authoritatively update password directly via Supabase Auth client using recovery session
+  let updateErr: any = null;
   const { error } = await supabase.auth.updateUser({
     password: newPassword
   });
 
   if (error) {
-    throw new Error(error.message || 'Failed to update password. Recovery session may have expired.');
+    updateErr = error;
+    // Fall back to secure server-side endpoint if direct client update encountered network or provider issue
+    if (session.access_token) {
+      try {
+        const res = await fetch('/api/auth/reset-password', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${session.access_token}`
+          },
+          body: JSON.stringify({ password: newPassword })
+        });
+        if (res.ok) {
+          updateErr = null;
+        } else {
+          const data = await res.json().catch(() => ({}));
+          throw new Error(data.message || error.message);
+        }
+      } catch (beErr: any) {
+        throw new Error(beErr.message || error.message || 'Failed to update password.');
+      }
+    }
+  }
+
+  if (updateErr) {
+    throw new Error(updateErr.message || 'Failed to update password. Recovery session may have expired.');
   }
 
   // 3. Invalidate temporary recovery session so normal login is required with new credentials

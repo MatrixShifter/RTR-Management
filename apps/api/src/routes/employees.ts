@@ -291,8 +291,8 @@ employeesRouter.post('/', requireOwnerAuth, async (req: Request, res: Response) 
     if (isNewlyCreatedAuth && targetUserId) {
       try {
         await supabaseAdmin.auth.admin.deleteUser(targetUserId);
-      } catch (cleanupErr) {
-        logger.error('Failed to cleanup orphaned auth user during compensation', { error: cleanupErr });
+      } catch (cleanupErr: any) {
+        logger.error('Failed to cleanup orphaned auth user during compensation', { error: cleanupErr?.message || 'Compensation error' });
       }
     }
 

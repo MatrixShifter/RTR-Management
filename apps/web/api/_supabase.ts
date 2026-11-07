@@ -10,8 +10,8 @@ const rawEnvKey = (process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_AN
 
 // Reject deprecated development project to prevent split-brain sessions
 const isLegacyAgencyProject = rawEnvUrl.includes('lwyxzmrxxviiuzztpwar');
-if (isLegacyAgencyProject) {
-  console.error('[Supabase Config Error] Deprecated development project URL (lwyxzmrxxviiuzztpwar) detected in serverless environment. Using authoritative client production project (xjlnoxbkcyymtdtallzu).');
+if (isLegacyAgencyProject && process.env.NODE_ENV !== 'production') {
+  console.warn('[Configuration Warning] Legacy project URL detected in environment. Using authoritative production project.');
 }
 
 export const supabaseUrl = (!isLegacyAgencyProject && rawEnvUrl && !rawEnvUrl.includes('placeholder'))
