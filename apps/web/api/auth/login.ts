@@ -73,7 +73,24 @@ export default async function handler(req: any, res: any) {
   }
 
   // 2. Resolve Identifier to Email
-  const email = resolveIdentifierToEmail(cleanUsername) || (cleanUsername.includes('@') ? cleanUsername : null);
+  let email = resolveIdentifierToEmail(cleanUsername) || (cleanUsername.includes('@') ? cleanUsername : null);
+  if (!email) {
+    try {
+      const lookupClient = supabaseServiceRoleKey ? supabaseAdmin : supabaseAnon;
+      const { data: profile } = await lookupClient
+        .from('profiles')
+        .select('email')
+        .ilike('username', cleanUsername)
+        .maybeSingle();
+
+      if (profile?.email) {
+        email = profile.email;
+      }
+    } catch {
+      // profiles lookup fallback
+    }
+  }
+
   if (!email) {
     return res.status(401).json({ error: INCORRECT_CREDENTIALS_MSG });
   }
@@ -87,6 +104,12 @@ export default async function handler(req: any, res: any) {
     if (authError || !authData.user || !authData.session) {
       if (authError?.status === 429 || authError?.message?.toLowerCase().includes('rate limit')) {
         return res.status(429).json({ error: 'Too many login attempts. Please wait a moment and try again.' });
+      }
+      if (authError && (((authError as any).status >= 500) || (authError as any).name === 'AuthRetryableFetchError')) {
+        return res.status(503).json({ error: 'Authentication service temporarily unavailable. Please try again.' });
+      }
+      if (authError?.message?.toLowerCase().includes('email not confirmed')) {
+        return res.status(403).json({ error: 'Please verify your email address before signing in.' });
       }
       return res.status(401).json({ error: INCORRECT_CREDENTIALS_MSG });
     }

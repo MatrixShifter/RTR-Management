@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach, afterAll } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import request from 'supertest';
 import { app } from './app.js';
 import { INCORRECT_CREDENTIALS_MSG, RECOVERY_CONFIRMATION_MSG, supabaseAdmin, supabaseAnon } from './routes/auth.js';
@@ -598,11 +598,5 @@ describe('Authentication API Endpoints (/api/auth)', { timeout: 25000 }, () => {
       expect(res.body.success).toBe(false);
       expect(res.body.message).toContain('not currently assigned to an active shop');
     });
-  });
-
-  afterAll(async () => {
-    await supabaseAdmin.auth.admin.updateUserById('ac088d6d-6aef-40b0-8388-51e5d74063a6', {
-      password: 'RtrOwner@2026'
-    }).catch(() => {});
   });
 });

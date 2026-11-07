@@ -1,23 +1,9 @@
-import { describe, it, expect, vi, afterEach, beforeAll } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import request from 'supertest';
 import { app } from './app.js';
 import { supabaseAdmin, supabaseAnon, RECOVERY_CONFIRMATION_MSG, INCORRECT_CREDENTIALS_MSG } from './routes/auth.js';
 
 describe('Auth Verification & Recovery Suite (Owner & Employee)', { timeout: 25000, hookTimeout: 20000 }, () => {
-  beforeAll(async () => {
-    try {
-      const listPromise = supabaseAdmin.auth.admin.listUsers();
-      const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 3000));
-      const res = await Promise.race([listPromise, timeoutPromise]);
-      const emp = res?.data?.users?.find((u) => u.email === 'vinoth42007@gmail.com');
-      if (emp) {
-        await supabaseAdmin.auth.admin.updateUserById(emp.id, {
-          password: 'RtrEmployee@2026',
-          email_confirm: true
-        });
-      }
-    } catch {}
-  }, 20000);
 
   afterEach(() => {
     vi.restoreAllMocks();
@@ -137,9 +123,17 @@ describe('Auth Verification & Recovery Suite (Owner & Employee)', { timeout: 250
 
   describe('Employee & Owner Login Verification', () => {
     it('authenticates valid employee with assigned shop', async () => {
+      vi.spyOn(supabaseAnon.auth, 'signInWithPassword').mockResolvedValueOnce({
+        data: {
+          user: { id: 'daf03ad9-77b9-4de4-ab71-0e4b32f48d5b', email: 'vinoth42007@gmail.com', user_metadata: { role: 'employee' } } as any,
+          session: { access_token: 'valid-emp-token', refresh_token: 'refresh-token', expires_at: 1799999999, expires_in: 3600 } as any
+        },
+        error: null
+      });
+
       const res = await request(app)
         .post('/api/auth/login')
-        .send({ username: 'vinoth42007', password: 'RtrEmployee@2026' });
+        .send({ username: 'vinoth42007', password: 'ValidEmployeePass123!' });
 
       expect(res.status).toBe(200);
       expect(res.body.success).toBe(true);
@@ -159,9 +153,17 @@ describe('Auth Verification & Recovery Suite (Owner & Employee)', { timeout: 250
     });
 
     it('authenticates valid owner', async () => {
+      vi.spyOn(supabaseAnon.auth, 'signInWithPassword').mockResolvedValueOnce({
+        data: {
+          user: { id: 'ac088d6d-6aef-40b0-8388-51e5d74063a6', email: 'rtrmobile92@gmail.com', user_metadata: { role: 'owner', full_name: 'Business Owner' } } as any,
+          session: { access_token: 'valid-owner-jwt-token', refresh_token: 'refresh', expires_at: 1799999999, expires_in: 3600 } as any
+        },
+        error: null
+      });
+
       const res = await request(app)
         .post('/api/auth/login')
-        .send({ username: 'owner', password: 'RtrOwner@2026' });
+        .send({ username: 'owner', password: 'ValidOwnerPass123!' });
 
       expect(res.status).toBe(200);
       expect(res.body.success).toBe(true);

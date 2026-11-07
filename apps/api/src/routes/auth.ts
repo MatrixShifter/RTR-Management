@@ -47,8 +47,12 @@ export const configuredOwnerEmail = (process.env.OWNER_EMAIL || 'rtrmobile92@gma
 const VERIFIED_USERNAME_MAP: Record<string, string> = {
   'owner': configuredOwnerEmail,
   'vino': configuredOwnerEmail,
+  'vinoth': configuredOwnerEmail,
   'rtrowner': configuredOwnerEmail,
+  'rtrmobile': configuredOwnerEmail,
   'rtrmobiles': configuredOwnerEmail,
+  'rtrmobile92': configuredOwnerEmail,
+  'rtr': configuredOwnerEmail,
   'demo-owner': 'demo-owner@rtrmobiles.com'
 };
 
@@ -62,6 +66,11 @@ export async function resolveIdentifierToEmail(identifier: string): Promise<stri
   // 1. Check verified owner username map
   if (VERIFIED_USERNAME_MAP[clean]) {
     return VERIFIED_USERNAME_MAP[clean];
+  }
+
+  // Direct handle matching for configured owner email prefix
+  if (configuredOwnerEmail && clean === configuredOwnerEmail.split('@')[0]) {
+    return configuredOwnerEmail;
   }
 
   // 2. Map known alias emails directly to the authoritative owner email

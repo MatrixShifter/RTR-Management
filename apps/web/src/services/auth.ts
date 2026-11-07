@@ -30,8 +30,12 @@ const configuredOwnerEmail = (import.meta.env?.VITE_OWNER_EMAIL || 'rtrmobile92@
 export const VERIFIED_USERNAME_MAP: Record<string, string> = {
   'owner': configuredOwnerEmail,
   'vino': configuredOwnerEmail,
+  'vinoth': configuredOwnerEmail,
   'rtrowner': configuredOwnerEmail,
+  'rtrmobile': configuredOwnerEmail,
   'rtrmobiles': configuredOwnerEmail,
+  'rtrmobile92': configuredOwnerEmail,
+  'rtr': configuredOwnerEmail,
   'demo-owner': 'demo-owner@rtrmobiles.com'
 };
 
@@ -41,6 +45,10 @@ export function resolveLoginEmail(identifier: string): string | null {
   // If it's a known owner username alias (without @)
   if (VERIFIED_USERNAME_MAP[clean]) {
     return VERIFIED_USERNAME_MAP[clean];
+  }
+  // If username equals the owner email handle prefix (e.g. 'rtrmobile92' for 'rtrmobile92@gmail.com')
+  if (configuredOwnerEmail && clean === configuredOwnerEmail.split('@')[0]) {
+    return configuredOwnerEmail;
   }
   // If it's an email address, preserve it (unless owner alias)
   if (clean.includes('@')) {
