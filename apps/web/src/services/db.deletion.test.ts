@@ -40,7 +40,8 @@ import {
   getValidAuthToken, 
   authenticatedFetch, 
   deleteBusinessRecord, 
-  deleteShop
+  deleteShop,
+  deleteProduct
 } from './db.js';
 import { supabase } from '../lib/supabase.js';
 
@@ -327,6 +328,167 @@ describe('Safe Deletion, Session Refresh & False Success Prevention Suite', () =
 
       const savedShops = JSON.parse(mockLocalStorage.getItem('rtr_shops_v1') || '[]');
       expect(savedShops.length).toBe(0);
+    });
+
+    it('permanently deletes unused product from local storage when backend confirms deletion', async () => {
+      const prodId = '55555555-5555-5555-5555-555555555555';
+      const initialProducts = [{ id: prodId, name: 'Clear Case', sku: 'CASE-CLR', unitPrice: 150, costPrice: 80, isActive: true }];
+      mockLocalStorage.setItem('rtr_products_v1', JSON.stringify(initialProducts));
+
+      vi.spyOn(supabase!.auth, 'getSession').mockResolvedValue({
+        data: {
+          session: {
+            access_token: 'valid-token',
+            expires_at: Math.floor(Date.now() / 1000) + 3600
+          } as any
+        },
+        error: null
+      });
+
+      global.fetch = vi.fn().mockImplementation(async (url) => {
+        if (url.includes('/usage')) {
+          return new Response(JSON.stringify({ inUse: false, count: 0 }), { status: 200 });
+        }
+        return new Response(JSON.stringify({
+          success: true,
+          action: 'deleted',
+          message: '"Clear Case" deleted successfully.',
+          recordsCount: 0
+        }), { status: 200 });
+      });
+
+      const result = await deleteProduct(prodId);
+      expect(result.success).toBe(true);
+      expect(result.action).toBe('deleted');
+
+      const savedProducts = JSON.parse(mockLocalStorage.getItem('rtr_products_v1') || '[]');
+      expect(savedProducts.length).toBe(0);
+    });
+
+    it('deactivates and archives product when referenced by historical records', async () => {
+      const prodId = '66666666-6666-6666-6666-666666666666';
+      const initialProducts = [{ id: prodId, name: 'Glass Armor', sku: 'GLS-ARM', unitPrice: 250, costPrice: 120, isActive: true }];
+      mockLocalStorage.setItem('rtr_products_v1', JSON.stringify(initialProducts));
+
+      vi.spyOn(supabase!.auth, 'getSession').mockResolvedValue({
+        data: {
+          session: {
+            access_token: 'valid-token',
+            expires_at: Math.floor(Date.now() / 1000) + 3600
+          } as any
+        },
+        error: null
+      });
+
+      global.fetch = vi.fn().mockImplementation(async (url) => {
+        if (url.includes('/usage')) {
+          return new Response(JSON.stringify({ inUse: true, count: 12 }), { status: 200 });
+        }
+        return new Response(JSON.stringify({
+          success: true,
+          action: 'archived',
+          message: '"Glass Armor" is referenced by 12 existing records. It has been safely deactivated and archived.',
+          recordsCount: 12
+        }), { status: 200 });
+      });
+
+      const result = await deleteProduct(prodId);
+      expect(result.success).toBe(true);
+      expect(result.action).toBe('archived');
+
+      const savedProducts = JSON.parse(mockLocalStorage.getItem('rtr_products_v1') || '[]');
+      expect(savedProducts.length).toBe(1);
+      expect(savedProducts[0].isActive).toBe(false);
+    });
+
+    it('retains local product and throws when backend returns 500 error', async () => {
+      const prodId = '77777777-7777-7777-7777-777777777777';
+      const initialProducts = [{ id: prodId, name: 'Leather Wallet', sku: 'LTH-WAL', unitPrice: 400, costPrice: 200, isActive: true }];
+      mockLocalStorage.setItem('rtr_products_v1', JSON.stringify(initialProducts));
+
+      vi.spyOn(supabase!.auth, 'getSession').mockResolvedValue({
+        data: {
+          session: {
+            access_token: 'valid-token',
+            expires_at: Math.floor(Date.now() / 1000) + 3600
+          } as any
+        },
+        error: null
+      });
+
+      global.fetch = vi.fn().mockImplementation(async (url) => {
+        if (url.includes('/usage')) {
+          return new Response(JSON.stringify({ inUse: false, count: 0 }), { status: 200 });
+        }
+        return new Response(JSON.stringify({ message: 'Database connection failed' }), { status: 500 });
+      });
+
+      await expect(deleteProduct(prodId)).rejects.toThrow();
+
+      // Product must remain in local store
+      const savedProducts = JSON.parse(mockLocalStorage.getItem('rtr_products_v1') || '[]');
+      expect(savedProducts.length).toBe(1);
+      expect(savedProducts[0].id).toBe(prodId);
+    });
+
+    it('rejects product deletion with 403 for unauthorized users and retains local record', async () => {
+      const prodId = '88888888-8888-8888-8888-888888888888';
+      const initialProducts = [{ id: prodId, name: 'Cable Protector', sku: 'CBL-PROT', unitPrice: 50, costPrice: 20, isActive: true }];
+      mockLocalStorage.setItem('rtr_products_v1', JSON.stringify(initialProducts));
+
+      vi.spyOn(supabase!.auth, 'getSession').mockResolvedValue({
+        data: {
+          session: {
+            access_token: 'employee-token',
+            expires_at: Math.floor(Date.now() / 1000) + 3600
+          } as any
+        },
+        error: null
+      });
+
+      global.fetch = vi.fn().mockImplementation(async (url) => {
+        if (url.includes('/usage')) {
+          return new Response(JSON.stringify({ inUse: false, count: 0 }), { status: 200 });
+        }
+        return new Response(JSON.stringify({ error: 'Forbidden', message: 'Unauthorized: Access restricted to Business Owner only.' }), { status: 403 });
+      });
+
+      await expect(deleteProduct(prodId)).rejects.toThrow('Unauthorized: Access restricted to Business Owner only.');
+
+      const savedProducts = JSON.parse(mockLocalStorage.getItem('rtr_products_v1') || '[]');
+      expect(savedProducts.length).toBe(1);
+      expect(savedProducts[0].id).toBe(prodId);
+    });
+  });
+
+  describe('Delivery Cascade Deletion & Inventory Consistency', () => {
+    it('successfully cleans up delivery items and payments while preserving inventory audit ledger', async () => {
+      const deliveryId = '99999999-9999-9999-9999-999999999999';
+      const initialDeliveries = [{ id: deliveryId, shopId: 's1', status: 'delivered', deliveryDate: '2026-11-01', createdBy: 'Owner', items: [], createdAt: '2026-11-01' }];
+      const initialInvoices = [{ id: 'inv-1', delivery_id: deliveryId, total_amount: 1000, shop_id: 's1' }];
+      mockLocalStorage.setItem('rtr_deliveries_v1', JSON.stringify(initialDeliveries));
+      mockLocalStorage.setItem('rtr_invoices_v1', JSON.stringify(initialInvoices));
+
+      vi.spyOn(supabase!.auth, 'getSession').mockResolvedValue({
+        data: {
+          session: {
+            access_token: 'valid-owner-token',
+            expires_at: Math.floor(Date.now() / 1000) + 3600
+          } as any
+        },
+        error: null
+      });
+
+      global.fetch = vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ success: true, message: 'Record deleted successfully.', deliveryId }), { status: 200 })
+      );
+
+      await deleteBusinessRecord(deliveryId);
+
+      const savedDeliveries = JSON.parse(mockLocalStorage.getItem('rtr_deliveries_v1') || '[]');
+      const savedInvoices = JSON.parse(mockLocalStorage.getItem('rtr_invoices_v1') || '[]');
+      expect(savedDeliveries.length).toBe(0);
+      expect(savedInvoices.length).toBe(0);
     });
   });
 });

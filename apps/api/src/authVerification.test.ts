@@ -8,8 +8,66 @@ describe('Auth Verification & Recovery Suite (Owner & Employee)', { timeout: 250
   afterEach(() => {
     vi.restoreAllMocks();
   });
+  function mockEmployeeLookup() {
+    vi.spyOn(supabaseAdmin.auth.admin, 'listUsers').mockResolvedValue({
+      data: {
+        users: [
+          {
+            id: 'daf03ad9-77b9-4de4-ab71-0e4b32f48d5b',
+            email: 'vinoth42007@gmail.com',
+            user_metadata: { role: 'employee', username: 'vinoth42007' }
+          }
+        ]
+      },
+      error: null
+    });
+
+    const origFrom = supabaseAdmin.from.bind(supabaseAdmin);
+    vi.spyOn(supabaseAdmin, 'from').mockImplementation((table) => {
+      if (table === 'business_memberships') {
+        return {
+          select: () => ({
+            eq: () => ({
+              maybeSingle: async () => ({
+                data: {
+                  business_id: '4fba6fb7-4e1b-4106-ac84-908f821d73c3',
+                  role: 'employee',
+                  is_active: true
+                },
+                error: null
+              })
+            })
+          })
+        };
+      }
+      if (table === 'shop_memberships') {
+        return {
+          select: () => ({
+            eq: () => ({
+              maybeSingle: async () => ({
+                data: {
+                  shop_id: '98d8b061-1a1d-40fe-a108-2f8d2bc71aa2',
+                  shops: {
+                    id: '98d8b061-1a1d-40fe-a108-2f8d2bc71aa2',
+                    name: 'shop a',
+                    code: 'SHOP-A',
+                    business_id: '4fba6fb7-4e1b-4106-ac84-908f821d73c3',
+                    is_active: true
+                  }
+                },
+                error: null
+              })
+            })
+          })
+        };
+      }
+      return origFrom(table);
+    });
+  }
+
   describe('POST /api/auth/forgot-password for Employee & Owner', () => {
     it('sends recovery email for valid active employee username', async () => {
+      mockEmployeeLookup();
       const resetSpy = vi.spyOn(supabaseAdmin.auth, 'resetPasswordForEmail').mockResolvedValueOnce({
         data: {} as any,
         error: null
@@ -32,6 +90,7 @@ describe('Auth Verification & Recovery Suite (Owner & Employee)', { timeout: 250
     });
 
     it('sends recovery email for valid active employee email', async () => {
+      mockEmployeeLookup();
       const resetSpy = vi.spyOn(supabaseAdmin.auth, 'resetPasswordForEmail').mockResolvedValueOnce({
         data: {} as any,
         error: null
@@ -123,6 +182,7 @@ describe('Auth Verification & Recovery Suite (Owner & Employee)', { timeout: 250
 
   describe('Employee & Owner Login Verification', () => {
     it('authenticates valid employee with assigned shop', async () => {
+      mockEmployeeLookup();
       vi.spyOn(supabaseAnon.auth, 'signInWithPassword').mockResolvedValueOnce({
         data: {
           user: { id: 'daf03ad9-77b9-4de4-ab71-0e4b32f48d5b', email: 'vinoth42007@gmail.com', user_metadata: { role: 'employee' } } as any,
