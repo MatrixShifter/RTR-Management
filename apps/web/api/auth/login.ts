@@ -1,6 +1,8 @@
 import { 
   supabaseAnon, 
   supabaseAdmin, 
+  supabaseServiceRoleKey,
+  createScopedUserClient,
   resolveIdentifierToEmail,
   configuredOwnerEmail 
 } from '../_supabase.js';
@@ -90,7 +92,8 @@ export default async function handler(req: any, res: any) {
     }
 
     // Verify User Role & Active Status via business_memberships
-    const clientForRole = supabaseAdmin || supabaseAnon;
+    const userClient = createScopedUserClient(authData.session.access_token);
+    const clientForRole = supabaseServiceRoleKey ? supabaseAdmin : userClient;
     let { data: membership, error: memErr } = await clientForRole
       .from('business_memberships')
       .select('business_id, role, is_active')
@@ -99,7 +102,7 @@ export default async function handler(req: any, res: any) {
 
     // Auto-link authoritative owner to tenant business if membership record is missing
     if ((!membership || memErr) && email.toLowerCase() === configuredOwnerEmail) {
-      const adminClient = supabaseAdmin || supabaseAnon;
+      const adminClient = supabaseServiceRoleKey ? supabaseAdmin : userClient;
       const { data: biz } = await adminClient
         .from('businesses')
         .select('id')

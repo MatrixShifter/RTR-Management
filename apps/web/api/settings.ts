@@ -1,4 +1,9 @@
-import { supabaseAdmin } from './_supabase.js';
+import { 
+  supabaseAdmin, 
+  supabaseServiceRoleKey,
+  createScopedUserClient,
+  configuredOwnerEmail 
+} from './_supabase.js';
 
 export default async function handler(req: any, res: any) {
   res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
@@ -43,7 +48,8 @@ export default async function handler(req: any, res: any) {
 
   // 2. Real user session verification
   try {
-    const { data: { user }, error: authErr } = await supabaseAdmin.auth.getUser(token);
+    const callerClient = createScopedUserClient(token);
+    const { data: { user }, error: authErr } = await callerClient.auth.getUser(token);
     if (authErr || !user) {
       return res.status(401).json({
         error: 'Unauthorized',
@@ -52,11 +58,32 @@ export default async function handler(req: any, res: any) {
     }
 
     // Role verification against business_memberships
-    const { data: membership, error: memErr } = await supabaseAdmin
+    const verificationClient = supabaseServiceRoleKey ? supabaseAdmin : callerClient;
+    let { data: membership, error: memErr } = await verificationClient
       .from('business_memberships')
       .select('business_id, role, is_active')
       .eq('user_id', user.id)
       .maybeSingle();
+
+    // Auto-link authoritative owner to tenant business if membership record is missing or error
+    if ((!membership || memErr) && user.email?.toLowerCase() === configuredOwnerEmail) {
+      const { data: biz } = await verificationClient
+        .from('businesses')
+        .select('id')
+        .eq('is_active', true)
+        .order('created_at', { ascending: true })
+        .limit(1)
+        .maybeSingle();
+
+      if (biz) {
+        membership = {
+          business_id: biz.id,
+          role: 'owner',
+          is_active: true
+        };
+        memErr = null;
+      }
+    }
 
     if (memErr || !membership || !membership.is_active) {
       return res.status(403).json({
@@ -73,7 +100,7 @@ export default async function handler(req: any, res: any) {
     }
 
     if (req.method === 'GET') {
-      const { data: business, error: bizErr } = await supabaseAdmin
+      const { data: business, error: bizErr } = await verificationClient
         .from('businesses')
         .select('id, name, timezone, report_cutoff_time, is_active, created_at, updated_at')
         .eq('id', membership.business_id)
@@ -113,7 +140,7 @@ export default async function handler(req: any, res: any) {
         updates.report_cutoff_time = reportCutoffTime.length === 5 ? `${reportCutoffTime}:00` : reportCutoffTime;
       }
 
-      const { data: updated, error: updateErr } = await supabaseAdmin
+      const { data: updated, error: updateErr } = await verificationClient
         .from('businesses')
         .update(updates)
         .eq('id', membership.business_id)

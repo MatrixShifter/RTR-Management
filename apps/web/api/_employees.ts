@@ -5,13 +5,55 @@ import {
   isDemoShop,
   type EmployeeRecord 
 } from '@crimpston/shared';
-import { supabaseAdmin } from './_supabase.js';
+import { 
+  supabaseAdmin, 
+  createScopedUserClient, 
+  backendApiUrl, 
+  supabaseServiceRoleKey, 
+  configuredOwnerEmail 
+} from './_supabase.js';
 
 export interface AuthenticatedOwner {
   id: string;
   email: string;
   businessId: string;
   isDemo: boolean;
+  token?: string;
+  client?: any;
+}
+
+/**
+ * Forwards requests to the authoritative backend API server (e.g. Render)
+ * when running in an environment lacking service-role key access (such as Vercel edge/serverless).
+ */
+async function delegateToBackend(req: any, res: any, path: string) {
+  const targetUrl = `${backendApiUrl}${path}${req.url && req.url.includes('?') ? '?' + req.url.split('?')[1] : ''}`;
+  
+  const headers: Record<string, string> = {
+    'Accept': 'application/json'
+  };
+  if (req.headers.authorization) headers['Authorization'] = req.headers.authorization;
+  if (req.headers['content-type']) headers['Content-Type'] = req.headers['content-type'];
+  if (req.headers['x-correlation-id']) headers['x-correlation-id'] = req.headers['x-correlation-id'];
+
+  const fetchInit: RequestInit = {
+    method: req.method,
+    headers
+  };
+  if (['POST', 'PUT', 'PATCH'].includes(req.method) && req.body) {
+    fetchInit.body = typeof req.body === 'string' ? req.body : JSON.stringify(req.body);
+  }
+
+  try {
+    const backendRes = await fetch(targetUrl, fetchInit);
+    const data = await backendRes.json().catch(() => ({}));
+    return res.status(backendRes.status).json(data);
+  } catch (err: any) {
+    return res.status(502).json({
+      error: 'Bad Gateway',
+      message: 'Backend API service unavailable. Please try again.'
+    });
+  }
 }
 
 /**
@@ -43,13 +85,15 @@ export async function authenticateOwner(req: any, res: any): Promise<Authenticat
       id: 'demo-owner-00000000-0000-0000-0000-000000000000',
       email: 'demo-owner@rtrmobiles.com',
       businessId: 'demo-business-00000000-0000-0000-0000-000000000000',
-      isDemo: true
+      isDemo: true,
+      token
     };
   }
 
   // 2. Real Supabase Auth session verification
   try {
-    const { data: { user }, error: authErr } = await supabaseAdmin.auth.getUser(token);
+    const callerClient = createScopedUserClient(token);
+    const { data: { user }, error: authErr } = await callerClient.auth.getUser(token);
     if (authErr || !user) {
       res.status(401).json({
         error: 'Unauthorized',
@@ -58,12 +102,34 @@ export async function authenticateOwner(req: any, res: any): Promise<Authenticat
       return null;
     }
 
-    // Role verification against business_memberships
-    const { data: membership, error: memErr } = await supabaseAdmin
+    // Role verification against business_memberships using caller client
+    // (PostgreSQL RLS grants SELECT on business_memberships to authenticated users for their own row)
+    const verificationClient = supabaseServiceRoleKey ? supabaseAdmin : callerClient;
+    let { data: membership, error: memErr } = await verificationClient
       .from('business_memberships')
       .select('business_id, role, is_active')
       .eq('user_id', user.id)
       .maybeSingle();
+
+    // Auto-link authoritative owner to tenant business if membership record is missing or error
+    if ((!membership || memErr) && user.email?.toLowerCase() === configuredOwnerEmail) {
+      const { data: biz } = await verificationClient
+        .from('businesses')
+        .select('id')
+        .eq('is_active', true)
+        .order('created_at', { ascending: true })
+        .limit(1)
+        .maybeSingle();
+
+      if (biz) {
+        membership = {
+          business_id: biz.id,
+          role: 'owner',
+          is_active: true
+        };
+        memErr = null;
+      }
+    }
 
     if (memErr || !membership || !membership.is_active) {
       res.status(403).json({
@@ -85,7 +151,9 @@ export async function authenticateOwner(req: any, res: any): Promise<Authenticat
       id: user.id,
       email: user.email || '',
       businessId: membership.business_id,
-      isDemo: false
+      isDemo: false,
+      token,
+      client: callerClient
     };
   } catch (err: any) {
     res.status(500).json({
@@ -121,6 +189,11 @@ export async function handleListEmployees(req: any, res: any) {
         }
       ]
     });
+  }
+
+  // If no service-role key is available locally, delegate to backend API
+  if (!supabaseServiceRoleKey) {
+    return delegateToBackend(req, res, '/api/employees');
   }
 
   try {
@@ -223,6 +296,11 @@ export async function handleCreateEmployee(req: any, res: any) {
       message: 'Demo employee account created and assigned.',
       employee: demoEmployee
     });
+  }
+
+  // If running in an environment without service-role key (e.g. Vercel edge), delegate privileged provisioning to the authoritative backend API server
+  if (!supabaseServiceRoleKey) {
+    return delegateToBackend(req, res, '/api/employees');
   }
 
   // 1. Verify target shop belongs to owner's business tenant and is active
@@ -406,6 +484,10 @@ export async function handleReassignShop(req: any, res: any, employeeId: string)
     });
   }
 
+  if (!supabaseServiceRoleKey) {
+    return delegateToBackend(req, res, `/api/employees/${encodeURIComponent(employeeId)}/shop`);
+  }
+
   try {
     // 1. Verify employee belongs to owner's business
     const { data: mem, error: memErr } = await supabaseAdmin
@@ -490,6 +572,10 @@ export async function handleToggleStatus(req: any, res: any, employeeId: string)
     });
   }
 
+  if (!supabaseServiceRoleKey) {
+    return delegateToBackend(req, res, `/api/employees/${encodeURIComponent(employeeId)}/status`);
+  }
+
   try {
     const { data: mem, error: memErr } = await supabaseAdmin
       .from('business_memberships')
@@ -538,6 +624,10 @@ export async function handleRevokeAccess(req: any, res: any, employeeId: string)
       success: true,
       message: 'Demo employee access revoked.'
     });
+  }
+
+  if (!supabaseServiceRoleKey) {
+    return delegateToBackend(req, res, `/api/employees/${encodeURIComponent(employeeId)}`);
   }
 
   try {
@@ -603,6 +693,10 @@ export async function handleResetPassword(req: any, res: any, employeeId: string
       success: true,
       message: 'Demo employee password reset successfully.'
     });
+  }
+
+  if (!supabaseServiceRoleKey) {
+    return delegateToBackend(req, res, `/api/employees/${encodeURIComponent(employeeId)}/reset-password`);
   }
 
   try {

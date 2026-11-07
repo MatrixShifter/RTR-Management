@@ -32,6 +32,13 @@ export const configuredOwnerEmail = (
   'rtrmobile92@gmail.com'
 ).trim().toLowerCase();
 
+const rawBackendUrl = (process.env.API_TARGET_URL || process.env.VITE_API_URL || '').trim();
+export const backendApiUrl = (
+  rawBackendUrl && !rawBackendUrl.includes('localhost')
+    ? rawBackendUrl
+    : 'https://rtr-management.onrender.com'
+).replace(/\/api\/?$/, '').replace(/\/+$/, '');
+
 export const supabaseAnon = createClient(supabaseUrl, supabaseAnonKey, {
   auth: {
     persistSession: false,
@@ -47,6 +54,24 @@ export const supabaseAdmin = supabaseServiceRoleKey
       }
     })
   : supabaseAnon;
+
+/**
+ * Creates a scoped Supabase client authenticated with the caller's JWT.
+ * Allows queries on tables protected by Row Level Security (RLS) under authenticated role policies.
+ */
+export function createScopedUserClient(accessToken: string) {
+  return createClient(supabaseUrl, supabaseAnonKey, {
+    global: {
+      headers: {
+        Authorization: `Bearer ${accessToken}`
+      }
+    },
+    auth: {
+      persistSession: false,
+      autoRefreshToken: false
+    }
+  });
+}
 
 export const VERIFIED_USERNAME_MAP: Record<string, string> = {
   'owner': configuredOwnerEmail,

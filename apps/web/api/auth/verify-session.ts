@@ -1,6 +1,7 @@
 import { 
   supabaseAnon, 
   supabaseAdmin, 
+  supabaseServiceRoleKey,
   supabaseUrl, 
   supabaseAnonKey, 
   configuredOwnerEmail 
@@ -67,7 +68,7 @@ export default async function handler(req: any, res: any) {
       global: { headers: { Authorization: `Bearer ${token}` } },
       auth: { persistSession: false, autoRefreshToken: false }
     });
-    const clientForRole = supabaseAdmin || userClient;
+    const clientForRole = supabaseServiceRoleKey ? supabaseAdmin : userClient;
 
     let { data: membership } = await clientForRole
       .from('business_memberships')
@@ -77,7 +78,7 @@ export default async function handler(req: any, res: any) {
 
     // Auto-link authoritative owner to tenant business if membership record is missing
     if (!membership && user.email?.toLowerCase() === configuredOwnerEmail) {
-      const adminClient = supabaseAdmin || userClient;
+      const adminClient = supabaseServiceRoleKey ? supabaseAdmin : userClient;
       const { data: biz } = await adminClient
         .from('businesses')
         .select('id')
