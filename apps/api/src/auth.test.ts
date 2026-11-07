@@ -42,7 +42,7 @@ describe('Authentication API Endpoints (/api/auth)', { timeout: 25000 }, () => {
     it('authenticates valid owner account using username', async () => {
       vi.spyOn(supabaseAnon.auth, 'signInWithPassword').mockResolvedValueOnce({
         data: {
-          user: { id: 'b46689e9-754e-49b5-b79b-ebc1ee42538f', email: 'rtrmobile92@gmail.com', user_metadata: { role: 'owner', full_name: 'Business Owner' } } as any,
+          user: { id: 'ac088d6d-6aef-40b0-8388-51e5d74063a6', email: 'rtrmobile92@gmail.com', user_metadata: { role: 'owner', full_name: 'Business Owner' } } as any,
           session: { access_token: 'valid-owner-jwt-token', refresh_token: 'refresh', expires_at: 1234567, expires_in: 3600 } as any
         },
         error: null
@@ -79,7 +79,7 @@ describe('Authentication API Endpoints (/api/auth)', { timeout: 25000 }, () => {
     it('authenticates valid owner account using email address', async () => {
       vi.spyOn(supabaseAnon.auth, 'signInWithPassword').mockResolvedValueOnce({
         data: {
-          user: { id: 'b46689e9-754e-49b5-b79b-ebc1ee42538f', email: 'rtrmobile92@gmail.com', user_metadata: { role: 'owner', full_name: 'Business Owner' } } as any,
+          user: { id: 'ac088d6d-6aef-40b0-8388-51e5d74063a6', email: 'rtrmobile92@gmail.com', user_metadata: { role: 'owner', full_name: 'Business Owner' } } as any,
           session: { access_token: 'valid-owner-jwt-token', refresh_token: 'refresh', expires_at: 1234567, expires_in: 3600 } as any
         },
         error: null
@@ -430,7 +430,7 @@ describe('Authentication API Endpoints (/api/auth)', { timeout: 25000 }, () => {
       expect(token).toBeDefined();
 
       vi.spyOn(supabaseAdmin.auth.admin, 'updateUserById').mockResolvedValueOnce({
-        data: { user: { id: 'b46689e9-754e-49b5-b79b-ebc1ee42538f', email: 'rtrmobile92@gmail.com' } } as any,
+        data: { user: { id: 'ac088d6d-6aef-40b0-8388-51e5d74063a6', email: 'rtrmobile92@gmail.com' } } as any,
         error: null
       });
 
