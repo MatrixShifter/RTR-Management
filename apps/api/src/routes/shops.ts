@@ -744,8 +744,14 @@ shopsRouter.delete('/:id', requireOwnerAuth, businessMutationRateLimiter, async 
 
     // 4. Safe permanent deletion ONLY if ZERO historical records exist
     await supabaseAdmin.from('shop_memberships').delete().eq('shop_id', shopId);
-    const { error: delErr } = await supabaseAdmin.from('shops').delete().eq('id', shopId);
+    const { data: deletedRows, error: delErr } = await supabaseAdmin.from('shops').delete().eq('id', shopId).select('id, name');
     if (delErr) throw delErr;
+    if (!deletedRows || deletedRows.length === 0) {
+      return res.status(500).json({
+        error: 'Internal Server Error',
+        message: 'Database rejected shop deletion. No records were modified in Supabase.'
+      });
+    }
 
     logSecurityEvent({
       action: 'DELETE_SHOP',

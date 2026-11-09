@@ -719,8 +719,14 @@ productsRouter.delete('/:id', requireOwnerAuth, businessMutationRateLimiter, asy
     }
 
     // 4. Safe permanent deletion ONLY if ZERO historical records exist
-    const { error: delErr } = await supabaseAdmin.from('products').delete().eq('id', productId);
+    const { data: deletedRows, error: delErr } = await supabaseAdmin.from('products').delete().eq('id', productId).select('id, name');
     if (delErr) throw delErr;
+    if (!deletedRows || deletedRows.length === 0) {
+      return res.status(500).json({
+        error: 'Internal Server Error',
+        message: 'Database rejected product deletion. No records were modified in Supabase.'
+      });
+    }
 
     logSecurityEvent({
       action: 'DELETE_PRODUCT',

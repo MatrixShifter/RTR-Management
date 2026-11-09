@@ -1119,11 +1119,15 @@ export async function deleteShop(id: string): Promise<DeleteCatalogResult> {
       await ensureAuthenticatedSession();
       if (usage.inUse) {
         // Safe archival preserving append-only immutable stock_movements ledger (NEVER raises 23505 conflict)
-        const { error: archErr } = await supabase
+        const { data: updatedRows, error: archErr } = await supabase
           .from('shops')
           .update({ is_active: false, updated_at: new Date().toISOString() })
-          .eq('id', id);
+          .eq('id', id)
+          .select('id, name');
         if (archErr) throw new Error(archErr.message || 'Database rejected shop archive.');
+        if (!updatedRows || updatedRows.length === 0) {
+          throw new Error('Database rejected shop archive. No records were modified in Supabase.');
+        }
         serverResult = {
           success: true,
           action: 'archived',
@@ -1133,8 +1137,15 @@ export async function deleteShop(id: string): Promise<DeleteCatalogResult> {
         };
       } else {
         await supabase.from('shop_memberships').delete().eq('shop_id', id);
-        const { error: delErr } = await supabase.from('shops').delete().eq('id', id);
+        const { data: deletedRows, error: delErr } = await supabase
+          .from('shops')
+          .delete()
+          .eq('id', id)
+          .select('id, name');
         if (delErr) throw new Error(delErr.message || 'Database rejected shop deletion.');
+        if (!deletedRows || deletedRows.length === 0) {
+          throw new Error('Database rejected shop deletion. No records were modified in Supabase.');
+        }
         serverResult = {
           success: true,
           action: 'deleted',
@@ -1396,13 +1407,20 @@ export async function checkProductUsage(id: string): Promise<{ inUse: boolean; c
 
     try {
       await ensureAuthenticatedSession();
-      const [delivRes, moveRes, repRes, transRes] = await Promise.all([
+      const [delivRes, moveRes, repRes, countRes, transRes, adjRes] = await Promise.all([
         supabase.from('delivery_items').select('id', { count: 'exact', head: true }).eq('product_id', id),
         supabase.from('stock_movements').select('id', { count: 'exact', head: true }).eq('product_id', id),
         supabase.from('daily_report_items').select('id', { count: 'exact', head: true }).eq('product_id', id),
-        supabase.from('stock_transfer_items').select('id', { count: 'exact', head: true }).eq('product_id', id)
+        supabase.from('stock_counts').select('id', { count: 'exact', head: true }).eq('product_id', id),
+        supabase.from('stock_transfers').select('id', { count: 'exact', head: true }).eq('product_id', id),
+        supabase.from('stock_adjustments').select('id', { count: 'exact', head: true }).eq('product_id', id)
       ]);
-      const totalCount = (delivRes.count || 0) + (moveRes.count || 0) + (repRes.count || 0) + (transRes.count || 0);
+      const totalCount = (delivRes.count || 0) + 
+                           (moveRes.count || 0) + 
+                           (repRes.count || 0) + 
+                           (countRes.count || 0) + 
+                           (transRes.count || 0) + 
+                           (adjRes.count || 0);
       return { inUse: totalCount > 0, count: totalCount };
     } catch (dbErr) {
       safeLogger.warn('Direct product usage check error', dbErr);
@@ -1498,6 +1516,7 @@ export async function deleteProduct(id: string): Promise<DeleteCatalogResult> {
       } else {
         setLocalItem(STORAGE_KEYS.PRODUCTS, products.filter(p => p.id !== id));
       }
+      clearMemoryCache();
       return serverResult;
     }
 
@@ -1506,15 +1525,20 @@ export async function deleteProduct(id: string): Promise<DeleteCatalogResult> {
       await ensureAuthenticatedSession();
       if (usage.inUse) {
         // Safe archive: set is_active = false
-        const { error: updErr } = await supabase
+        const { data: updatedRows, error: updErr } = await supabase
           .from('products')
           .update({ is_active: false, updated_at: new Date().toISOString() })
-          .eq('id', id);
+          .eq('id', id)
+          .select('id, name');
 
         if (updErr) throw new Error(updErr.message);
+        if (!updatedRows || updatedRows.length === 0) {
+          throw new Error('Database rejected product archival. No records were modified in Supabase.');
+        }
 
         const next = products.map(p => p.id === id ? { ...p, isActive: false } : p);
         setLocalItem(STORAGE_KEYS.PRODUCTS, next);
+        clearMemoryCache();
 
         return {
           success: true,
@@ -1525,21 +1549,29 @@ export async function deleteProduct(id: string): Promise<DeleteCatalogResult> {
         };
       } else {
         // Safe hard delete: only if 0 records reference this product
-        const { error: delErr } = await supabase
+        const { data: deletedRows, error: delErr } = await supabase
           .from('products')
           .delete()
-          .eq('id', id);
+          .eq('id', id)
+          .select('id, name');
 
         if (delErr) {
           // If foreign key constraint still blocks, fall back to archiving
           if (delErr.code === '23503' || delErr.code === '23505') {
-            await supabase
+            const { data: archRows, error: archErr } = await supabase
               .from('products')
               .update({ is_active: false, updated_at: new Date().toISOString() })
-              .eq('id', id);
+              .eq('id', id)
+              .select('id, name');
+
+            if (archErr) throw new Error(archErr.message);
+            if (!archRows || archRows.length === 0) {
+              throw new Error('Database rejected product archival after foreign-key constraint.');
+            }
 
             const next = products.map(p => p.id === id ? { ...p, isActive: false } : p);
             setLocalItem(STORAGE_KEYS.PRODUCTS, next);
+            clearMemoryCache();
 
             return {
               success: true,
@@ -1552,7 +1584,12 @@ export async function deleteProduct(id: string): Promise<DeleteCatalogResult> {
           throw new Error(delErr.message);
         }
 
+        if (!deletedRows || deletedRows.length === 0) {
+          throw new Error('Database rejected product deletion. No records were modified in Supabase.');
+        }
+
         setLocalItem(STORAGE_KEYS.PRODUCTS, products.filter(p => p.id !== id));
+        clearMemoryCache();
         return {
           success: true,
           action: 'deleted',
@@ -1565,6 +1602,10 @@ export async function deleteProduct(id: string): Promise<DeleteCatalogResult> {
       safeLogger.error('Direct deleteProduct error', dbErr);
       throw new Error(dbErr.message || 'Failed to delete product from database.');
     }
+  }
+
+  if (isSupabaseConfigured) {
+    throw new Error('Failed to delete product from database. Operation was not confirmed.');
   }
 
   // Purely offline/mock fallback if Supabase is not configured

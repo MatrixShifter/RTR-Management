@@ -37,6 +37,7 @@ if (typeof globalThis.window.addEventListener !== 'function') {
 }
 
 import { 
+  clearMemoryCache,
   getValidAuthToken, 
   authenticatedFetch, 
   deleteBusinessRecord, 
@@ -49,6 +50,7 @@ describe('Safe Deletion, Session Refresh & False Success Prevention Suite', () =
   beforeEach(() => {
     vi.restoreAllMocks();
     memoryStore.clear();
+    clearMemoryCache();
   });
 
   afterEach(() => {
@@ -458,6 +460,106 @@ describe('Safe Deletion, Session Refresh & False Success Prevention Suite', () =
       const savedProducts = JSON.parse(mockLocalStorage.getItem('rtr_products_v1') || '[]');
       expect(savedProducts.length).toBe(1);
       expect(savedProducts[0].id).toBe(prodId);
+    });
+
+    it('rejects product deletion and retains local record when direct Supabase delete modifies 0 rows', async () => {
+      const prodId = '99999999-0000-0000-0000-000000000001';
+      const initialProducts = [{ id: prodId, name: 'Zero Row Product', sku: 'ZERO-SKU', unitPrice: 100, costPrice: 50, isActive: true }];
+      mockLocalStorage.setItem('rtr_products_v1', JSON.stringify(initialProducts));
+
+      vi.spyOn(supabase!.auth, 'getSession').mockResolvedValue({
+        data: {
+          session: {
+            access_token: 'valid-token',
+            expires_at: Math.floor(Date.now() / 1000) + 3600
+          } as any
+        },
+        error: null
+      });
+
+      // API 404s so it falls back to direct Supabase
+      global.fetch = vi.fn().mockImplementation(async () => {
+        return new Response('Not Found', { status: 404 });
+      });
+
+      // Mock supabase.from('products').delete() returning 0 rows
+      const deleteEqMock = vi.fn().mockReturnValue({
+        select: vi.fn().mockResolvedValue({ data: [], error: null })
+      });
+      const updateEqMock = vi.fn().mockReturnValue({
+        select: vi.fn().mockResolvedValue({ data: [], error: null })
+      });
+
+      vi.spyOn(supabase!, 'from').mockImplementation((table: string) => {
+        if (table === 'products') {
+          return {
+            delete: vi.fn().mockReturnValue({ eq: deleteEqMock }),
+            update: vi.fn().mockReturnValue({ eq: updateEqMock }),
+            select: vi.fn().mockReturnValue({
+              order: vi.fn().mockResolvedValue({ data: initialProducts, error: null })
+            })
+          } as any;
+        }
+        return {
+          select: vi.fn().mockReturnValue({
+            eq: vi.fn().mockResolvedValue({ data: [], error: null, count: 0 })
+          })
+        } as any;
+      });
+
+      await expect(deleteProduct(prodId)).rejects.toThrow('Database rejected product deletion. No records were modified in Supabase.');
+
+      // Product MUST still remain in local storage
+      const savedProducts = JSON.parse(mockLocalStorage.getItem('rtr_products_v1') || '[]');
+      expect(savedProducts.length).toBe(1);
+      expect(savedProducts[0].id).toBe(prodId);
+    });
+
+    it('successfully removes product from local storage when direct Supabase delete returns affected row', async () => {
+      const prodId = '99999999-0000-0000-0000-000000000002';
+      const initialProducts = [{ id: prodId, name: 'Verified Row Product', sku: 'VER-SKU', unitPrice: 100, costPrice: 50, isActive: true }];
+      mockLocalStorage.setItem('rtr_products_v1', JSON.stringify(initialProducts));
+
+      vi.spyOn(supabase!.auth, 'getSession').mockResolvedValue({
+        data: {
+          session: {
+            access_token: 'valid-token',
+            expires_at: Math.floor(Date.now() / 1000) + 3600
+          } as any
+        },
+        error: null
+      });
+
+      global.fetch = vi.fn().mockImplementation(async () => {
+        return new Response('Not Found', { status: 404 });
+      });
+
+      const deleteEqMock = vi.fn().mockReturnValue({
+        select: vi.fn().mockResolvedValue({ data: [{ id: prodId, name: 'Verified Row Product' }], error: null })
+      });
+
+      vi.spyOn(supabase!, 'from').mockImplementation((table: string) => {
+        if (table === 'products') {
+          return {
+            delete: vi.fn().mockReturnValue({ eq: deleteEqMock }),
+            select: vi.fn().mockReturnValue({
+              order: vi.fn().mockResolvedValue({ data: initialProducts, error: null })
+            })
+          } as any;
+        }
+        return {
+          select: vi.fn().mockReturnValue({
+            eq: vi.fn().mockResolvedValue({ data: [], error: null, count: 0 })
+          })
+        } as any;
+      });
+
+      const res = await deleteProduct(prodId);
+      expect(res.success).toBe(true);
+      expect(res.action).toBe('deleted');
+
+      const savedProducts = JSON.parse(mockLocalStorage.getItem('rtr_products_v1') || '[]');
+      expect(savedProducts.length).toBe(0);
     });
   });
 
