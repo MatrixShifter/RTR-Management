@@ -47,40 +47,64 @@
   ],
   "rewrites": [
     {
+      "source": "/api/auth/:action",
+      "destination": "/api/auth?action=:action"
+    },
+    {
+      "source": "/api/auth",
+      "destination": "/api/auth"
+    },
+    {
       "source": "/api/products/:id/usage",
-      "destination": "/api/products/:id/usage"
+      "destination": "/api/products?id=:id&action=usage"
     },
     {
       "source": "/api/products/:id",
-      "destination": "/api/products/:id"
+      "destination": "/api/products?id=:id"
+    },
+    {
+      "source": "/api/products",
+      "destination": "/api/products"
     },
     {
       "source": "/api/shops/:id/usage",
-      "destination": "/api/shops/:id/usage"
+      "destination": "/api/shops?id=:id&action=usage"
     },
     {
       "source": "/api/shops/:id",
-      "destination": "/api/shops/:id"
+      "destination": "/api/shops?id=:id"
+    },
+    {
+      "source": "/api/shops",
+      "destination": "/api/shops"
     },
     {
       "source": "/api/employees/:id/reset-password",
-      "destination": "/api/employees/:id/reset-password"
+      "destination": "/api/employees?id=:id&action=reset-password"
     },
     {
       "source": "/api/employees/:id/shop",
-      "destination": "/api/employees/:id/shop"
+      "destination": "/api/employees?id=:id&action=shop"
     },
     {
       "source": "/api/employees/:id/status",
-      "destination": "/api/employees/:id/status"
+      "destination": "/api/employees?id=:id&action=status"
     },
     {
       "source": "/api/employees/:id",
-      "destination": "/api/employees/:id"
+      "destination": "/api/employees?id=:id"
     },
     {
       "source": "/api/employees",
       "destination": "/api/employees"
+    },
+    {
+      "source": "/api/settings",
+      "destination": "/api/settings"
+    },
+    {
+      "source": "/api/health",
+      "destination": "/api/health"
     },
     {
       "source": "/api/(.*)",

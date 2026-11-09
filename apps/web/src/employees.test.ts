@@ -1,9 +1,10 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import employeesHandler from '../api/employees/index.js';
-import employeeIdHandler from '../api/employees/[id]/index.js';
-import employeeShopHandler from '../api/employees/[id]/shop.js';
-import employeeStatusHandler from '../api/employees/[id]/status.js';
-import employeeResetPasswordHandler from '../api/employees/[id]/reset-password.js';
+import employeesHandler, {
+  employeeIdHandler,
+  employeeShopHandler,
+  employeeStatusHandler,
+  employeeResetPasswordHandler
+} from '../api/employees.js';
 import { 
   getEmployees, 
   createEmployee, 
